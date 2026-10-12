@@ -2,7 +2,7 @@
 
 :root{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;color:#172846;background:#f5f7fb;font-synthesis:none;--bd-blue:#1760ef;--bd-navy:#172846;--bd-muted:#596b85;--bd-line:#e4e9f1;--bd-card:#fff}
 *{box-sizing:border-box}
-body{margin:0;min-width:320px;font-size:13px;line-height:1.5}
+body{margin:0;min-width:280px;font-size:13px;line-height:1.5}
 button,input,select,textarea{font:inherit}
 button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}
 button{cursor:pointer;color:inherit}
