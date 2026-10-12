@@ -37,7 +37,7 @@ function RelatedGroup({ group }: { group: G2bRelatedGroup }) {
 }
 
 /** Optional related lookups run only after the reader requests them. */
-export function RelatedNoticeDetails({ bid }: { bid: BidNotice }) {
+export function RelatedNoticeDetails({ bid, onDataChange }: { bid: BidNotice; onDataChange?: (data: G2bRelatedDetail | null) => void }) {
   const headingId = useId();
   const key = `${bid.type}:${bid.number}:${bid.revision}`;
   const [result, setResult] = useState<{ key: string; value: G2bRelatedDetail } | null>(null);
@@ -55,8 +55,9 @@ export function RelatedNoticeDetails({ bid }: { bid: BidNotice }) {
     request.current?.abort();
     request.current = null;
     setResult(null); setFailure(null); setLoadingKey('');
+    onDataChange?.(null);
     return () => { request.current?.abort(); };
-  }, [key]);
+  }, [key, onDataChange]);
 
   async function loadRelated() {
     request.current?.abort();
@@ -69,6 +70,7 @@ export function RelatedNoticeDetails({ bid }: { bid: BidNotice }) {
       if (abort.signal.aborted || currentKey.current !== key) return;
       if (value.number !== bid.number || value.revision !== bid.revision || value.type !== bid.type) throw new Error('요청한 공고와 조회 결과가 일치하지 않습니다. 다시 조회해 주세요.');
       setResult({ key, value });
+      onDataChange?.(value);
     } catch (reason) {
       if (!abort.signal.aborted && currentKey.current === key) setFailure({ key, message: reason instanceof Error ? reason.message : '연관 정보를 불러오지 못했습니다. 잠시 후 다시 조회해 주세요.' });
     } finally {

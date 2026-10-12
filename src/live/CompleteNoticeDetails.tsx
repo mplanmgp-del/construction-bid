@@ -1,10 +1,11 @@
-import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Building2, CalendarClock, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardList, ExternalLink, FileCheck2, FileText, HardHat, Info, Landmark, Paperclip, Phone, Search, ShieldCheck, Wallet, X } from 'lucide-react';
-import type { G2bDetailSection, G2bNoticeDetail } from '../g2b-types';
+import type { G2bDetailSection, G2bNoticeDetail, G2bRelatedDetail } from '../g2b-types';
 import type { BidNotice } from '../types';
 import { formatDateTime, formatPrice } from '../domain';
 import { safeG2bUrl } from './client';
 import { RelatedNoticeDetails } from './RelatedNoticeDetails';
+import { NoticePrintDialog } from '../print/NoticePrintDialog';
 import './CompleteNoticeDetails.css';
 
 const icons: Record<string, ReactNode> = {
@@ -34,11 +35,19 @@ function fallbackSections(bid: BidNotice, detail: G2bNoticeDetail): G2bDetailSec
   ];
 }
 
-export function CompleteNoticeDetails({ detail, bid, showSummary = true }: { detail: G2bNoticeDetail; bid: BidNotice; showSummary?: boolean }) {
+export interface CompleteNoticeDetailsHandle { openPrint: () => void; }
+
+export function CompleteNoticeDetails({ detail, bid, showSummary = true, printRef }: { detail: G2bNoticeDetail; bid: BidNotice; showSummary?: boolean; printRef?: Ref<CompleteNoticeDetailsHandle> }) {
   const id = useId();
   const sections = useMemo(() => detail.sections?.length ? detail.sections : fallbackSections(bid, detail), [bid, detail]);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [query, setQuery] = useState('');
+  const [printNoticeKey, setPrintNoticeKey] = useState('');
+  const [related, setRelated] = useState<G2bRelatedDetail | null>(null);
+  const noticeKey = `${bid.type}:${bid.number}:${bid.revision}`;
+  useEffect(() => setPrintNoticeKey(''), [noticeKey]);
+  const openPrint = () => setPrintNoticeKey(noticeKey);
+  useImperativeHandle(printRef, () => ({ openPrint }), [noticeKey]);
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const sourceUrl = safeG2bUrl(detail.sourceUrl || bid.detailUrl);
   const search = query.trim().normalize('NFKC').toLocaleLowerCase('ko-KR');
@@ -73,7 +82,7 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true }: { det
     </div>
     <div className="fnd-detail-tools">
       <div className="fnd-detail-heading"><span className="fnd-eyebrow">NOTICE DETAILS</span><h2>공고 상세정보 <span>{totalFields}개 항목</span></h2></div>
-      <div className="fnd-tool-actions"><label className="fnd-search"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="상세 항목 검색" aria-label="공고 상세 항목 검색" />{query && <button type="button" aria-label="상세 검색 초기화" onClick={() => setQuery('')}><X size={16} /></button>}</label><button className="fnd-expand-all" type="button" onClick={() => { setQuery(''); setCollapsed(allCollapsed ? new Set() : new Set(sections.map(section => section.id))); }}>{allCollapsed ? <ChevronsUpDown size={17} /> : <ChevronsDownUp size={17} />}<span>{allCollapsed ? '전체 펼치기' : '전체 접기'}</span></button></div>
+      <div className="fnd-tool-actions"><label className="fnd-search"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="상세 항목 검색" aria-label="공고 상세 항목 검색" />{query && <button type="button" aria-label="상세 검색 초기화" onClick={() => setQuery('')}><X size={16} /></button>}</label><button className="fnd-expand-all" type="button" onClick={() => { setQuery(''); setCollapsed(allCollapsed ? new Set() : new Set(sections.map(section => section.id))); }}>{allCollapsed ? <ChevronsUpDown size={17} /> : <ChevronsDownUp size={17} />}<span>{allCollapsed ? '전체 펼치기' : '전체 접기'}</span></button><button type="button" className="fnd-print-document" onClick={openPrint}><FileText size={17} />인쇄용 문서</button></div>
     </div>
     {search && <p className="fnd-search-status" role="status">“{query}” 검색 결과 {matchingCount}개 항목</p>}
     {!detail.sections?.length && <p className="fnd-section-note"><Info size={16} />기본 조회 정보입니다. 상세 조회를 다시 실행하면 추가 공개 항목을 확인할 수 있습니다.</p>}
@@ -99,6 +108,7 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true }: { det
       })}</ul> : <p className="fnd-doc-empty">공개 데이터에서 제공된 첨부서류가 없습니다.{sourceUrl && ' 나라장터 원문에서 첨부 여부를 확인해 주세요.'}</p>}
       <p className="fnd-section-note"><Info size={15} />첨부서류는 발주기관이 게시한 나라장터 원본 링크로 열립니다.</p>
     </section>
-    {bid.source === 'live' && <div className="fnd-related-anchor" ref={element => { sectionRefs.current.relatedData = element; }}><RelatedNoticeDetails key={`${bid.type}:${bid.number}:${bid.revision}`} bid={bid} /></div>}
+    {bid.source === 'live' && <div className="fnd-related-anchor" ref={element => { sectionRefs.current.relatedData = element; }}><RelatedNoticeDetails key={noticeKey} bid={bid} onDataChange={setRelated} /></div>}
+    {printNoticeKey === noticeKey && <NoticePrintDialog key={noticeKey} bid={bid} detail={detail} related={related?.number === bid.number && related.revision === bid.revision && related.type === bid.type ? related : null} onClose={() => setPrintNoticeKey('')} />}
   </div>;
 }
