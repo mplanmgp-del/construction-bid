@@ -31,4 +31,4 @@ PC에서는 상세정보와 업체 검토 도구를 두 열로 배치한다. 모
 - `src/design/detailFixture.ts`: 참고 화면에서 옮긴 항목과 첨부파일명.
 - `src/design/detailDesign.css`: PC·모바일 및 인쇄 스타일.
 
-실제 API 필드 연결과 기존 상세 패널 교체는 이 시안의 후속 적용 단계다.
+후속 구현으로 `/notice-detail.html`에 실제 API 전체 상세 페이지를 추가했고, 기존 상세 패널의 `전체 상세` 탭에도 연결했다. 이 초기 시안은 예시 화면으로 보존하며 상단 링크로 실제 전체 상세를 열 수 있다. 세부 사항은 `complete-notice-detail.md`를 참고한다.

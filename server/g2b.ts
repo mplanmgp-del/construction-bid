@@ -1,5 +1,6 @@
 import type { BidNotice, Category } from '../src/types.ts';
 import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage, G2bOpeningResult, G2bResultPage } from '../src/g2b-types.ts';
+import { mapDetailSections } from './g2b-detail.ts';
 
 type Row = Record<string, unknown>;
 const BID_BASE = 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/';
@@ -241,18 +242,41 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
   }
   async function detail(number: string, revision: string, type: G2bBusinessType): Promise<G2bNoticeDetail> {
     const params = { inqryDiv: '2', bidNtceNo: number, bidNtceOrd: revision, pageNo: '1', numOfRows: '999' };
-    const [regions, licenses] = await Promise.allSettled([
-      request(BID_BASE, 'getBidPblancListInfoPrtcptPsblRgn', params), request(BID_BASE, 'getBidPblancListInfoLicenseLimit', params),
+    const [general, baseAmounts, regions, licenses] = await Promise.allSettled([
+      request(BID_BASE, type === '공사' ? 'getBidPblancListInfoCnstwk' : 'getBidPblancListInfoServc', params),
+      request(BID_BASE, type === '공사' ? 'getBidPblancListInfoCnstwkBsisAmount' : 'getBidPblancListInfoServcBsisAmount', params),
+      request(BID_BASE, 'getBidPblancListInfoPrtcptPsblRgn', params),
+      request(BID_BASE, 'getBidPblancListInfoLicenseLimit', params),
     ]);
-    const matches = (row: Row) => identity(row) === `${number}:${revision}` && (!text(row.bsnsDivNm) || text(row.bsnsDivNm) === type);
+    const matches = (row: Row) => text(row.bidNtceNo) === number && /^\d{1,3}$/.test(text(row.bidNtceOrd))
+      && text(row.bidNtceOrd).padStart(3, '0') === revision && (!text(row.bsnsDivNm) || text(row.bsnsDivNm) === type);
     const regionComplete = regions.status === 'fulfilled' && regions.value.items.length >= regions.value.totalCount;
     const licenseComplete = licenses.status === 'fulfilled' && licenses.value.items.length >= licenses.value.totalCount;
-    if (regions.status === 'rejected' && licenses.status === 'rejected') throw regions.reason;
-    const names = regionComplete && regions.status === 'fulfilled' ? unique(regions.value.items.filter(matches).map(row => text(row.prtcptPsblRgnNm))) : [];
-    return { number, revision, allowedRegions: names.length ? names : null,
-      licenses: licenseComplete && licenses.status === 'fulfilled' ? unique(licenses.value.items.filter(matches).map(row => text(row.lcnsLmtNm))) : [],
+    if ([general, baseAmounts, regions, licenses].every(result => result.status === 'rejected')) {
+      if (general.status === 'rejected') throw general.reason;
+    }
+    const regionRows = regionComplete && regions.status === 'fulfilled' ? regions.value.items.filter(matches) : [];
+    const licenseRows = licenseComplete && licenses.status === 'fulfilled' ? licenses.value.items.filter(matches) : [];
+    const generalComplete = general.status === 'fulfilled' && general.value.items.length >= general.value.totalCount;
+    const generalRows = generalComplete && general.status === 'fulfilled' ? general.value.items.filter(matches) : [];
+    // Do not silently pick the first item when a provider returns duplicate/ambiguous identities.
+    const noticeRow = generalRows.length === 1 ? generalRows[0] : undefined;
+    const baseComplete = baseAmounts.status === 'fulfilled' && baseAmounts.value.items.length >= baseAmounts.value.totalCount;
+    const baseRows = baseComplete && baseAmounts.status === 'fulfilled' ? baseAmounts.value.items.filter(matches) : [];
+    const names = unique(regionRows.map(row => text(row.prtcptPsblRgnNm)));
+    const licenseNames = unique(licenseRows.map(row => text(row.lcnsLmtNm)));
+    const sourceUrl = `https://www.g2b.go.kr/link/PNPE027_01/?${new URLSearchParams({ bidPbancNo: number, bidPbancOrd: revision })}`;
+    const notice = noticeRow ? { ...mapNotice(noticeRow, type, now()), allowedRegions: names.length ? names : null, licenses: licenseNames, detailUrl: sourceUrl } : undefined;
+    return { number, revision, allowedRegions: names.length ? names : null, licenses: licenseNames,
       regionComplete, licenseComplete, fetchedAt: new Date(now()).toISOString(),
-      warnings: [...(!regionComplete ? ['지역조건을 모두 확인하지 못했습니다. 공고 원문을 확인해 주세요.'] : []), ...(!licenseComplete ? ['면허조건을 모두 확인하지 못했습니다. 공고 원문을 확인해 주세요.'] : [])] };
+      ...(notice ? { notice } : {}), sourceUrl,
+      sections: mapDetailSections({ row: noticeRow, type, regionRows, licenseRows, baseRows }),
+      warnings: [
+        ...(!noticeRow ? ['해당 공고의 일반 상세정보를 확인하지 못했습니다. 공고번호·차수와 나라장터 원문을 확인해 주세요.'] : []),
+        ...(!baseComplete ? ['기초금액 공개정보를 모두 불러오지 못했습니다. 금액 상세는 나라장터 원문을 확인해 주세요.'] : []),
+        ...(!regionComplete ? ['지역조건을 모두 확인하지 못했습니다. 공고 원문을 확인해 주세요.'] : []),
+        ...(!licenseComplete ? ['면허조건을 모두 확인하지 못했습니다. 공고 원문을 확인해 주세요.'] : []),
+      ] };
   }
   async function results(query: SearchQuery): Promise<G2bResultPage> {
     const result = await request(STANDARD_BASE, 'getDataSetOpnStdScsbidInfo', {

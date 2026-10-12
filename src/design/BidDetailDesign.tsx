@@ -3,7 +3,7 @@ import { ArrowDown, ArrowLeft, ArrowUpRight, Bookmark, Building2, CalendarClock,
 import { detailSections, referenceDocuments, type DetailSectionData } from './detailFixture';
 
 const NOTICE_NUMBER = 'R26BK01764541-000';
-const ORIGINAL_URL = 'https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01764541&bidPbancOrd=000';
+const ORIGINAL_URL = 'https://www.g2b.go.kr/link/PNPE027_01/?bidPbancNo=R26BK01764541&bidPbancOrd=000';
 const sectionIcons: Record<string, ReactNode> = { general: <Building2 />, schedule: <CalendarClock />, eligibility: <ShieldCheck />, pricing: <Wallet />, qualification: <FileCheck2 />, fees: <ClipboardCheck /> };
 const navItems = [{ id: 'summary', label: '핵심 요약' }, { id: 'general', label: '공고 일반' }, { id: 'schedule', label: '입찰 일정' }, { id: 'eligibility', label: '참가조건' }, { id: 'pricing', label: '금액 정보' }, { id: 'qualification', label: '적격심사' }, { id: 'fees', label: '보증금' }, { id: 'documents', label: '첨부서류', count: 4 }, { id: 'review', label: '업체 검토' }, { id: 'preparation', label: '준비 체크' }];
 
@@ -88,9 +88,9 @@ export function BidDetailDesign() {
     </div></header>
 
     <main className="bd-container">
-      <div className="bd-breadcrumb"><a href="/"><ArrowLeft size={15} /><span>공고 목록</span></a><ChevronRight size={13} /><span>공사</span><ChevronRight size={13} /><strong>공고 상세</strong><span className="bd-source-note">참고 화면 기준 · 2026.10.12</span></div>
+      <div className="bd-breadcrumb"><a href="/"><ArrowLeft size={15} /><span>공고 목록</span></a><ChevronRight size={13} /><span>공사</span><ChevronRight size={13} /><strong>공고 상세</strong><span className="bd-source-note">나라장터 원문 대조 · 2026.10.12</span></div>
 
-      <section id="summary" className="bd-hero" aria-labelledby="notice-title">
+      <a className="bd-live-preview-link" href="/notice-detail.html?number=R26BK01764541&amp;revision=000&amp;type=공사"><span><b>실제 공고의 전체 상세정보 보기</b>나라장터 API로 공고·금액·참가조건·첨부서류를 조회합니다.</span><ArrowUpRight size={22} /></a><section id="summary" className="bd-hero" aria-labelledby="notice-title">
         <div className="bd-hero-topline"><div className="bd-badges"><span className="bd-badge bd-blue">접수예정</span><span className="bd-badge">공사</span><span className="bd-badge">수의계약</span><span className="bd-badge bd-purple">지역제한</span></div><div className="bd-hero-tools"><button className="bd-icon-button" aria-label="공고번호 복사" title="공고번호 복사" onClick={() => void copy(NOTICE_NUMBER, '공고번호를 복사했습니다.')}><Copy size={17} /></button><button className="bd-icon-button bd-print" aria-label="공고 정보 인쇄" title="공고 정보 인쇄" onClick={() => window.print()}><Printer size={17} /></button><button className={`bd-icon-button ${bookmarked ? 'is-saved' : ''}`} aria-label={bookmarked ? '관심공고 해제' : '관심공고 저장'} aria-pressed={bookmarked} onClick={toggleBookmark}><Bookmark size={19} fill={bookmarked ? 'currentColor' : 'none'} /></button></div></div>
         <h1 id="notice-title">향남읍 송곡리 403번지 일원<br className="bd-title-break" /> 우수관로 정비공사</h1>
         <div className="bd-hero-meta"><span><Building2 size={15} />경기도 화성시 맑은물사업소</span><i /><span className="bd-mono">{NOTICE_NUMBER}</span><span className="bd-notice-type">실공고</span></div>
@@ -122,7 +122,7 @@ export function BidDetailDesign() {
             <div className="bd-file-list">{referenceDocuments.map((file, index) => <div className="bd-file" key={file.name}><span className={`bd-file-icon is-${file.extension.toLowerCase()}`}>{file.extension === 'XLSX' ? <FileSpreadsheet size={21} /> : <FileText size={21} />}<b>{file.extension}</b></span><div><span className="bd-file-kind">{file.kind}</span><p>{file.name}</p><small>참고 화면의 첨부 목록 · 파일 크기 미제공</small></div><button className="bd-icon-button" aria-label={`${index + 1}번 첨부 파일명 복사`} title="파일명 복사" onClick={() => void copy(file.name, '첨부 파일명을 복사했습니다.')}><Copy size={16} /></button></div>)}</div>
             <div className="bd-subtle-note"><Info size={15} /><p>시안에서는 파일 목록을 확인할 수 있습니다. 실제 파일은 나라장터 원문의 첨부서류에서 확인해 주세요.</p></div>
           </section>
-          <div className="bd-bottom-note"><ShieldCheck size={17} /><p>참가자격과 금액·일정은 최신 공고 원문을 기준으로 확인하세요.<br /><span>이 화면은 제공해주신 이미지로 구성한 디자인 시안입니다. 실시간 공고 조회 결과가 아닙니다.</span></p></div>
+          <div className="bd-bottom-note"><ShieldCheck size={17} /><p>참가자격과 금액·일정은 최신 공고 원문을 기준으로 확인하세요.<br /><span>이 화면은 참고 이미지와 나라장터 원문을 대조한 디자인 시안입니다. 최신 데이터는 위의 전체 상세정보에서 조회하세요.</span></p></div>
         </div>
 
         <aside className="bd-sidebar" aria-label="입찰 검토 도구"><div className="bd-sidebar-sticky">

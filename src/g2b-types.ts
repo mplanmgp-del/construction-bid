@@ -14,6 +14,19 @@ export interface G2bPage<T> {
 }
 export type G2bNoticePage = G2bPage<BidNotice>;
 
+export interface G2bDetailField {
+  key: string;
+  label: string;
+  value: string | null;
+  note?: string;
+  wide?: boolean;
+}
+export interface G2bDetailSection {
+  id: string;
+  label: string;
+  fields: G2bDetailField[];
+}
+
 export interface G2bNoticeDetail {
   number: string;
   revision: string;
@@ -23,6 +36,9 @@ export interface G2bNoticeDetail {
   licenseComplete: boolean;
   fetchedAt: string;
   warnings: string[];
+  notice?: BidNotice;
+  sections?: G2bDetailSection[];
+  sourceUrl?: string;
 }
 
 /** Public opening data, never evidence that a private submission was accepted. */

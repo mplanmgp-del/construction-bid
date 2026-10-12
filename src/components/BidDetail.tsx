@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { CalendarClock, Check, Download, ExternalLink, FileText, Info, MapPin, ShieldCheck, Star, X } from 'lucide-react';
-import { daysUntil, formatDateTime, formatPrice } from '../domain';
+import { assessRegion, daysUntil, formatDateTime, formatPrice } from '../domain';
 import type { BidNotice, CompanyProfile, RegionAssessment } from '../types';
 import type { G2bNoticeDetail } from '../g2b-types';
-import { fetchApi, koreanToday, safeG2bUrl } from '../live/client';
+import { currentNotice, fetchApi, koreanToday, safeG2bUrl } from '../live/client';
 import { PublicResults } from '../live/PublicResults';
+import { CompleteNoticeDetails } from '../live/CompleteNoticeDetails';
 
 interface BidDetailProps {
   bid: BidNotice;
@@ -18,6 +19,28 @@ interface BidDetailProps {
 }
 
 type DetailTab = 'overview' | 'terms' | 'documents' | 'results' | 'preparation';
+type LoadedDetail = { bidId: string; data: G2bNoticeDetail };
+
+/** Keep each visible tab on one exact notice, including the render before selection effects run. */
+export function resolveDisplayedBid(inputBid: BidNotice, loaded: LoadedDetail | null): { bid: BidNotice; detail: G2bNoticeDetail | null } {
+  const detail = loaded?.data;
+  if (inputBid.source !== 'live' || !detail || loaded.bidId !== inputBid.id || detail.number !== inputBid.number || detail.revision !== inputBid.revision) {
+    return { bid: inputBid, detail: null };
+  }
+  const latest = detail.notice;
+  if (latest && (latest.number !== inputBid.number || latest.revision !== inputBid.revision || latest.type !== inputBid.type || latest.source !== 'live')) {
+    return { bid: inputBid, detail: null };
+  }
+  return {
+    detail,
+    bid: currentNotice({
+      ...(latest ?? inputBid), id: inputBid.id,
+      allowedRegions: detail.regionComplete ? detail.allowedRegions : inputBid.allowedRegions,
+      licenses: detail.licenseComplete ? detail.licenses : inputBid.licenses,
+      detailUrl: detail.sourceUrl || latest?.detailUrl || inputBid.detailUrl,
+    }),
+  };
+}
 const TABS: { id: DetailTab; label: string }[] = [
   { id: 'overview', label: '공고 개요' },
   { id: 'terms', label: '참가조건' },
@@ -45,7 +68,7 @@ function downloadSampleDocument(bid: BidNotice, documentName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function BidDetail({ bid, profile, assessment, isBookmarked, onClose, onToggleBookmark, onEnriched, preparation }: BidDetailProps) {
+export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment, isBookmarked, onClose, onToggleBookmark, onEnriched, preparation }: BidDetailProps) {
   const id = useId();
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   const drawer = useRef<HTMLElement>(null);
@@ -53,22 +76,27 @@ export function BidDetail({ bid, profile, assessment, isBookmarked, onClose, onT
   const closeAction = useRef(onClose);
   closeAction.current = onClose;
   const enrichAction = useRef(onEnriched); enrichAction.current = onEnriched;
-  const isLive = bid.source === 'live';
-  const tabs = isLive ? [...TABS, { id: 'results' as const, label: '공개 결과' }, { id: 'preparation' as const, label: '투찰 준비' }] : TABS;
+  const isLive = inputBid.source === 'live';
+  const tabs = isLive ? [...TABS.map(tab => tab.id === 'overview' ? { ...tab, label: '전체 상세' } : tab), { id: 'results' as const, label: '공개 결과' }, { id: 'preparation' as const, label: '투찰 준비' }] : TABS;
   const [detailStatus, setDetailStatus] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
+  const [loadedDetail, setLoadedDetail] = useState<LoadedDetail | null>(null);
+  const { bid, detail: detailData } = resolveDisplayedBid(inputBid, loadedDetail);
+  const assessment = isLive ? assessRegion(bid, profile) : inputAssessment;
   useEffect(() => {
+    setLoadedDetail(null);
     if (!isLive) return;
     const abort = new AbortController();
-    setDetailStatus('지역·면허 상세조건을 확인하는 중입니다.');
-    const params = new URLSearchParams({ number: bid.number, revision: bid.revision, type: bid.type });
+    setDetailStatus('공고 일반·일정·금액·참가조건을 조회하는 중입니다.');
+    const params = new URLSearchParams({ number: inputBid.number, revision: inputBid.revision, type: inputBid.type });
     fetchApi<G2bNoticeDetail>(`/api/detail?${params}`, abort.signal).then(detail => {
       if (abort.signal.aborted) return;
+      setLoadedDetail({ bidId: inputBid.id, data: detail });
       enrichAction.current?.(detail);
-      setDetailStatus(detail.warnings.join(' · ') || '나라장터 지역·면허 상세조건을 조회했습니다.');
+      setDetailStatus(detail.warnings.join(' · ') || '나라장터 공고와 금액 상세를 조회했습니다.');
     }).catch(error => { if (!abort.signal.aborted) setDetailStatus(error instanceof Error ? error.message : '상세조건 조회에 실패했습니다.'); });
     return () => abort.abort();
-  }, [bid.id, isLive, detailRetry]);
+  }, [inputBid.id, inputBid.number, inputBid.revision, inputBid.type, isLive, detailRetry]);
 
   useEffect(() => {
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -133,7 +161,7 @@ export function BidDetail({ bid, profile, assessment, isBookmarked, onClose, onT
   return (
     <div className="detail-overlay">
       <button className="detail-backdrop" onClick={onClose} tabIndex={-1} aria-label="공고 상세 닫기" />
-      <aside className="detail-drawer" ref={drawer} role="dialog" aria-modal="true" tabIndex={-1}
+      <aside className={`detail-drawer ${isLive ? 'detail-drawer-complete' : ''}`} ref={drawer} role="dialog" aria-modal="true" tabIndex={-1}
         aria-labelledby={`${id}-title`} aria-describedby={`${id}-demo`}>
         <div className="detail-topbar">
           <span className="eyebrow">입찰공고 상세</span>
@@ -173,7 +201,8 @@ export function BidDetail({ bid, profile, assessment, isBookmarked, onClose, onT
         <div className="detail-content" role="tabpanel" id={`${id}-panel-${activeTab}`} aria-labelledby={`${id}-tab-${activeTab}`} tabIndex={0}>
           {isLive && activeTab === 'results' && <PublicResults bid={bid} />}
           {isLive && activeTab === 'preparation' && preparation}
-          {activeTab === 'overview' && <>
+          {isLive && activeTab === 'overview' && <div className="detail-live-status"><p role="status">{detailStatus}</p><div><button className="text-button" onClick={() => setDetailRetry(value => value + 1)}>새로 조회</button><a href={`/notice-detail.html?${new URLSearchParams({ number: bid.number, revision: bid.revision, type: bid.type })}`} target="_blank" rel="noopener noreferrer">넓은 화면으로 보기<ExternalLink size={14} /></a></div></div>}
+          {activeTab === 'overview' && (isLive && detailData ? <CompleteNoticeDetails detail={detailData} bid={bid} /> : <>
             <div className="detail-price-block"><span>추정가격</span><strong>{formatPrice(bid.estimatedPrice)}</strong><p>{bid.estimatedPrice === null ? '이 공고에는 추정가격이 제공되지 않았습니다.' : '금액 검색 및 정렬에 사용하는 추정가격입니다.'}</p></div>
             <section className="detail-section" aria-labelledby={`${id}-base-info`}>
               <h3 id={`${id}-base-info`}>기본정보</h3>
@@ -195,7 +224,7 @@ export function BidDetail({ bid, profile, assessment, isBookmarked, onClose, onT
               </ol>
             </section>
             <section className="detail-section" aria-labelledby={`${id}-description`}><h3 id={`${id}-description`}>공고 내용</h3><p className="detail-description">{bid.description}</p></section>
-          </>}
+          </>)}
 
           {activeTab === 'terms' && <>{isLive && <p className="live-scope" role="status">{detailStatus}<button className="text-button" onClick={() => setDetailRetry(value => value + 1)}>다시 확인</button></p>}
             <div className="detail-warning"><Info size={19} aria-hidden="true" /><div><strong>최종 참가자격은 원문을 확인하세요.</strong><p>지역 일치는 참가 가능 여부를 확정하지 않습니다. 면허, 실적, 공동수급, 등록기한 등 공고의 모든 조건을 확인해야 합니다.</p></div></div>

@@ -1,5 +1,5 @@
 /**
- * Design-reference data transcribed from the three screenshots supplied by the user.
+ * Design-reference data from the supplied screenshots, corrected against the official page.
  * This is not an API response or a live procurement notice.
  * Blank source cells remain “미기재”; values such as 0, 없음 and 비공개 are preserved.
  * The source service's account manager (유찬진1) is excluded because that person is
@@ -61,9 +61,9 @@ export const detailSections: DetailSectionData[] = [
     fields: [
       { label: '집행관', value: '이민숙' },
       { label: '입회관(담당자)', value: '이민숙' },
-      { label: 'PQ심사신청서', value: '방식:없음' },
+      missing('PQ심사신청서'),
       missing('PQ심사신청기한'),
-      { label: '실적심사신청서', value: '방식:없음' },
+      missing('실적심사신청서'),
       missing('실적심사신청서 신청기한'),
       missing('현장설명장소'),
       { label: '현장설명일시', value: '—', note: '참고 화면에 대시(-)로 표시되어 있습니다. 공고 원문을 확인하세요.' },
@@ -79,7 +79,7 @@ export const detailSections: DetailSectionData[] = [
       { label: '입찰마감', value: '2026.10.16 10:00', emphasis: true },
       { label: '개찰(입찰)일시', value: '2026.10.16 11:00' },
       { label: '개찰장소', value: '국가종합전자조달시스템(나라장터)' },
-      { label: '관련공고', value: '화성시맑은물사업소 공고제2026-193호' },
+      missing('관련공고'),
       { label: '재입찰', value: '허용' },
       missing('현장설명서'),
       { ...missing('공내역서'), note: '진행정보의 공내역서 칸은 미기재입니다. 별도 첨부목록에는 (공)내역서 XLSX가 있습니다.' },
@@ -116,14 +116,14 @@ export const detailSections: DetailSectionData[] = [
       { label: '추정가격', value: '57,836,364원', emphasis: true, note: '검색·비교의 기준 금액' },
       { label: '기초금액', value: '63,620,000원' },
       { label: '기초금액 A', value: '4,748,790원' },
-      { label: '순공사원가', value: '0원', note: '참고 화면에 표시된 값' },
+      { ...missing('순공사원가'), note: '나라장터 API에 값이 제공되지 않았습니다. 0원으로 판단하지 않습니다.' },
       { label: '투찰하한율', value: '89.745%' },
       { label: '예가변동폭', value: '97 ~ 103' },
       { label: '예가방법', value: '복수예가: 4(추첨예가) / 15(총예가)' },
       { label: '추첨번호 공개여부', value: '비공개' },
       { label: '공사예정금액', value: '94,340,000원' },
       { label: '관급금액 · 도급자설치', value: '30,720,000원' },
-      missing('관급금액 · 관급자설치'),
+      { label: '관급금액 · 관급자설치', value: '0원' },
       missing('기초금액 공개 · 비고1'),
       missing('기초금액 공개 · 비고2'),
       missing('기초금액 공개 · 상세보기'),
@@ -134,10 +134,10 @@ export const detailSections: DetailSectionData[] = [
     label: '적격심사',
     kicker: 'QUALIFICATION REVIEW',
     fields: [
-      { label: '평가기준', value: '행자부' },
+      { ...missing('평가기준'), note: '나라장터 공개 원문에 별도 표시가 없습니다.' },
       missing('주공종'),
       { ...missing('공사예정금액'), note: '적격심사 표의 해당 칸은 미기재입니다. 가격정보의 공사예정금액과 별도로 확인하세요.' },
-      { label: '업종평가비율', value: '100%' },
+      { ...missing('업종평가비율'), note: '나라장터 원문과 API에 값이 제공되지 않았습니다.' },
       missing('가산지역', true),
     ],
   },

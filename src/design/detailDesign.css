@@ -17,6 +17,8 @@ button:disabled{cursor:default}
 html{scroll-behavior:smooth;scroll-padding-top:150px}
 .bd-app{padding-bottom:0}
 .bd-muted{color:var(--bd-muted)}
+.bd-live-preview-link{display:flex;align-items:center;justify-content:space-between;gap:18px;background:#edf4ff;border:1px solid #cbdcfa;border-radius:12px;padding:17px 20px;margin-bottom:20px;color:#385578;font-size:12px;line-height:1.8}
+.bd-live-preview-link b{display:block;font-size:15px;color:#1760ef;margin-bottom:3px}
 .bd-mono{font-variant-numeric:tabular-nums;letter-spacing:.1px}
 .bd-skip{position:fixed;top:-70px;left:20px;z-index:100;background:white;border:2px solid var(--bd-blue);padding:12px}
 .bd-skip:focus{top:12px}

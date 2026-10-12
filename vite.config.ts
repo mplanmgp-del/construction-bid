@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   if (env.G2B_SERVICE_KEY) process.env.G2B_SERVICE_KEY = env.G2B_SERVICE_KEY;
   return {
-    build: { rolldownOptions: { input: { main: 'index.html', detailDesign: 'detail-design.html' } } },
+    build: { rolldownOptions: { input: { main: 'index.html', detailDesign: 'detail-design.html', noticeDetail: 'notice-detail.html' } } },
     plugins: [react(), {
       name: 'local-bid-api',
       configureServer(server) {
