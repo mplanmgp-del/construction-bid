@@ -82,7 +82,7 @@ html{scroll-behavior:smooth;scroll-padding-top:150px}
 .bd-section-nav>div>button{flex-shrink:0;white-space:nowrap;font-size:13px;font-weight:600;color:#596b85;height:100%;padding:0 2px;display:flex;align-items:center;gap:6px;position:relative}
 .bd-section-nav>div>button.is-active{color:var(--bd-blue)}
 .bd-section-nav>div>button.is-active:after{content:'';height:3px;border-radius:3px;background:var(--bd-blue);position:absolute;bottom:0;left:0;right:0}
-.bd-section-nav>div>button>span{font-size:13px;background:#e7edf7;color:#596b85;padding:1px 5px;border-radius:4px}
+.bd-section-nav>div>button>span{font-size:11px;background:#e7edf7;color:#596b85;padding:1px 5px;border-radius:4px}
 .bd-expand-button{display:flex;flex-shrink:0;min-width:44px;min-height:44px;align-items:center;gap:5px;font-size:12px;color:#596b85;white-space:nowrap;padding:9px 0 9px 8px}
 .bd-layout{display:grid;grid-template-columns:minmax(0,1fr) 298px;gap:24px;align-items:start}
 .bd-content{min-width:0}
@@ -112,12 +112,10 @@ html{scroll-behavior:smooth;scroll-padding-top:150px}
 .bd-section-toggle{display:flex;align-items:center;text-align:left;padding:21px 23px;width:100%;gap:11px}
 .bd-section-toggle:hover{background:#fafcff}
 .bd-section-toggle>span:nth-child(2){flex:1;min-width:0}
-.bd-section-kicker{overflow-wrap:anywhere}
-.bd-section-label{display:block;word-break:keep-all;overflow-wrap:anywhere}
 .bd-section-icon{width:35px;height:35px;display:grid;place-items:center;border-radius:10px;background:#f0f5fc;color:#596b85;flex-shrink:0}
 .bd-section-icon svg{width:18px;height:18px;stroke-width:1.65}
-.bd-section-kicker{display:block;font-size:10px;letter-spacing:1px;color:#596b85;font-weight:500;margin-bottom:3px}
-.bd-section-label{font-size:16px;letter-spacing:-.5px;font-weight:700;color:#223754}
+.bd-section-kicker{display:block;overflow-wrap:anywhere;font-size:10px;letter-spacing:1px;color:#596b85;font-weight:500;margin-bottom:3px}
+.bd-section-label{display:block;word-break:keep-all;overflow-wrap:anywhere;font-size:16px;letter-spacing:-.5px;font-weight:700;color:#223754}
 .bd-section-count{margin-left:auto;font-size:10px;font-weight:400;color:#596b85}
 .bd-chevron{color:#596b85;transition:transform .2s}
 .bd-section:not(.is-open) .bd-chevron{transform:rotate(-90deg)}
