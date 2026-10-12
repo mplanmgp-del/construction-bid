@@ -1,0 +1,26 @@
+Use case: ui-mockup.
+Create one polished Korean desktop web-app screen image for a public demolition and construction bid notice search system. Image 1 is a visual style and information-architecture reference, not real live bid data. Build the updated complete screen from this reference, retaining the recognizable white / very light blue-gray / cobalt blue / dark navy look, rounded subtle borders, crisp Korean sans-serif typography, horizontal work-category navigation, collapsible left filters and the table. Refine density and spacing for a practical production-quality business app. Wide landscape about 16:10, high-resolution, straight-on screenshot only, no laptop mockup, no browser chrome, no outside annotations. All Korean must be highly legible and spelled exactly. Fictional/example data only.
+
+User's essential changes:
+1) This screen uses 나라장터 입찰공고. A logged-in member has their own company profile and an automatic participation-region filter. Show a narrow pale-blue profile/filter strip prominently: "내 업체: 예시철거" and "본점: 서울특별시 마포구", outlined action "업체 정보 수정". In the same strip or immediately below, a clearly enabled blue switch with exact text "내 지역 조건에 맞는 공고". Add muted text "등록한 업체 소재지를 기준으로 비교합니다". Do not label overall legal eligibility as possible; use "지역 일치" and "확인 필요".
+2) MONEY MUST BE "추정가격" everywhere: main table header, amount range filter and any amount sort labels. Never display "기초금액" anywhere in this screen. If unavailable show "미제공", never 0원.
+3) Separate "공사 위치" and "참가 가능 지역" table columns. A site in 경기 can still be shown for a 서울 company when its participation region is 서울·경기 or 전국.
+4) Maintain visible "계약방법" values (제한경쟁, 일반경쟁, 수의계약) and collapsible detailed search.
+5) Top-right discrete badge "화면 시안 · 예시 데이터". Bottom footnote "공고·업체·금액은 예시입니다. 지역 일치는 전체 참가자격을 의미하지 않습니다."
+
+Layout:
+Header logo and name "공사입찰 검색"; navigation "입찰공고" active, "관심공고", "내 정보". Right user "예시철거" and the mockup badge.
+A compact title area "철거·공사 입찰공고" with brief subtitle "우리 업체의 지역조건에 맞는 공고를 찾아보세요". Large but compact search input placeholder "공고명, 공고번호, 발주기관 검색", blue "검색" button.
+Horizontal categories: "전체", "철거·해체" selected cobalt, "석면", "건축·리모델링", "토목", "보수·유지관리", "전기·통신·소방", "기계·설비", "조경", "폐기물", "조사·설계·감리". Keep readable.
+Place company-region strip described above beneath category row, across main workspace area.
+Left sidebar around 245px with heading "상세 검색", collapse icon/button "접기", reset "초기화"; accordion filters "공고 구분" summary "공사 · 용역"; "공사 위치" summary "전체"; "참가 가능 지역" summary "내 업체 기준"; "요구 업종·면허" summary "전체"; EXPANDED "추정가격" with two amount input boxes "최소 금액" and "최대 금액", unit "원"; "진행 상태" summary "접수중"; "공고 출처" summary "나라장터". Footer subtle "접어도 선택한 조건은 유지됩니다."
+Results pane toolbar: "검색 결과 27건"; selectable tabs "전체 27", "지역 일치 24", "확인 필요 3"; muted outline action "지역 제외 8건 보기" (excluded rows are hidden in the default table), sort dropdown "마감 임박순". Filter chips "철거·해체", "접수중", "내 지역 자동필터". Numbers must be internally consistent: 24 matched + 3 uncertain = 27 shown, 8 excluded not shown.
+Table columns left to right: bookmark star icon; "공고명 / 발주기관"; "공사 위치"; "참가 가능 지역"; "지역 판정"; "계약방법"; "추정가격"; "제출 마감"; narrow detail chevron. No separate source column needed, this view is 나라장터. All five rows visually readable with comfortable row heights. Heading can wrap to 2 lines when necessary, but no overlapping content. Title cells include small "접수중" status and row1 small amber "정정" label. Right-align all money values. Display compact pale-green "지역 일치" tags on rows 1-4 and amber "확인 필요" row5. No misleading submit/bid buttons.
+
+Exact five fictional rows, in deadline order:
+Row1 title "공공청사 별관 철거공사", organization "○○시청", construction site "경기 고양시", allowed region "서울·경기", judgement "지역 일치", contract "제한경쟁", estimated price "109,090,909원", deadline "10.20 14:00", D-day "D-8".
+Row2 title "노후 공공주택 지장물 철거공사", organization "○○공사", site "서울 마포구", allowed "서울", judgement "지역 일치", contract "제한경쟁", price "260,000,000원", deadline "10.21 10:00", "D-9".
+Row3 title "유휴시설 구조물 해체공사", organization "○○시설관리공단", site "경기 성남시", allowed "전국", judgement "지역 일치", contract "일반경쟁", price "85,454,545원", deadline "10.22 10:00", "D-10".
+Row4 title "공공시설 내부 철거공사", organization "○○구청", site "서울 강서구", allowed "서울", judgement "지역 일치", contract "수의계약", price "59,090,909원", deadline "10.23 14:00", "D-11".
+Row5 title "정비구역 지장물 철거공사", organization "○○지역본부", site "서울 은평구", allowed "원문 확인", judgement "확인 필요", contract "일반경쟁", price "미제공", deadline "10.26 10:00", "D-14".
+Bottom pagination "1 2 3". Keep no charts or dashboard metric cards, no decorative illustration, no artificial shadows, no corporate facts borrowed from sankun. Render only the updated usable application screenshot.
