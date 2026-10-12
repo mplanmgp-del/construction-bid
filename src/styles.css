@@ -12,3 +12,46 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;scroll-behavior:auto!important}}
 
 .filter-heading-actions .mobile-filter-close{display:none}@media(max-width:1000px){.filter-heading-actions .mobile-filter-close{display:inline-flex}}
+/* Live procurement and member workspaces */
+.mode-select select { border: 1px solid #d9e0eb; background: #fff; border-radius: 8px; padding: 9px 12px; color: #23405e; font: inherit; font-size: 12px; }
+.live-member-status { margin-top: 18px; color: #53657c; font-size: 12px; line-height: 1.6; }
+.live-query { margin-bottom: 18px; padding: 19px 22px; }
+.live-query-heading { display: flex; gap: 14px; align-items: baseline; margin-bottom: 14px; }
+.live-query-heading strong { color: #1f385d; font-size: 14px; }
+.live-query-heading span { color: #718097; font-size: 12px; }
+.live-query form, form.live-query, .result-local-search { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
+.live-query label, .result-local-search label { display: flex; flex-direction: column; gap: 6px; color: #52647d; font-size: 12px; min-width: 100px; }
+.live-query input, .live-query select, .result-local-search input { min-height: 39px; border: 1px solid #dce3ee; background: white; border-radius: 7px; color: #24374d; padding: 8px 10px; font: inherit; }
+.live-query .live-keyword { flex: 1; min-width: 170px; }
+.live-query .button { min-height: 39px; }
+.live-scope { padding: 15px 22px; background: #f6f9fd; color: #52657e; font-size: 12px; line-height: 1.75; border-bottom: 1px solid #e5ebf3; overflow-wrap: anywhere; }
+.live-scope p { margin: 4px 0 0; }
+.live-scope strong { font-weight: 600; color: #304c71; }
+.live-scope .text-button { margin-left: 12px; }
+.live-error { color: #b33138; font-size: 13px; line-height: 1.7; }
+.live-warning { color: #855b16; font-size: 12px; line-height: 1.7; }
+.live-more { display: flex; margin: 20px auto; }
+.live-empty { padding: 30px 20px; background: #f7f9fc; color: #69798d; font-size: 13px; line-height: 1.8; }
+.public-results { padding: 26px; margin-top: 24px; }
+.public-results header h2 { margin: 0 0 10px; font-size: 23px; color: #203654; }
+.public-results header p { color: #62728a; font-size: 13px; line-height: 1.7; margin-bottom: 20px; }
+.public-results .live-query { padding: 0; margin-top: 18px; }
+.result-local-search { margin: 18px 0; }
+.result-local-search label { flex: 1; }
+.public-results .live-scope { padding: 12px; }
+.public-result-cards { display: grid; gap: 12px; margin: 18px 0; }
+.public-result-card { border: 1px solid #e1e7ef; border-radius: 10px; padding: 18px; }
+.public-result-card h3 { font-size: 15px; margin: 10px 0 6px; }
+.public-result-card p { color: #738197; font-size: 12px; line-height: 1.6; }
+.public-result-card dl { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin: 16px 0 0; }
+.public-result-card dt { color: #79869a; font-size: 11px; margin-bottom: 4px; }
+.public-result-card dd { color: #29435f; font-size: 13px; overflow-wrap: anywhere; margin: 0; }
+.detail-drawer .public-results { border: 0; padding: 0; box-shadow: none; margin: 0; }
+.detail-drawer .public-results header h2 { font-size: 18px; }
+.detail-drawer .public-results .live-query label { min-width: 0; }
+.detail-drawer .public-results .live-query input { max-width: 150px; }
+.detail-tabs { overflow-x: auto; }
+.detail-tabs button { flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 1000px) { .header-inner { flex-wrap: wrap; } .main-nav { order: 3; flex-basis: 100%; } .header-account { margin-left: auto; } .live-query { padding: 16px; } }
+@media (max-width: 640px) { .live-query-heading { flex-wrap: wrap; gap: 5px; } .live-query label { flex: 1; min-width: 120px; } .live-query label:first-child { flex-basis: 100%; } .live-query input { width: 100%; } .live-scope { padding: 13px 16px; } .public-results { padding: 18px 14px; } .public-result-card dl { grid-template-columns: repeat(2,minmax(0,1fr)); } .mode-select select { max-width: 130px; padding: 8px 5px; font-size: 11px; } .header-account .button { padding: 7px 9px; min-height: 32px; font-size: 11px; } .header-account { gap: 6px; } .main-nav { overflow-x: auto; } .detail-tabs button { padding-left: 10px; padding-right: 10px; } }
+.preparation-chip { padding: 3px 6px; border-radius: 4px; background: #edf2ff; color: #365e99; font-size: 10px; white-space: nowrap; }

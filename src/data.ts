@@ -64,6 +64,7 @@ export const DEFAULT_FILTERS: SearchFilters = {
 };
 
 const categoryLicenses: Record<Category, string[]> = {
+  '기타': [],
   '철거·해체': ['구조물해체·비계공사업'], '석면': ['석면해체·제거업'],
   '건축·리모델링': ['건축공사업', '실내건축공사업'], '토목': ['토목공사업'],
   '보수·유지관리': ['도장·습식·방수·석공사업'],

@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ChevronDown, RotateCcw, PanelLeftClose, X, SlidersHorizontal } from 'lucide-react';
 import { LICENSES, PROVINCES } from '../data';
-import { getPriceRangeError } from '../domain';
+import { formatAmountInput, getPriceRangeError } from '../domain';
 import type { SearchFilters } from '../types';
 
 interface Props {
@@ -15,6 +15,70 @@ interface Props {
 
 function Group({ label, summary, children, open = false }: { label: string; summary: string; children: React.ReactNode; open?: boolean }) {
   return <details className="filter-group" open={open || undefined}><summary><span>{label}</span><span className="filter-summary">{summary}<ChevronDown size={15} /></span></summary><div className="filter-group-body">{children}</div></details>;
+}
+
+function AmountInput({ value, placeholder, onChange }: { value: string; placeholder: string; onChange: (value: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pendingCaret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (pendingCaret.current !== null && document.activeElement === inputRef.current) {
+      inputRef.current?.setSelectionRange(pendingCaret.current, pendingCaret.current);
+    }
+    pendingCaret.current = null;
+  });
+
+  function applyInput(displayValue: string, caret: number) {
+    const rawValue = displayValue.trim().replaceAll(',', '');
+    const prefixLength = displayValue.slice(0, caret).trimStart().replaceAll(',', '').length;
+    const formatted = formatAmountInput(rawValue);
+    let nextCaret = prefixLength;
+    if (/^\d*$/.test(rawValue)) {
+      nextCaret = 0;
+      let digitsBeforeCaret = 0;
+      while (nextCaret < formatted.length && digitsBeforeCaret < prefixLength) {
+        if (formatted[nextCaret] !== ',') digitsBeforeCaret++;
+        nextCaret++;
+      }
+    }
+    pendingCaret.current = nextCaret;
+    onChange(rawValue);
+  }
+
+  function deleteAtSeparator(input: HTMLInputElement, direction: 'backward' | 'forward'): boolean {
+    const caret = input.selectionStart;
+    if (caret === null || caret !== input.selectionEnd || !/^[\d,]*$/.test(input.value)) return false;
+    const backward = direction === 'backward' && input.value[caret - 1] === ',';
+    const forward = direction === 'forward' && input.value[caret] === ',';
+    if (!backward && !forward) return false;
+    // 구분자 옆에서 삭제하면 해당 방향의 숫자를 지워 입력이 멈춘 것처럼 보이지 않게 합니다.
+    const start = backward ? caret - 2 : caret;
+    const end = backward ? caret : caret + 2;
+    applyInput(input.value.slice(0, start) + input.value.slice(end), start);
+    return true;
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing) return;
+    const direction = event.key === 'Backspace' ? 'backward' : event.key === 'Delete' ? 'forward' : null;
+    if (direction && deleteAtSeparator(event.currentTarget, direction)) event.preventDefault();
+  }
+
+  // 가상 키보드는 keydown 없이 beforeinput으로 삭제를 알릴 수 있습니다.
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    const handleBeforeInput = (event: InputEvent) => {
+      if (!event.cancelable || event.isComposing) return;
+      const direction = event.inputType === 'deleteContentBackward' ? 'backward'
+        : event.inputType === 'deleteContentForward' ? 'forward' : null;
+      if (direction && deleteAtSeparator(input, direction)) event.preventDefault();
+    };
+    input.addEventListener('beforeinput', handleBeforeInput);
+    return () => input.removeEventListener('beforeinput', handleBeforeInput);
+  });
+
+  return <input ref={inputRef} className="field" type="text" inputMode="numeric" placeholder={placeholder}
+    value={formatAmountInput(value)} onChange={event => applyInput(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length)} onKeyDown={handleKeyDown} />;
 }
 
 export function FilterPanel({ filters, onChange, onReset, onCollapse, mobileOpen, onMobileClose }: Props) {
@@ -50,7 +114,7 @@ export function FilterPanel({ filters, onChange, onReset, onCollapse, mobileOpen
       <Group label="공사 위치" summary={filters.siteProvince} open><label className="sr-only" htmlFor="site-province">공사 위치</label><select id="site-province" className="field" value={filters.siteProvince} onChange={event => onChange('siteProvince', event.target.value)}><option value="전체">전국 모든 지역</option>{PROVINCES.map(province => <option key={province}>{province}</option>)}</select></Group>
       <Group label="참가 가능 지역" summary={filters.autoRegion ? '내 업체 기준' : '모든 지역'}><p className="filter-description">상단의 지역 자동필터가 등록한 업체 소재지와 공고 조건을 비교합니다. 정보가 부족한 공고는 ‘확인 필요’로 표시합니다.</p></Group>
       <Group label="요구 업종·면허" summary={filters.license} ><label className="sr-only" htmlFor="license-filter">요구 업종·면허</label><select id="license-filter" className="field" value={filters.license} onChange={event => onChange('license', event.target.value)}><option value="전체">전체 업종·면허</option>{LICENSES.map(license => <option key={license}>{license}</option>)}</select></Group>
-      <Group label="추정가격" summary={filters.minAmount || filters.maxAmount ? '범위 선택' : '전체'} open><div className="amount-fields"><label><span className="sr-only">최소 추정가격</span><input className="field" type="number" min="0" step="1" placeholder="최소 금액" value={filters.minAmount} onChange={event => onChange('minAmount', event.target.value)} /><span className="amount-unit">원</span></label><span>~</span><label><span className="sr-only">최대 추정가격</span><input className="field" type="number" min="0" step="1" placeholder="최대 금액" value={filters.maxAmount} onChange={event => onChange('maxAmount', event.target.value)} /><span className="amount-unit">원</span></label></div><div className="price-presets"><button onClick={() => { onChange('minAmount', ''); onChange('maxAmount', '100000000'); }}>1억 이하</button><button onClick={() => { onChange('minAmount', '100000000'); onChange('maxAmount', '500000000'); }}>1억 ~ 5억</button></div>{amountError && <p className="field-error" role="alert">{amountError}</p>}</Group>
+      <Group label="추정가격" summary={filters.minAmount || filters.maxAmount ? '범위 선택' : '전체'} open><div className="amount-fields"><label><span className="sr-only">최소 추정가격</span><AmountInput placeholder="최소 금액" value={filters.minAmount} onChange={value => onChange('minAmount', value)} /><span className="amount-unit">원</span></label><span>~</span><label><span className="sr-only">최대 추정가격</span><AmountInput placeholder="최대 금액" value={filters.maxAmount} onChange={value => onChange('maxAmount', value)} /><span className="amount-unit">원</span></label></div><div className="price-presets"><button onClick={() => { onChange('minAmount', ''); onChange('maxAmount', '100000000'); }}>1억 이하</button><button onClick={() => { onChange('minAmount', '100000000'); onChange('maxAmount', '500000000'); }}>1억 ~ 5억</button></div>{amountError && <p className="field-error" role="alert">{amountError}</p>}</Group>
       <Group label="진행 상태" summary={filters.status}><label className="sr-only" htmlFor="status-filter">진행 상태</label><select id="status-filter" className="field" value={filters.status} onChange={event => onChange('status', event.target.value as SearchFilters['status'])}>{['전체', '접수중', '접수예정', '마감', '취소'].map(status => <option key={status}>{status}</option>)}</select></Group>
       <Group label="계약방법" summary={filters.contractMethod}><label className="sr-only" htmlFor="contract-filter">계약방법</label><select id="contract-filter" className="field" value={filters.contractMethod} onChange={event => onChange('contractMethod', event.target.value)}>{['전체', '제한경쟁', '일반경쟁', '수의계약'].map(method => <option key={method}>{method}</option>)}</select></Group>
       <Group label="제출 마감일" summary={filters.deadlineFrom || filters.deadlineTo ? '기간 선택' : '전체'}><label className="date-field"><span>시작일</span><input className="field" type="date" value={filters.deadlineFrom} onChange={event => onChange('deadlineFrom', event.target.value)} /></label><label className="date-field"><span>종료일</span><input className="field" type="date" value={filters.deadlineTo} onChange={event => onChange('deadlineTo', event.target.value)} /></label></Group>

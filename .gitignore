@@ -5,3 +5,9 @@ dist/
 .superpowers/
 test-results/
 playwright-report/
+
+.vercel/
+outputs/
+
+.env*
+!.env.example

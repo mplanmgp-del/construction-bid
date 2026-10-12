@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessRegion, daysUntil, filterNotices, getPriceRangeError } from '../src/domain';
+import { assessRegion, buildBidCsv, daysUntil, filterNotices, formatAmountInput, getPriceRangeError } from '../src/domain';
 import type { BidNotice, CompanyProfile, SearchFilters } from '../src/types';
 
 const company: CompanyProfile = {
@@ -207,6 +207,37 @@ describe('화면과 검색이 공유하는 원 단위 금액 검증', () => {
     { minimum: '200000001', maximum: '100000000' },
   ])('유효하지 않은 금액 입력 %j에는 사람이 읽을 오류를 반환한다', ({ minimum, maximum }) => {
     expect(getPriceRangeError(minimum, maximum)).toMatch(/금액/);
+  });
+});
+
+describe('검색 금액의 천 단위 표시', () => {
+  it.each([
+    ['', ''], ['0', '0'], ['999', '999'], ['1000', '1,000'],
+    ['100000000', '100,000,000'], ['100,000,000', '100,000,000'],
+    [' 100,000,000 ', '100,000,000'],
+    ['9007199254740992', '9,007,199,254,740,992'],
+  ])('입력 %s를 금액 손실 없이 %s로 표시한다', (input, expected) => {
+    expect(formatAmountInput(input)).toBe(expected);
+  });
+
+  it.each(['-10', '1.5', '1e8', '가격'])('잘못된 입력 %s를 다른 금액으로 바꾸지 않는다', input => {
+    expect(formatAmountInput(input)).toBe(input);
+    expect(getPriceRangeError(formatAmountInput(input), '')).toMatch(/금액/);
+  });
+});
+
+describe('CSV 추정가격 표시', () => {
+  it('쉼표가 있는 가격을 한 열로 출력하고 미제공·0원·문서 인용을 보존한다', () => {
+    const csv = buildBidCsv([
+      notice({ number: 'CSV-1', title: '학교, "별관" 철거공사', estimatedPrice: 109_090_909 }),
+      notice({ number: 'CSV-2', estimatedPrice: null }),
+      notice({ number: 'CSV-3', estimatedPrice: 0 }),
+    ]);
+    const lines = csv.split('\r\n');
+    expect(lines[0]).toBe('\uFEFF"공고번호","공고명","발주기관","공사 위치","참가 가능 지역","계약방법","추정가격(원)","제출 마감"');
+    expect(lines[1]).toBe('"CSV-1","학교, ""별관"" 철거공사","예시시청","경기도 고양시","서울","제한경쟁","109,090,909","2026-10-20T14:00:00+09:00"');
+    expect(lines[2]).toContain(',"미제공","2026-10-20T14:00:00+09:00"');
+    expect(lines[3]).toContain(',"0","2026-10-20T14:00:00+09:00"');
   });
 });
 

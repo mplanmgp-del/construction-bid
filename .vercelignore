@@ -1,0 +1,7 @@
+outputs
+.superpowers
+.git
+.env*
+tests
+test-results
+playwright-report

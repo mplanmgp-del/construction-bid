@@ -6,6 +6,7 @@ import type { CompanyProfile } from '../types';
 interface ProfileViewProps {
   profile: CompanyProfile;
   onSave: (profile: CompanyProfile) => void;
+  persistence?: 'browser' | 'cloud';
 }
 
 type ProfileErrors = Partial<Record<'companyName' | 'email', string>>;
@@ -20,7 +21,7 @@ function profileHasChanges(profile: CompanyProfile, draft: CompanyProfile): bool
     || [...profile.licenses].sort().join('\u0000') !== [...draft.licenses].sort().join('\u0000');
 }
 
-export function ProfileView({ profile, onSave }: ProfileViewProps) {
+export function ProfileView({ profile, onSave, persistence = 'browser' }: ProfileViewProps) {
   const id = useId();
   const [draft, setDraft] = useState(() => copyProfile(profile));
   const [errors, setErrors] = useState<ProfileErrors>({});
@@ -92,7 +93,7 @@ export function ProfileView({ profile, onSave }: ProfileViewProps) {
     };
     onSave(savedProfile);
     setDraft(copyProfile(savedProfile));
-    setFeedback('업체 정보를 저장했습니다.');
+    setFeedback(persistence === 'cloud' ? '업체 정보를 적용했습니다. 클라우드 저장 상태를 확인하세요.' : '업체 정보를 저장했습니다.');
   };
 
   return (
@@ -191,7 +192,7 @@ export function ProfileView({ profile, onSave }: ProfileViewProps) {
           </section>
 
           <footer className="profile-form-footer">
-            <p className="profile-feedback" role="status">{feedback || (dirty ? '변경한 정보는 저장 후 적용됩니다.' : '현재 업체의 정보가 브라우저에 저장됩니다.')}</p>
+            <p className="profile-feedback" role="status">{feedback || (dirty ? '변경한 정보는 저장 후 적용됩니다.' : persistence === 'cloud' ? '현재 회원의 업체 정보를 클라우드에 저장합니다.' : '현재 업체의 정보가 브라우저에 저장됩니다.')}</p>
             <div className="profile-actions">
               <button type="button" className="button button-secondary" disabled={!dirty} onClick={resetDraft}><RotateCcw size={16} aria-hidden="true" />변경 취소</button>
               <button type="submit" className="button button-primary"><Save size={16} aria-hidden="true" />정보 저장</button>

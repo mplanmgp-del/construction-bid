@@ -15,6 +15,7 @@ const provinceAliases: Record<string, string> = {
 
 const cleanText = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ');
 const canonicalProvince = (value: string) => provinceAliases[cleanText(value)] ?? null;
+const canonicalLicense = (value: string) => cleanText(value.replace(/[ㆍ・ᆞ]/g, '·')).replace(/\/\d+$/, '').replace(/\s+/g, '');
 
 type ParsedRegion = { province: string; district: string | null } | { nationwide: true };
 
@@ -116,7 +117,7 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
     if (filters.category !== '전체' && bid.category !== filters.category) return false;
     if (filters.type !== '전체' && bid.type !== filters.type) return false;
     if (filters.siteProvince !== '전체' && (!siteProvince || canonicalProvince(bid.province) !== siteProvince)) return false;
-    if (filters.license !== '전체' && !bid.licenses.includes(filters.license)) return false;
+    if (filters.license !== '전체' && !bid.licenses.some(license => canonicalLicense(license) === canonicalLicense(filters.license))) return false;
     if (filters.status !== '전체' && bid.status !== filters.status) return false;
     if (filters.contractMethod !== '전체' && bid.contractMethod !== filters.contractMethod) return false;
     const price = priceOrNull(bid.estimatedPrice);
@@ -151,10 +152,26 @@ export function formatPrice(value: number | null): string {
   return price === null ? '미제공' : `${price.toLocaleString('ko-KR')}원`;
 }
 
-export function daysUntil(deadline: string): number {
+export function formatAmountInput(value: string): string {
+  const digits = value.trim().replaceAll(',', '');
+  // 문자열로 묶어 큰 금액의 자릿수를 보존하고, 잘못된 입력은 검증 안내에 남깁니다.
+  return /^\d*$/.test(digits) ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : value;
+}
+
+export function buildBidCsv(notices: BidNotice[]): string {
+  const rows = [['공고번호', '공고명', '발주기관', '공사 위치', '참가 가능 지역', '계약방법', '추정가격(원)', '제출 마감'],
+    ...notices.map(bid => [bid.number, bid.title, bid.agency, `${bid.province} ${bid.district}`,
+      bid.allowedRegions?.join(' · ') || '원문 확인', bid.contractMethod,
+      formatPrice(bid.estimatedPrice).replace(/원$/, ''), bid.deadline])];
+  // Public titles and agency names are untrusted text; Excel must not interpret them as formulas.
+  const safeCell = (value: string) => /^[\s]*[=+@-]/.test(value) || /^[\t\r\n]/.test(value) ? `'${value}` : value;
+  return '\uFEFF' + rows.map(row => row.map(value => '"' + safeCell(value).replaceAll('"', '""') + '"').join(',')).join('\r\n');
+}
+
+export function daysUntil(deadline: string, today: string = DEMO_TODAY): number {
   const day = koreanDate(deadline);
   if (!day) return Number.NaN;
-  return Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${DEMO_TODAY}T00:00:00Z`)) / 86_400_000);
+  return Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
 }
 
 export function formatDateTime(value: string): string {

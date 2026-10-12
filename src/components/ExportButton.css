@@ -1,0 +1,15 @@
+.export-control{position:relative;display:flex;align-items:center;border:1px solid #dce5f0;border-radius:7px;background:#fff;flex-shrink:0}
+.export-main,.export-format-toggle{display:flex;align-items:center;justify-content:center;min-height:35px;background:none;color:#547195}
+.export-main{gap:7px;padding:8px 11px;font-size:11px;font-weight:600;border-radius:6px 0 0 6px;white-space:nowrap}
+.export-format-toggle{align-self:stretch;padding:6px;border-left:1px solid #e6edf6;border-radius:0 6px 6px 0}
+.export-main:hover,.export-format-toggle:hover{background:#f0f5ff;color:#185de7}
+.export-main:disabled,.export-format-toggle:disabled{opacity:.55;cursor:wait}
+.export-format-menu{position:absolute;right:0;top:calc(100% + 7px);width:208px;padding:5px;background:#fff;border:1px solid #dde6f1;border-radius:9px;box-shadow:0 8px 28px #1f3c6820;z-index:25}
+.export-format-menu>button{display:flex;width:100%;align-items:center;gap:11px;padding:10px 11px;border-radius:5px;background:none;text-align:left;color:#344f72;font-size:12px}
+.export-format-menu>button:hover,.export-format-menu>button:focus-visible{background:#f0f5ff;color:#185de7}
+.export-format-menu>button span{display:flex;flex-direction:column;gap:4px}
+.export-format-menu small{font-size:10px;font-weight:400;color:#8a9cb5}
+.export-spinner{animation:export-spin 1s linear infinite}
+@keyframes export-spin{to{transform:rotate(360deg)}}
+@media(max-width:760px){.export-main{min-height:30px;padding:6px 7px}.export-main>span{display:none}.export-format-toggle{min-height:30px;padding:5px}.export-format-toggle>svg{width:11px}.export-format-menu{width:185px}.export-format-menu>button{font-size:11px}.export-format-menu small{font-size:9px}}
+@media(prefers-reduced-motion:reduce){.export-spinner{animation:none}}
