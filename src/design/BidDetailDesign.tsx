@@ -36,12 +36,28 @@ export function BidDetailDesign() {
   }, [toast]);
   useEffect(() => {
     const targets = navItems.map(item => document.getElementById(item.id)).filter((item): item is HTMLElement => Boolean(item));
-    const observer = new IntersectionObserver(entries => {
-      const entry = entries.find(item => item.isIntersecting);
-      if (entry) setActiveSection(entry.target.id);
-    }, { rootMargin: '-130px 0px -60% 0px', threshold: 0 });
-    targets.forEach(item => observer.observe(item));
-    return () => observer.disconnect();
+    let frame = 0;
+    function updateCurrentSection() {
+      frame = 0;
+      const marker = (document.querySelector('.bd-section-nav')?.getBoundingClientRect().bottom ?? 136) + 24;
+      const mobile = window.matchMedia('(max-width: 850px)').matches;
+      const candidates = targets
+        .filter(target => mobile || !['review', 'preparation'].includes(target.id))
+        .map(target => ({ id: target.id, top: target.getBoundingClientRect().top }))
+        .filter(target => target.top <= marker)
+        .sort((a, b) => b.top - a.top);
+      if (candidates[0]) setActiveSection(candidates[0].id);
+    }
+    function onScroll() {
+      if (!frame) frame = window.requestAnimationFrame(updateCurrentSection);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
   }, []);
   useEffect(() => {
     if (showContact) contactDialog.current?.showModal();
