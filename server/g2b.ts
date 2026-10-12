@@ -1,6 +1,7 @@
 import type { BidNotice, Category } from '../src/types.ts';
 import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage, G2bOpeningResult, G2bResultPage } from '../src/g2b-types.ts';
 import { mapDetailSections } from './g2b-detail.ts';
+import { createRelatedLoader } from './g2b-related.ts';
 
 type Row = Record<string, unknown>;
 const BID_BASE = 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/';
@@ -287,5 +288,6 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       totalCount: result.totalCount, page: query.page, pageSize: query.pageSize, hasMore: query.page * query.pageSize < result.totalCount,
       fetchedAt: new Date(now()).toISOString(), source: '나라장터 공공데이터개방표준서비스' };
   }
-  return { notices, detail, results };
+  const related = createRelatedLoader(request, now);
+  return { notices, detail, results, related };
 }

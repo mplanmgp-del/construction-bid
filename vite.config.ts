@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
           const pathname = req.url?.split('?')[0];
-          if (!['/api/notices', '/api/detail', '/api/results'].includes(pathname ?? '')) return next();
+          if (!['/api/notices', '/api/detail', '/api/results', '/api/related'].includes(pathname ?? '')) return next();
           void nodeApiHandler(req, res);
         });
       },

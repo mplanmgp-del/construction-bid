@@ -4,6 +4,7 @@ import type { G2bDetailSection, G2bNoticeDetail } from '../g2b-types';
 import type { BidNotice } from '../types';
 import { formatDateTime, formatPrice } from '../domain';
 import { safeG2bUrl } from './client';
+import { RelatedNoticeDetails } from './RelatedNoticeDetails';
 import './CompleteNoticeDetails.css';
 
 const icons: Record<string, ReactNode> = {
@@ -68,7 +69,7 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true }: { det
       <div className="fnd-summary-date"><FileCheck2 size={20} /><span>개찰일시</span><strong>{formatDateTime(bid.openingAt)}</strong></div>
     </div>}
     <div className="fnd-jumpbar" aria-label="공고 상세 구역 이동">
-      <div className="fnd-jump-scroll">{sections.map(section => <button type="button" key={section.id} onClick={() => jumpTo(section.id)}>{section.label}</button>)}<button type="button" onClick={() => jumpTo('documents')}>첨부서류 <span>{documents.length}</span></button></div>
+      <div className="fnd-jump-scroll"><button type="button" className="fnd-related-jump" onClick={() => jumpTo('relatedData')}>계약·진행 이력·기관</button>{sections.map(section => <button type="button" key={section.id} onClick={() => jumpTo(section.id)}>{section.label}</button>)}<button type="button" onClick={() => jumpTo('documents')}>첨부서류 <span>{documents.length}</span></button></div>
     </div>
     <div className="fnd-detail-tools">
       <div className="fnd-detail-heading"><span className="fnd-eyebrow">NOTICE DETAILS</span><h2>공고 상세정보 <span>{totalFields}개 항목</span></h2></div>
@@ -98,5 +99,6 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true }: { det
       })}</ul> : <p className="fnd-doc-empty">공개 데이터에서 제공된 첨부서류가 없습니다.{sourceUrl && ' 나라장터 원문에서 첨부 여부를 확인해 주세요.'}</p>}
       <p className="fnd-section-note"><Info size={15} />첨부서류는 발주기관이 게시한 나라장터 원본 링크로 열립니다.</p>
     </section>
+    {bid.source === 'live' && <div className="fnd-related-anchor" ref={element => { sectionRefs.current.relatedData = element; }}><RelatedNoticeDetails key={`${bid.type}:${bid.number}:${bid.revision}`} bid={bid} /></div>}
   </div>;
 }

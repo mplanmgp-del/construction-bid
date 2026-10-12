@@ -14,12 +14,12 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
   try {
     if (path === '/api/notices') return { status: 200, body: await api.notices(parseSearch(params)) };
     if (path === '/api/results') return { status: 200, body: await api.results(parseSearch(params, 7)) };
-    if (path === '/api/detail') {
+    if (path === '/api/detail' || path === '/api/related') {
       const number = params.get('number') || '', revision = params.get('revision') || '', type = params.get('type');
       if (!/^[a-zA-Z0-9_-]{1,40}$/.test(number) || !/^\d{1,3}$/.test(revision) || (type !== '공사' && type !== '용역')) {
         throw new G2bError(400, 'INVALID_QUERY', '공고번호, 차수, 업무 구분을 확인해 주세요.');
       }
-      return { status: 200, body: await api.detail(number, revision.padStart(3, '0'), type) };
+      return { status: 200, body: await (path === '/api/related' ? api.related : api.detail)(number, revision.padStart(3, '0'), type) };
     }
     return { status: 404, body: { error: { code: 'NOT_FOUND', message: '존재하지 않는 API입니다.' } } };
   } catch (error) {

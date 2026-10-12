@@ -41,6 +41,28 @@ export interface G2bNoticeDetail {
   sourceUrl?: string;
 }
 
+export interface G2bRelatedRecord {
+  id: string;
+  title: string;
+  fields: G2bDetailField[];
+  sourceUrl?: string;
+}
+export interface G2bRelatedGroup {
+  id: string;
+  label: string;
+  status: 'ok' | 'empty' | 'unavailable';
+  message?: string;
+  records: G2bRelatedRecord[];
+}
+export interface G2bRelatedDetail {
+  number: string;
+  revision: string;
+  type: G2bBusinessType;
+  fetchedAt: string;
+  groups: G2bRelatedGroup[];
+  warnings: string[];
+}
+
 /** Public opening data, never evidence that a private submission was accepted. */
 export interface G2bOpeningResult {
   id: string;
