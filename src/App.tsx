@@ -159,4 +159,3 @@ export default function App() {
     <div className={`toast ${toast ? 'visible' : ''}`} role="status" aria-live="polite">{toast && <><span><Check size={15} /></span>{toast}</>}</div>
   </div>;
 }
-
