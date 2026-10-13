@@ -17,7 +17,7 @@ describe('notice summary through detail loading', () => {
     for (const html of [renderToStaticMarkup(<NoticeSummary bid={bid} pending />), renderToStaticMarkup(<NoticeSummary bid={bid} detail={detail} />)]) {
       expect(html).toContain('94,340,000');
       expect(html).toContain('57,836,364');
-      expect(html).toContain('공사 예정금액');
+      expect(html).toContain('<span>예정금액</span>');
       expect(html).not.toContain('63,620,000');
     }
   });
