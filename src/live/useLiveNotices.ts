@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BidNotice } from '../types';
-import type { G2bBusinessType, G2bNoticePage, G2bNoticeDetail } from '../g2b-types';
-import { currentNotice, fetchApi, mergeById, recentDates } from './client';
+import type { G2bNoticePage, G2bNoticeDetail } from '../g2b-types';
+import { currentNotice, mergeById, recentDates } from './client';
+import { fetchNoticePage, type NoticeQuery } from './notice-search';
+export type { NoticeQuery } from './notice-search';
 
-export interface NoticeQuery { type: G2bBusinessType; from: string; to: string; keyword: string }
 export function useLiveNotices(enabled: boolean) {
-  const [query, setQuery] = useState<NoticeQuery>(() => ({ type: '공사', ...recentDates(7), keyword: '' }));
+  const [query, setQuery] = useState<NoticeQuery>(() => ({ type: '공사·용역', ...recentDates(7), keyword: '' }));
   const [items, setItems] = useState<BidNotice[]>([]);
   const [meta, setMeta] = useState<G2bNoticePage | null>(null);
   const [loading, setLoading] = useState(false);
@@ -20,8 +21,7 @@ export function useLiveNotices(enabled: boolean) {
     setLoading(true); setError('');
     if (page === 1) { setItems([]); setMeta(null); }
     try {
-      const params = new URLSearchParams({ ...query, page: String(page), pageSize: '100' });
-      const result = await fetchApi<G2bNoticePage>(`/api/notices?${params}`, controller.signal);
+      const result = await fetchNoticePage(query, page, controller.signal);
       if (token !== sequence.current) return;
       setItems(previous => mergeById(page === 1 ? [] : previous, result.items.map(item => currentNotice({ ...item, source: 'live' }))));
       setMeta(result);
