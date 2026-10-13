@@ -55,3 +55,13 @@
 @media (max-width: 1000px) { .header-inner { flex-wrap: wrap; } .main-nav { order: 3; flex-basis: 100%; } .header-account { margin-left: auto; } .live-query { padding: 16px; } }
 @media (max-width: 640px) { .live-query-heading { flex-wrap: wrap; gap: 5px; } .live-query label { flex: 1; min-width: 120px; } .live-query label:first-child { flex-basis: 100%; } .live-query input { width: 100%; } .live-scope { padding: 13px 16px; } .public-results { padding: 18px 14px; } .public-result-card dl { grid-template-columns: repeat(2,minmax(0,1fr)); }  .header-account .button { padding: 7px 9px; min-height: 32px; font-size: 11px; } .header-account { gap: 6px; } .main-nav { overflow-x: auto; } .detail-tabs button { padding-left: 10px; padding-right: 10px; } }
 .preparation-chip { padding: 3px 6px; border-radius: 4px; background: #edf2ff; color: #365e99; font-size: 10px; white-space: nowrap; }
+
+/* Keep pagination bounded, including large result sets and narrow screens. */
+.results-bottom{flex-wrap:wrap;justify-content:center}
+.result-range,.page-size-label{white-space:nowrap;flex-shrink:0}
+.result-range{margin-right:auto}.page-size-label{margin-left:auto}
+.pagination{flex-shrink:0;align-items:center;gap:5px;max-width:100%}
+.pagination button{min-height:36px;min-width:32px}
+.pagination-gap{display:grid;place-items:center;width:18px;color:#7c8da8;flex-shrink:0}
+@media(max-width:1000px){.result-range{width:100%;text-align:center;margin:0;order:2}.page-size-label{display:none}.results-bottom{gap:12px}}
+@media(max-width:480px){.results-bottom{padding:18px 10px}.pagination{gap:3px}.pagination button{min-width:28px;height:40px;padding:0 5px}.pagination-gap{width:12px}}
