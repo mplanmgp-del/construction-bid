@@ -1,3 +1,4 @@
+import { NoticeList } from './components/NoticeList';
 import { pageGroup } from './pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Bookmark, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, ExternalLink, FileSearch, Info, MapPin, PanelLeftOpen, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Star, UserRound, X } from 'lucide-react';
@@ -20,9 +21,7 @@ import { PublicResults } from './live/PublicResults';
 import { currentNotice, koreanToday, mergeById } from './live/client';
 
 type View = 'notices' | 'bookmarks' | 'profile' | 'results';
-const PAGE_SIZE = 8;
-const REGION_LABELS = { matched: '지역 일치', review: '확인 필요', excluded: '지역 제외' } as const;
-const SHORT_PROVINCES: Record<string, string> = { 서울특별시: '서울', 경기도: '경기', 부산광역시: '부산', 인천광역시: '인천', 대구광역시: '대구', 대전광역시: '대전', 광주광역시: '광주', 울산광역시: '울산', 세종특별자치시: '세종', 강원특별자치도: '강원', 충청북도: '충북', 충청남도: '충남', 전북특별자치도: '전북', 전라남도: '전남', 경상북도: '경북', 경상남도: '경남', 제주특별자치도: '제주' };
+const PAGE_SIZE = 30;
 
 function saveDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -30,10 +29,6 @@ function saveDownload(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function Deadline({ bid }: { bid: BidNotice }) {
-  const days = daysUntil(bid.deadline, bid.source === 'live' ? koreanToday() : DEMO_TODAY);
-  return <div className="deadline-cell"><span>{formatDateTime(bid.deadline)}</span><span className={`deadline-badge ${days >= 0 && days <= 3 ? 'urgent' : ''} ${bid.status === '마감' || bid.status === '취소' ? 'past' : ''}`}>{bid.status === '마감' ? '마감' : bid.status === '취소' ? '취소' : !Number.isFinite(days) ? '확인 필요' : days < 0 ? '마감' : days === 0 ? 'D-day' : `D-${days}`}</span></div>;
-}
 
 export default function App() {
   const [mode, setMode] = useState<'live' | 'demo'>('live');
@@ -45,19 +40,20 @@ export default function App() {
   const guestProfile: CompanyProfile = { id: 'guest', companyName: '업체 정보 미등록', province: '', district: '', address: '', licenses: [], contactName: '', email: '' };
   const profile = mode === 'live' ? member.workspace?.profile ?? guestProfile : state.profiles.find(item => item.id === state.activeProfileId) ?? state.profiles[0];
   const [view, setView] = useState<View>('notices');
-  const [filters, setFilters] = useState<SearchFilters>(() => ({ ...DEFAULT_FILTERS, category: '전체', status: '전체', autoRegion: true }));
+  const [filters, setFilters] = useState<SearchFilters>(() => ({ ...DEFAULT_FILTERS, category: '전체', status: '전체', autoRegion: false }));
   const [searchInput, setSearchInput] = useState('');
   const [page, setPage] = useState(1);
+  const [selectedNoticeIds, setSelectedNoticeIds] = useState<string[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileFilters, setMobileFilters] = useState(false);
   const [selectedBid, setSelectedBid] = useState<BidNotice | null>(null);
   const [toast, setToast] = useState('');
   const noticeFiltersRef = useRef(filters);
   const bookmarks = mode === 'live' ? member.workspace?.bookmarks ?? [] : state.bookmarks[profile.id] ?? [];
-  const preferredAutoRegion = mode === 'live' ? member.workspace?.preferences.autoRegion ?? true : state.preferences[profile.id]?.autoRegion ?? true;
   const availableNotices = mode === 'live' ? live.items : NOTICES;
 
-  useEffect(() => { if (mode === 'live') { setSelectedBid(null); setPage(1); setFilters(previous => ({ ...previous, autoRegion: view === 'bookmarks' ? false : preferredAutoRegion })); } }, [member.user?.id, mode, preferredAutoRegion]);
+  // Region filtering is opt-in for each visit, including accounts with an older saved ON preference.
+  useEffect(() => { setSelectedNoticeIds([]); setSelectedBid(null); setPage(1); noticeFiltersRef.current = { ...noticeFiltersRef.current, autoRegion: false, regionView: 'all' }; setFilters(previous => ({ ...previous, autoRegion: false, regionView: 'all' })); }, [member.user?.id, mode]);
   useEffect(() => {
     if (member.recoveryMode) { setMode('live'); setView('profile'); setSelectedBid(null); setMobileFilters(false); }
   }, [member.recoveryMode]);
@@ -82,14 +78,10 @@ export default function App() {
 
   function updateFilter<K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) {
     setFilters(previous => ({ ...previous, [key]: value })); setPage(1);
-    if (key === 'autoRegion') {
-      if (mode === 'live') { if (member.ready) member.updateWorkspace(current => ({ ...current, preferences: { autoRegion: value as boolean } })); }
-      else persist({ ...state, preferences: { ...state.preferences, [profile.id]: { autoRegion: value as boolean } } });
-    }
   }
 
   function resetFilters() {
-    setFilters({ ...DEFAULT_FILTERS, ...(mode === 'live' ? { category: '전체', status: '전체' } : {}), ...(view === 'bookmarks' ? { category: '전체', status: '전체', autoRegion: false } : { autoRegion: preferredAutoRegion }) });
+    setFilters({ ...DEFAULT_FILTERS, ...(mode === 'live' || view === 'bookmarks' ? { category: '전체', status: '전체' } : {}), autoRegion: false });
     setSearchInput(''); setPage(1);
   }
 
@@ -97,13 +89,13 @@ export default function App() {
     if (view === next) return;
     setSelectedBid(null); setMobileFilters(false); setPage(1);
     if (next === 'bookmarks') { setFilters({ ...DEFAULT_FILTERS, category: '전체', status: '전체', autoRegion: false }); setSearchInput(''); }
-    if (next === 'notices') { const saved = { ...noticeFiltersRef.current, autoRegion: preferredAutoRegion }; setFilters(saved); setSearchInput(saved.keyword); }
+    if (next === 'notices') { const saved = noticeFiltersRef.current; setFilters(saved); setSearchInput(saved.keyword); }
     setView(next);
   }
 
   function switchProfile(id: string) {
     persist({ ...state, activeProfileId: id }); setSelectedBid(null); setPage(1);
-    setFilters(previous => ({ ...previous, autoRegion: view === 'bookmarks' ? false : state.preferences[id]?.autoRegion ?? true, regionView: 'all' }));
+    setFilters(previous => ({ ...previous, autoRegion: false, regionView: 'all' }));
     setToast('테스트 업체를 전환했습니다. 업체 정보와 관심공고를 각각 확인해 보세요.');
   }
 
@@ -155,19 +147,21 @@ export default function App() {
   const pagination = pageGroup(safePage, pages);
   const visibleNotices = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const allCount = filters.autoRegion ? counts.matched : baseResults.length;
+  const selectedNotices = filtered.filter(bid => selectedNoticeIds.includes(bid.id));
+  const exportNotices = selectedNotices.length ? selectedNotices : filtered;
 
   async function exportResults(format: ExportFormat) {
     try {
       if (format === 'csv') {
-        saveDownload(new Blob([buildBidCsv(filtered)], { type: 'text/csv;charset=utf-8' }), mode === 'live' ? '입찰공고_목록.csv' : '입찰공고_예시목록.csv');
+        saveDownload(new Blob([buildBidCsv(exportNotices)], { type: 'text/csv;charset=utf-8' }), mode === 'live' ? '입찰공고_목록.csv' : '입찰공고_예시목록.csv');
       } else {
         const { buildBidWorkbook, getExcelFilename } = await import('./excel-export');
         const generatedAt = new Date();
-        const workbook = buildBidWorkbook(filtered, profile, generatedAt, mode);
+        const workbook = buildBidWorkbook(exportNotices, profile, generatedAt, mode);
         const bytes = new Uint8Array(await workbook.xlsx.writeBuffer());
         saveDownload(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), getExcelFilename(generatedAt));
       }
-      setToast(`현재 검색 결과 ${filtered.length}건을 ${format === 'xlsx' ? '서식이 적용된 엑셀' : 'CSV'} 파일로 다운로드했습니다.`);
+      setToast(`${selectedNotices.length ? '선택한 공고' : '현재 검색 결과'} ${exportNotices.length}건을 ${format === 'xlsx' ? '서식이 적용된 엑셀' : 'CSV'} 파일로 다운로드했습니다.`);
     } catch {
       setToast('다운로드 파일을 만들지 못했습니다. 다시 시도해 주세요.');
     }
@@ -209,17 +203,17 @@ export default function App() {
           {(!sidebarCollapsed || mobileFilters) && <FilterPanel filters={filters} onChange={updateFilter} onReset={resetFilters} onCollapse={() => { setSidebarCollapsed(true); setMobileFilters(false); }} mobileOpen={mobileFilters} onMobileClose={() => setMobileFilters(false)} />}
           <section className="results-panel panel" aria-label="입찰공고 검색 결과">
             {mode === 'live' && view === 'notices' && <div className="live-scope"><strong>{live.query.type} · {live.query.from} ~ {live.query.to}{live.query.keyword && ` · 공고명: ${live.query.keyword}`}</strong><p>원본 {live.meta?.totalCount.toLocaleString('ko-KR') ?? '—'}건 중 {live.items.length.toLocaleString('ko-KR')}건 불러옴 · 아래 조건과 내보내기는 불러온 공고에 적용됩니다.</p>{live.meta && <p>최근 조회 {formatDateTime(live.meta.fetchedAt)} · 첫 100건은 화면을 보는 동안 5분마다 갱신합니다.</p>}{live.loading && <p role="status">나라장터 공고를 불러오는 중입니다.</p>}{live.error && <p className="live-error" role="alert">{live.error}<button className="text-button" onClick={live.refresh}>다시 조회</button></p>}{live.meta?.warnings?.map(warning => <p className="live-warning" key={warning}>{warning}</p>)}</div>}{mode === 'live' && view === 'bookmarks' && <p className="live-scope">저장 시점의 공고와 현재 조회 자료를 표시합니다. 정정·취소와 최신 참가조건은 나라장터 원문에서 확인하세요.</p>}
-            <div className="results-toolbar"><div className="results-heading-group"><button className="button button-secondary show-filter-button" aria-label="상세 검색 열기" onClick={() => { if (window.matchMedia('(max-width: 1000px)').matches) setMobileFilters(true); else setSidebarCollapsed(false); }}><PanelLeftOpen size={16} /><span>상세 검색</span></button><h2>{view === 'bookmarks' ? '저장한 공고' : '검색 결과'} <strong>{filtered.length}</strong><span>건</span></h2></div><div className="results-actions"><ExportButton onExport={exportResults} /><label className="sr-only" htmlFor="sort-order">공고 정렬</label><select id="sort-order" className="sort-select" value={filters.sort} onChange={event => updateFilter('sort', event.target.value as SearchFilters['sort'])}><option value="deadline">마감 임박순</option><option value="newest">최신 공고순</option><option value="amountDesc">추정가격 높은순</option><option value="amountAsc">추정가격 낮은순</option></select></div></div>
+            <div className="results-toolbar"><div className="results-heading-group"><button className="button button-secondary show-filter-button" aria-label="상세 검색 열기" onClick={() => { if (window.matchMedia('(max-width: 1000px)').matches) setMobileFilters(true); else setSidebarCollapsed(false); }}><PanelLeftOpen size={16} /><span>상세 검색</span></button><h2>{view === 'bookmarks' ? '저장한 공고' : '불러온 공고 중 검색 결과'} <strong>{filtered.length}</strong><span>건</span></h2></div><div className="results-actions"><ExportButton onExport={exportResults} /><label className="sr-only" htmlFor="sort-order">공고 정렬</label><select id="sort-order" className="sort-select" value={filters.sort} onChange={event => updateFilter('sort', event.target.value as SearchFilters['sort'])}><option value="deadline">마감 임박순</option><option value="newest">최신 공고순</option><option value="amountDesc">추정가격 높은순</option><option value="amountAsc">추정가격 낮은순</option></select></div></div>
             <div className="result-filter-line"><div className="result-state-tabs" aria-label="지역 판정 필터"><button className={filters.regionView === 'all' ? 'active' : ''} onClick={() => updateFilter('regionView', 'all')}>전체 <span>{allCount}</span></button><button className={filters.regionView === 'matched' ? 'active' : ''} onClick={() => updateFilter('regionView', 'matched')}><span className="state-dot green" />지역 일치 <span>{counts.matched}</span></button><button className={filters.regionView === 'review' ? 'active' : ''} onClick={() => updateFilter('regionView', 'review')}><span className="state-dot amber" />확인 필요 <span>{counts.review}</span></button></div><button className={`excluded-button ${filters.regionView === 'excluded' ? 'active' : ''}`} onClick={() => updateFilter('regionView', filters.regionView === 'excluded' ? 'all' : 'excluded')}>{filters.regionView === 'excluded' ? '기본 목록으로 돌아가기' : `지역 제외 ${counts.excluded}건 보기`}<ChevronRight size={13} /></button></div>
             <div className="chips-line"><div className="filter-chips">{chips.map(chip => <button key={chip.label} onClick={chip.remove}>{chip.label}<X size={12} /></button>)}{filters.autoRegion && <span className="automatic-chip"><ShieldCheck size={13} />내 지역 자동필터</span>}{chips.length === 0 && !filters.autoRegion && <span className="muted">모든 조건의 공고를 표시합니다.</span>}</div><button className="text-button reset-results" onClick={resetFilters}>조건 초기화</button></div>
             {filters.regionView === 'excluded' && <div className="excluded-notice"><Info size={15} />등록한 업체 소재지와 지역조건이 맞지 않는 공고입니다. 공고 상세에서 제외 사유를 확인할 수 있습니다.</div>}
 
             {visibleNotices.length > 0 ? <>
-              <div className="bid-table-wrap"><table className="bid-table"><thead><tr><th className="bookmark-column"><Star size={16} aria-label="관심공고" /></th><th className="title-column">공고명 / 발주기관</th><th>공사 위치</th><th>참가 가능 지역</th><th>지역 판정</th><th>계약방법</th><th className="price-column">추정가격</th><th className="deadline-column">제출 마감</th><th className="detail-column"><span className="sr-only">상세</span></th></tr></thead><tbody>{visibleNotices.map(bid => { const region = assessRegion(bid, profile); const saved = bookmarks.includes(bid.id); return <tr key={bid.id} onClick={() => setSelectedBid(bid)}><td className="bookmark-column"><button className={`icon-button bookmark-button ${saved ? 'saved' : ''}`} aria-label={`${bid.title} ${saved ? '관심공고 해제' : '관심공고 저장'}`} aria-pressed={saved} onClick={event => { event.stopPropagation(); toggleBookmark(bid.id); }}><Star size={18} fill={saved ? 'currentColor' : 'none'} strokeWidth={1.6} /></button></td><td className="title-cell"><div className="bid-title-line"><span className={`bid-status status-${bid.status}`}>{bid.status}</span>{bid.revised && <span className="amendment-badge">정정</span>}<span className="bid-kind">{bid.type}</span>{mode === 'live' && member.workspace?.preparations[bid.id] && <span className="preparation-chip">{member.workspace.preparations[bid.id].stage}</span>}</div><button className="bid-title" onClick={event => { event.stopPropagation(); setSelectedBid(bid); }}>{bid.title}</button><div className="bid-agency">{bid.agency}<span>·</span>{bid.number}</div></td><td><div className="table-region"><span>{SHORT_PROVINCES[bid.province] ?? bid.province}</span><span>{bid.district}</span></div></td><td><span className={`allowed-region ${!bid.allowedRegions?.length ? 'muted' : ''}`}>{bid.allowedRegions?.map(area => SHORT_PROVINCES[area] ?? area).join(' · ') || '원문 확인'}</span></td><td><span className={`badge ${region.status === 'matched' ? 'badge-green' : region.status === 'review' ? 'badge-amber' : 'badge-gray'}`} title={region.reason}>{region.status === 'matched' && <Check size={11} />}{REGION_LABELS[region.status]}</span></td><td><span className="contract-method">{bid.contractMethod}</span></td><td className={`price-cell ${bid.estimatedPrice === null ? 'price-missing' : ''}`}><strong>{formatPrice(bid.estimatedPrice)}</strong></td><td><Deadline bid={bid} /></td><td className="detail-column"><button className="icon-button row-detail" aria-label={`${bid.title} 상세보기`} onClick={event => { event.stopPropagation(); setSelectedBid(bid); }}><ChevronRight size={17} /></button></td></tr>; })}</tbody></table></div>
-              <div className="bid-mobile-list">{visibleNotices.map(bid => { const region = assessRegion(bid, profile); const saved = bookmarks.includes(bid.id); return <article className="bid-mobile-card" key={bid.id}><div className="mobile-card-top"><div><span className={`bid-status status-${bid.status}`}>{bid.status}</span>{bid.revised && <span className="amendment-badge">정정</span>}<span className={`badge ${region.status === 'matched' ? 'badge-green' : region.status === 'review' ? 'badge-amber' : 'badge-gray'}`}>{REGION_LABELS[region.status]}</span>{mode === 'live' && member.workspace?.preparations[bid.id] && <span className="preparation-chip">{member.workspace.preparations[bid.id].stage}</span>}</div><button className={`icon-button bookmark-button ${saved ? 'saved' : ''}`} aria-label={`${bid.title} ${saved ? '관심공고 해제' : '관심공고 저장'}`} aria-pressed={saved} onClick={() => toggleBookmark(bid.id)}><Star size={19} fill={saved ? 'currentColor' : 'none'} /></button></div><button className="mobile-bid-title" onClick={() => setSelectedBid(bid)}>{bid.title}</button><p className="mobile-agency">{bid.agency}</p><div className="mobile-bid-meta"><span>공사 위치 <strong>{SHORT_PROVINCES[bid.province] ?? bid.province} {bid.district}</strong></span><span>참가 지역 <strong>{bid.allowedRegions?.map(area => SHORT_PROVINCES[area] ?? area).join(' · ') || '원문 확인'}</strong></span><span>계약방법 <strong>{bid.contractMethod}</strong></span></div><div className="mobile-card-bottom"><div><span>추정가격</span><strong>{formatPrice(bid.estimatedPrice)}</strong></div><Deadline bid={bid} /></div><button className="mobile-detail-button" onClick={() => setSelectedBid(bid)}>공고 상세보기<ArrowRight size={15} /></button></article>; })}</div>
+              {selectedNotices.length > 0 && <div className="selection-summary"><span>{selectedNotices.length}건 선택 · 다운로드 시 선택한 공고를 내보냅니다.</span><button onClick={() => setSelectedNoticeIds([])}>선택 해제</button></div>}
+              <NoticeList bids={visibleNotices} keyword={[filters.keyword, mode === 'live' ? live.query.keyword : ''].filter(Boolean).join(' ')} profile={profile} bookmarks={bookmarks} selected={selectedNoticeIds} onSelect={setSelectedNoticeIds} onOpen={setSelectedBid} onBookmark={toggleBookmark} />
             </> : <div className="empty-state"><div className="empty-icon">{view === 'bookmarks' && bookmarks.length === 0 ? <Bookmark size={30} /> : <FileSearch size={32} />}</div><h3>{mode === 'live' && live.loading ? '공고를 불러오는 중입니다' : mode === 'live' && live.error && view === 'notices' ? '나라장터 연결을 확인해 주세요' : view === 'bookmarks' && bookmarks.length === 0 ? '아직 저장한 관심공고가 없습니다' : '조건에 맞는 공고가 없습니다'}</h3><p>{view === 'bookmarks' && bookmarks.length === 0 ? '공고 옆 별표를 누르면 이 업체의 관심공고에 저장됩니다.' : '검색어를 바꾸거나 선택한 조건을 조금 넓혀보세요.'}</p><button className="button button-primary" onClick={view === 'bookmarks' && bookmarks.length === 0 ? () => navigate('notices') : resetFilters}>{view === 'bookmarks' && bookmarks.length === 0 ? '입찰공고 둘러보기' : '검색 조건 초기화'}<ArrowRight size={16} /></button></div>}
 
-            {filtered.length > 0 && <div className="results-bottom"><span className="result-range">전체 {filtered.length}건 중 {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)}건</span><nav className="pagination" aria-label="검색 결과 페이지"><button aria-label="이전 10페이지" disabled={pagination.previous === null} onClick={() => pagination.previous !== null && setPage(pagination.previous)}><ChevronLeft size={15} /></button><div className="pagination-numbers">{pagination.items.map(number => <button key={number} aria-label={`${number}페이지`} aria-current={safePage === number ? 'page' : undefined} className={safePage === number ? 'active' : ''} onClick={() => setPage(number)}>{number}</button>)}</div><button aria-label="다음 10페이지" disabled={pagination.next === null} onClick={() => pagination.next !== null && setPage(pagination.next)}><ChevronRight size={15} /></button></nav><span className="page-size-label">8개씩 보기</span></div>}
+            {filtered.length > 0 && <div className="results-bottom"><span className="result-range">불러온 검색 결과 {filtered.length}건 중 {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)}건</span><nav className="pagination" aria-label="검색 결과 페이지"><button aria-label="이전 10페이지" disabled={pagination.previous === null} onClick={() => pagination.previous !== null && setPage(pagination.previous)}><ChevronLeft size={15} /></button><div className="pagination-numbers">{pagination.items.map(number => <button key={number} aria-label={`${number}페이지`} aria-current={safePage === number ? 'page' : undefined} className={safePage === number ? 'active' : ''} onClick={() => setPage(number)}>{number}</button>)}</div><button aria-label="다음 10페이지" disabled={pagination.next === null} onClick={() => pagination.next !== null && setPage(pagination.next)}><ChevronRight size={15} /></button></nav><span className="page-size-label">30개씩 보기</span></div>}
             {mode === 'live' && view === 'notices' && live.meta?.hasMore && <button className="button button-secondary live-more" disabled={live.loading} onClick={live.loadMore}>나라장터 공고 100건 더 불러오기</button>}
           </section>
         </div>

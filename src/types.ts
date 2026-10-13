@@ -12,6 +12,8 @@ export interface BidNotice {
   type: '공사' | '용역'; category: Category; province: string; district: string;
   allowedRegions: string[] | null; estimatedPrice: number | null;
   plannedAmount?: number | null;
+  demandAgency?: string;
+  noticeKind?: string;
   contractMethod: string; status: BidStatus;
   postedAt: string; deadline: string; openingAt: string; registrationDeadline: string;
   licenses: string[]; duration: string; description: string; requirements: string[];

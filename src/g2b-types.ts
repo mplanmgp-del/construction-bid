@@ -87,6 +87,12 @@ export interface G2bOpeningResult {
 }
 export type G2bResultPage = G2bPage<G2bOpeningResult>;
 
+export interface G2bResultSummary {
+  number: string; revision: string; type: G2bBusinessType;
+  firstCompanies: string[]; winnerCompanies: string[]; result: string;
+  complete: boolean; fetchedAt: string;
+}
+
 export interface G2bApiError {
   error: { code: string; message: string };
 }

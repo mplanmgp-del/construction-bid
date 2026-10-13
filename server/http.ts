@@ -14,10 +14,17 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
   try {
     if (path === '/api/notices') return { status: 200, body: await api.notices(parseSearch(params)) };
     if (path === '/api/results') return { status: 200, body: await api.results(parseSearch(params, 7)) };
-    if (path === '/api/detail' || path === '/api/related') {
+    if (path === '/api/detail' || path === '/api/related' || path === '/api/result-summary') {
       const number = params.get('number') || '', revision = params.get('revision') || '', type = params.get('type');
       if (!/^[a-zA-Z0-9_-]{1,40}$/.test(number) || !/^\d{1,3}$/.test(revision) || (type !== '공사' && type !== '용역')) {
         throw new G2bError(400, 'INVALID_QUERY', '공고번호, 차수, 업무 구분을 확인해 주세요.');
+      }
+      if (path === '/api/result-summary') {
+        const openingAt = params.get('openingAt') || '';
+        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\+09:00|Z)$/.test(openingAt) || !Number.isFinite(Date.parse(openingAt))) {
+          throw new G2bError(400, 'INVALID_QUERY', '개찰 일시를 확인해 주세요.');
+        }
+        return { status: 200, body: await api.resultSummary(number, revision.padStart(3, '0'), type, openingAt) };
       }
       return { status: 200, body: await (path === '/api/related' ? api.related : api.detail)(number, revision.padStart(3, '0'), type) };
     }

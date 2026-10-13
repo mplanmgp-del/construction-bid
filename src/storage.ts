@@ -15,7 +15,7 @@ function initialState(defaultProfiles: CompanyProfile[]): PrototypeState {
   return {
     version: 1, activeProfileId: profiles[0].id, profiles,
     bookmarks: Object.fromEntries(profiles.map(profile => [profile.id, []])),
-    preferences: Object.fromEntries(profiles.map(profile => [profile.id, { autoRegion: true }])),
+    preferences: Object.fromEntries(profiles.map(profile => [profile.id, { autoRegion: false }])),
   };
 }
 
@@ -40,7 +40,7 @@ export function loadPrototypeState(defaultProfiles: CompanyProfile[], storage?: 
     for (const profile of profiles) {
       const ids = saved.bookmarks?.[profile.id];
       bookmarks[profile.id] = Array.isArray(ids) ? [...new Set(ids.filter((id: unknown): id is string => typeof id === 'string'))] as string[] : [];
-      preferences[profile.id] = { autoRegion: typeof saved.preferences?.[profile.id]?.autoRegion === 'boolean' ? saved.preferences[profile.id].autoRegion : true };
+      preferences[profile.id] = { autoRegion: typeof saved.preferences?.[profile.id]?.autoRegion === 'boolean' ? saved.preferences[profile.id].autoRegion : false };
     }
     return {
       state: { version: 1, profiles, bookmarks, preferences, activeProfileId: profiles.some(profile => profile.id === saved.activeProfileId) ? saved.activeProfileId : profiles[0].id },

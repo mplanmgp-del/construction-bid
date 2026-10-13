@@ -37,7 +37,7 @@ export function emptyMemberWorkspace(userId: string, email = ''): MemberWorkspac
   return {
     version: 1,
     profile: { id: userId, companyName: '', province: '', district: '', address: '', licenses: [], contactName: '', email },
-    bookmarks: [], preferences: { autoRegion: true }, preparations: {}, noticeSnapshots: {},
+    bookmarks: [], preferences: { autoRegion: false }, preparations: {}, noticeSnapshots: {},
   };
 }
 
