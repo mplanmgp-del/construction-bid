@@ -93,7 +93,7 @@ describe('G2B integrations and bounded reads', () => {
     const fetcher = vi.fn(async (url: URL | string | Request) => String(url).includes('PrtcptPsblRgn')
       ? response([{ ...record(), prtcptPsblRgnNm: '서울특별시' }], 6000) : response([record()]));
     const result = await createG2bClient({ serviceKey: 'test', fetcher: fetcher as typeof fetch }).notices(query());
-    expect(fetcher).toHaveBeenCalledTimes(6);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     expect(result.items[0].allowedRegions).toBeNull();
     expect(result.warnings?.length).toBe(1);
   });
@@ -109,7 +109,7 @@ describe('G2B integrations and bounded reads', () => {
     const fetcher = vi.fn(async (url: URL | string | Request) => {
       if (String(url).includes('PrtcptPsblRgn')) {
         clock += 15_000;
-        return response([{ ...record(), prtcptPsblRgnNm: '서울특별시' }], 6000);
+        return response([{ ...record(), prtcptPsblRgnNm: '서울특별시' }], 4000);
       }
       return response([record()]);
     });

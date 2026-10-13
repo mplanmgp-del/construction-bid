@@ -210,6 +210,8 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
           // The provider silently resets 1000 to 10; live verification confirms 999 is supported.
           bidNtceOrd: '000', pageNo: String(page), numOfRows: '999',
         }, Math.min(15_000, remaining));
+        // This bounded lookup cannot be complete; avoid downloading pages that would be discarded.
+        if (result.totalCount > MAX_REGION_PAGES * 999) return { rows: [] as Row[], complete: false };
         rows.push(...result.items);
         if (rows.length >= result.totalCount) return { rows, complete: true };
         if (!result.items.length) break;

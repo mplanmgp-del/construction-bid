@@ -4,7 +4,7 @@ import { startSearchWindows } from './start-range';
 
 export interface NoticeQuery { type: G2bBusinessType | '공사·용역'; from: string; to: string; keyword: string }
 
-export async function fetchStartedNotices(query: NoticeQuery, signal: AbortSignal, progress: (done: number, total: number) => void): Promise<G2bNoticePage> {
+export async function fetchStartedNotices(query: NoticeQuery, signal: AbortSignal, progress: (done: number, total: number) => void, options: { force?: boolean } = {}): Promise<G2bNoticePage> {
   const types: G2bBusinessType[] = query.type === '공사·용역' ? ['공사', '용역'] : [query.type];
   const jobs = startSearchWindows(query.from, query.to).flatMap((_, window) => types.map(type => ({ type, window })));
   const results: G2bNoticePage[] = [];
@@ -15,10 +15,10 @@ export async function fetchStartedNotices(query: NoticeQuery, signal: AbortSigna
   let next = 0;
   progress(0, jobs.length);
   try {
-    await Promise.all(Array.from({ length: 2 }, async () => {
+    await Promise.all(Array.from({ length: 4 }, async () => {
       while (next < jobs.length && !controller.signal.aborted) {
         const job = jobs[next++];
-        const params = new URLSearchParams({ ...query, type: job.type, window: String(job.window) });
+        const params = new URLSearchParams({ ...query, type: job.type, window: String(job.window), ...(options.force ? { refresh: '1' } : {}) });
         const result = await fetchApi<G2bNoticePage>(`/api/notices-start?${params}`, controller.signal);
         if (result.hasMore || result.items.length !== result.totalCount) throw new Error('전체 공고 조회가 완료되지 않았습니다. 다시 조회해 주세요.');
         results.push(result); progress(results.length, jobs.length);

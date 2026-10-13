@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.3",
+    "@vercel/functions": "3.9.11",
     "exceljs": "^4.4.0",
     "jspdf": "4.2.1",
     "jspdf-autotable": "5.0.8",
