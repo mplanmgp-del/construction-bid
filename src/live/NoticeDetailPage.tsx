@@ -5,6 +5,7 @@ import type { BidNotice } from '../types';
 import { formatDateTime } from '../domain';
 import { currentNotice, fetchApi, safeG2bUrl } from './client';
 import { CompleteNoticeDetails, type CompleteNoticeDetailsHandle } from './CompleteNoticeDetails';
+import { noticeState } from '../notice-status';
 
 function queryNotice() {
   const params = new URLSearchParams(window.location.search);
@@ -25,10 +26,19 @@ export function NoticeDetailPage() {
   const [error, setError] = useState(query.valid ? '' : '공고번호 또는 차수가 올바르지 않습니다. 입찰공고 목록에서 공고를 다시 선택해 주세요.');
   const [retry, setRetry] = useState(0);
   const [toast, setToast] = useState('');
+  const [statusNow, setStatusNow] = useState(() => Date.now());
   const printRef = useRef<CompleteNoticeDetailsHandle>(null);
   const requestedUrl = safeG2bUrl(`https://www.g2b.go.kr/link/PNPE027_01/?${new URLSearchParams({ bidPbancNo: query.number, bidPbancOrd: query.revision })}`);
   const sourceUrl = safeG2bUrl(detail?.sourceUrl || detail?.notice?.detailUrl) || (query.valid ? requestedUrl : undefined);
   const bid = detail ? currentNotice(detail.notice ?? emptyNotice(detail, query.type)) : null;
+  const state = bid ? noticeState(bid, statusNow) : null;
+
+  useEffect(() => {
+    const update = () => setStatusNow(Date.now());
+    const timer = window.setInterval(update, 60_000);
+    window.addEventListener('focus', update);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', update); };
+  }, []);
 
   useEffect(() => {
     if (!query.valid) return;
@@ -56,7 +66,7 @@ export function NoticeDetailPage() {
       {error && <section className="fnd-error-state" role="alert"><Info size={25} /><div><h2>공고 상세 조회를 완료하지 못했습니다</h2><p>{error}</p></div>{query.valid && <button type="button" className="fnd-secondary-button" onClick={() => setRetry(value => value + 1)} disabled={loading}><RefreshCw size={16} />다시 조회</button>}{sourceUrl && <a href={sourceUrl} target="_blank" rel="noopener noreferrer">나라장터 원문 <ExternalLink size={16} /></a>}</section>}
       {detail && bid && <>
         <section className="fnd-hero" aria-labelledby="fnd-notice-title">
-          <div className="fnd-hero-top"><div className="fnd-badges"><span className={`fnd-status${bid.status === '마감' || bid.status === '취소' ? ' is-muted' : ''}`}>{bid.status}</span><span>{bid.type}</span>{bid.contractMethod && <span>{bid.contractMethod}</span>}</div><div className="fnd-hero-actions"><button type="button" onClick={copyNumber} aria-label="공고번호 복사" title="공고번호 복사"><Copy size={18} /></button><button type="button" onClick={() => printRef.current?.openPrint()} aria-label="공고 상세 인쇄" title="인쇄용 PDF 만들기"><Printer size={18} /></button></div></div>
+          <div className="fnd-hero-top"><div className="fnd-badges"><span className={`fnd-status is-${state?.tone}`} title={state?.description}>{state?.label}</span><span>{bid.type}</span>{bid.contractMethod && <span>{bid.contractMethod}</span>}</div><div className="fnd-hero-actions"><button type="button" onClick={copyNumber} aria-label="공고번호 복사" title="공고번호 복사"><Copy size={18} /></button><button type="button" onClick={() => printRef.current?.openPrint()} aria-label="공고 상세 인쇄" title="인쇄용 PDF 만들기"><Printer size={18} /></button></div></div>
           <h1 id="fnd-notice-title">{bid.title || '-'}</h1>
           <div className="fnd-hero-meta"><span><Building2 size={16} />{bid.agency || '-'}</span><span className="fnd-notice-number">{bid.number}-{bid.revision}</span></div>
           <div className="fnd-hero-bottom"><div><MapPin size={16} /><span><b>참가 가능 지역</b> {detail.allowedRegions?.join(' · ') || '-'}</span></div><div><FileText size={16} /><span><b>업종</b> {detail.licenses.join(' · ') || '-'}</span></div></div>

@@ -71,3 +71,8 @@ body.fnd-document{margin:0;min-width:280px;background:#f4f6fa;font-family:'Noto 
 .fnd-skeleton-lines span{height:18px;border-radius:6px;background:#edf2f8}
 .fnd-skeleton-lines span:nth-child(2){width:85%}.fnd-skeleton-lines span:nth-child(3){width:65%}
 .fnd-key-summary .fnd-estimate>strong{overflow-wrap:anywhere}
+.fnd-badges .fnd-status.is-active{background:#20ae42;border-color:#20ae42;color:#fff}
+.fnd-badges .fnd-status.is-urgent{background:#d84936;border-color:#d84936;color:#fff}
+.fnd-badges .fnd-status.is-scheduled{background:#ec7600;border-color:#ec7600;color:#fff}
+.fnd-badges .fnd-status.is-opened{background:#445567;border-color:#445567;color:#fff}
+.fnd-badges .fnd-status.is-unknown{background:#edf0f4;border-color:#edf0f4;color:#5b697c}
