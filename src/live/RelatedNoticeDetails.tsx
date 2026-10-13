@@ -19,7 +19,7 @@ function RelatedRecord({ record }: { record: G2bRelatedRecord }) {
     <div className="rnd-record-heading"><h4>{record.title || '공개 연관 정보'}</h4>{sourceUrl && <a href={sourceUrl} target="_blank" rel="noopener noreferrer" aria-label={`${record.title || '연관 정보'} 나라장터 원문 열기`}>원문 <ExternalLink size={15} /></a>}</div>
     <dl className="rnd-fields">{record.fields.map(field => {
       const missing = field.value === null || field.value === '';
-      return <div className={`rnd-field${field.wide ? ' is-wide' : ''}`} key={field.key}><dt>{field.label}</dt><dd className={missing ? 'rnd-missing' : undefined}>{missing ? '미제공' : field.value}{field.note && <small>{field.note}</small>}</dd></div>;
+      return <div className={`rnd-field${field.wide ? ' is-wide' : ''}`} key={field.key}><dt>{field.label}</dt><dd className={missing ? 'rnd-missing' : undefined}>{missing ? '-' : field.value}{field.note && <small>{field.note}</small>}</dd></div>;
     })}</dl>
     {record.fields.length === 0 && <p className="rnd-empty-fields">공개된 추가 항목이 없습니다.</p>}
   </article>;

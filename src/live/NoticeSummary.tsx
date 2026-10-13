@@ -10,7 +10,7 @@ export function NoticeSummary({ bid, detail, pending = false, failed = false }: 
   const budget = detail?.sections?.flatMap(section => section.fields).find(field => field.key === 'bdgtAmt');
   // Once returned, the current detail is authoritative, including an explicit missing value.
   const planned = budget ? budget.value : bid.plannedAmount == null ? null : formatPrice(bid.plannedAmount);
-  const unknown = pending ? '조회 중' : failed ? '조회 실패' : '원문 확인 필요';
+  const unknown = pending ? '조회 중' : failed ? '조회 실패' : '-';
   return <div className="fnd-key-summary" aria-label="입찰 핵심 정보">
     <div className="fnd-estimate"><span>추정가격</span><strong>{bid.estimatedPrice == null ? unknown : formatPrice(bid.estimatedPrice)}</strong><small>공고에 공개된 추정가격 기준</small></div>
     <div className="fnd-estimate fnd-base-amount"><span>예정금액</span><strong>{planned || unknown}</strong><small>{bid.type === '공사' ? '공고에 공개된 공사 예정금액 기준' : '공고에 공개된 사업 예산금액 기준'}</small></div>

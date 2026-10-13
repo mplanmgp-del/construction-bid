@@ -57,9 +57,9 @@ export function NoticeDetailPage() {
       {detail && bid && <>
         <section className="fnd-hero" aria-labelledby="fnd-notice-title">
           <div className="fnd-hero-top"><div className="fnd-badges"><span className={`fnd-status${bid.status === '마감' || bid.status === '취소' ? ' is-muted' : ''}`}>{bid.status}</span><span>{bid.type}</span>{bid.contractMethod && <span>{bid.contractMethod}</span>}</div><div className="fnd-hero-actions"><button type="button" onClick={copyNumber} aria-label="공고번호 복사" title="공고번호 복사"><Copy size={18} /></button><button type="button" onClick={() => printRef.current?.openPrint()} aria-label="공고 상세 인쇄" title="인쇄용 PDF 만들기"><Printer size={18} /></button></div></div>
-          <h1 id="fnd-notice-title">{bid.title || '공고명 미제공'}</h1>
-          <div className="fnd-hero-meta"><span><Building2 size={16} />{bid.agency || '공고기관 미제공'}</span><span className="fnd-notice-number">{bid.number}-{bid.revision}</span></div>
-          <div className="fnd-hero-bottom"><div><MapPin size={16} /><span><b>참가 가능 지역</b> {detail.allowedRegions?.join(' · ') || '미제공'}</span></div><div><FileText size={16} /><span><b>업종</b> {detail.licenses.join(' · ') || '미제공'}</span></div></div>
+          <h1 id="fnd-notice-title">{bid.title || '-'}</h1>
+          <div className="fnd-hero-meta"><span><Building2 size={16} />{bid.agency || '-'}</span><span className="fnd-notice-number">{bid.number}-{bid.revision}</span></div>
+          <div className="fnd-hero-bottom"><div><MapPin size={16} /><span><b>참가 가능 지역</b> {detail.allowedRegions?.join(' · ') || '-'}</span></div><div><FileText size={16} /><span><b>업종</b> {detail.licenses.join(' · ') || '-'}</span></div></div>
         </section>
         {detail.warnings.length > 0 && <aside className="fnd-data-warning"><Info size={18} /><div><strong>일부 상세 항목은 확인이 필요합니다</strong><ul>{detail.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div></aside>}
         <CompleteNoticeDetails detail={detail} bid={bid} printRef={printRef} />

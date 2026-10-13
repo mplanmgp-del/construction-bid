@@ -55,7 +55,7 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true, printRe
   const matchingSections = sections.map(section => ({
     ...section,
     fields: !search || section.label.toLocaleLowerCase('ko-KR').includes(search) ? section.fields : section.fields.filter(field =>
-      `${field.label} ${field.value ?? '미제공'} ${field.note ?? ''}`.normalize('NFKC').toLocaleLowerCase('ko-KR').includes(search)),
+      `${field.label} ${field.value ?? '-'} ${field.note ?? ''}`.normalize('NFKC').toLocaleLowerCase('ko-KR').includes(search)),
   })).filter(section => section.fields.length > 0);
   const totalFields = sections.reduce((total, section) => total + section.fields.length, 0);
   const matchingCount = matchingSections.reduce((total, section) => total + section.fields.length, 0);
@@ -91,8 +91,8 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true, printRe
         <h3 id={`${sectionId}-heading`}><button className="fnd-section-toggle" type="button" onClick={() => { if (search) setQuery(''); toggle(section.id); }} aria-expanded={open} aria-controls={`${sectionId}-content`}><span className="fnd-section-icon">{icons[section.id] || <ClipboardList />}</span><span>{section.label}</span><span className="fnd-field-count">{section.fields.length}개 항목</span><ChevronDown className="fnd-chevron" size={20} /></button></h3>
         <div id={`${sectionId}-content`} hidden={!open} className="fnd-section-content"><dl className="fnd-fields">{section.fields.map(field => {
           const absent = field.value === null || field.value === '';
-          return <div key={field.key} className={`fnd-field${field.wide ? ' is-wide' : ''}`}><dt>{field.label}</dt><dd className={absent ? 'fnd-missing' : undefined}>{absent ? '미제공' : field.value}{field.note && !absent && <small>{field.note}</small>}</dd></div>;
-        })}</dl>{missing && <p className="fnd-section-note"><Info size={15} /><span>미제공 항목은 현재 공개 데이터에 값이 없습니다. 공고 원문과 첨부서류에서 확인해 주세요.{sourceUrl && <> <a href={sourceUrl} target="_blank" rel="noopener noreferrer">원문 확인 <ExternalLink size={12} /></a></>}</span></p>}</div>
+          return <div key={field.key} className={`fnd-field${field.wide ? ' is-wide' : ''}`}><dt>{field.label}</dt><dd className={absent ? 'fnd-missing' : undefined}>{absent ? '-' : field.value}{field.note && !absent && <small>{field.note}</small>}</dd></div>;
+        })}</dl>{missing && <p className="fnd-section-note"><Info size={15} /><span>‘-’는 현재 공개 데이터에 값이 없는 항목입니다. 공고 원문과 첨부서류에서 확인해 주세요.{sourceUrl && <> <a href={sourceUrl} target="_blank" rel="noopener noreferrer">원문 확인 <ExternalLink size={12} /></a></>}</span></p>}</div>
       </section>;
     })}</div>
     {search && matchingCount === 0 && <div className="fnd-no-results"><Search size={26} /><strong>일치하는 상세 항목이 없습니다.</strong><button type="button" onClick={() => setQuery('')}>전체 항목 보기</button></div>}
@@ -101,7 +101,7 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true, printRe
       {documents.length > 0 ? <ul className="fnd-document-list">{documents.map((document, index) => {
         const url = safeG2bUrl(document.url);
         const extension = /\.([a-z0-9]{1,6})$/i.exec(document.name)?.[1].toUpperCase() || 'FILE';
-        return <li key={`${document.name}-${index}`}><span className={`fnd-file-type${extension === 'PDF' ? ' is-pdf' : extension === 'XLSX' || extension === 'XLS' ? ' is-sheet' : ''}`}><FileText size={20} /><b>{extension}</b></span><div className="fnd-file-info"><strong>{document.name}</strong>{document.size && <span>{document.size}</span>}</div>{url ? <a className="fnd-file-open" href={url} target="_blank" rel="noopener noreferrer" aria-label={`${document.name} 원본 열기`}><span>원본 열기</span><ExternalLink size={17} /></a> : sourceUrl ? <a className="fnd-file-open" href={sourceUrl} target="_blank" rel="noopener noreferrer" aria-label={`${document.name} 나라장터 원문에서 확인`}><span>원문 확인</span><ExternalLink size={17} /></a> : <span className="fnd-file-unavailable">링크 미제공</span>}</li>;
+        return <li key={`${document.name}-${index}`}><span className={`fnd-file-type${extension === 'PDF' ? ' is-pdf' : extension === 'XLSX' || extension === 'XLS' ? ' is-sheet' : ''}`}><FileText size={20} /><b>{extension}</b></span><div className="fnd-file-info"><strong>{document.name}</strong>{document.size && <span>{document.size.includes('미제공') ? '-' : document.size}</span>}</div>{url ? <a className="fnd-file-open" href={url} target="_blank" rel="noopener noreferrer" aria-label={`${document.name} 원본 열기`}><span>원본 열기</span><ExternalLink size={17} /></a> : sourceUrl ? <a className="fnd-file-open" href={sourceUrl} target="_blank" rel="noopener noreferrer" aria-label={`${document.name} 나라장터 원문에서 확인`}><span>원문 확인</span><ExternalLink size={17} /></a> : <span className="fnd-file-unavailable">-</span>}</li>;
       })}</ul> : <p className="fnd-doc-empty">공개 데이터에서 제공된 첨부서류가 없습니다.{sourceUrl && ' 나라장터 원문에서 첨부 여부를 확인해 주세요.'}</p>}
       <p className="fnd-section-note"><Info size={15} />첨부서류는 발주기관이 게시한 나라장터 원본 링크로 열립니다.</p>
     </section>

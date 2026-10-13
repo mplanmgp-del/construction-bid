@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NoticeSummary, PendingNoticeDetails } from '../src/live/NoticeSummary';
+import { CompleteNoticeDetails } from '../src/live/CompleteNoticeDetails';
 import { BidDetail } from '../src/components/BidDetail';
 import { mapNotice } from '../server/g2b';
 import type { G2bNoticeDetail } from '../src/g2b-types';
@@ -29,8 +30,11 @@ describe('notice summary through detail loading', () => {
     expect(failed).toContain('aria-busy="false"');
     const missing = { ...detail, sections: [{ ...detail.sections![0], fields: [{ key: 'bdgtAmt', label: '공사 예정금액', value: null }] }] };
     const html = renderToStaticMarkup(<NoticeSummary bid={bid} detail={missing} />);
-    expect(html).toContain('원문 확인 필요');
+    expect(html).toContain('<strong>-</strong>');
     expect(html).not.toContain('94,340,000');
+    const full = renderToStaticMarkup(<CompleteNoticeDetails bid={bid} detail={missing} />);
+    expect(full).toContain('class="fnd-missing">-</dd>');
+    expect(full).not.toContain('>미제공<');
     expect(renderToStaticMarkup(<NoticeSummary bid={{ ...bid, plannedAmount: 0 }} />)).toContain('>0원<');
   });
   it('renders the shared summary on the first drawer render instead of the old simple card', () => {
