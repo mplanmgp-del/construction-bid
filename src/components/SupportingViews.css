@@ -211,3 +211,13 @@
   .detail-footer > p { font-size: 9px; }
   .detail-footer .button { font-size: 11px; padding-left: 12px; padding-right: 12px; }
 }
+
+/* Use one scroll surface so short screens retain access to the full notice. */
+.detail-drawer{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin}
+.detail-drawer>.detail-content{flex:none;min-height:auto;overflow:visible}
+.detail-tabs{overflow-x:auto;overflow-y:hidden;gap:20px;min-height:52px;scrollbar-width:thin}
+.detail-tabs>button{flex-shrink:0;white-space:nowrap}
+.detail-live-status{flex-wrap:wrap}
+.detail-live-status>div{flex-wrap:wrap;min-width:0}
+.detail-footer{flex-wrap:wrap}
+@media(max-width:480px){.detail-tabs{padding:0 16px;gap:18px}.detail-footer{padding:14px 16px}.detail-drawer-complete .detail-title-row h2{font-size:18px}}
