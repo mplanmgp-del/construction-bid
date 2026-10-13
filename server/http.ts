@@ -1,5 +1,6 @@
 import { createG2bClient, G2bError, parseSearch } from './g2b.ts';
 import { loadPublicSearch } from './public-search-cache.ts';
+import { ProviderQuotaError } from './provider-quota.ts';
 import type { G2bApiError } from '../src/g2b-types.ts';
 
 type Client = ReturnType<typeof createG2bClient>;
@@ -12,13 +13,14 @@ function serverClient(force = false) {
   return client;
 }
 
-export async function handleG2bRequest(path: string, params: URLSearchParams, api: Client = serverClient(params.get('refresh') === '1')): Promise<{ status: number; body: unknown; cacheStatus?: string }> {
+export async function handleG2bRequest(path: string, params: URLSearchParams, api: Client = serverClient(params.get('refresh') === '1')): Promise<{ status: number; body: unknown; cacheStatus?: string; retryAfterSeconds?: number }> {
   try {
     if (path === '/api/notices') return { status: 200, body: await api.notices(parseSearch(params)) };
     if (path === '/api/notices-start') {
       const index = params.get('window') ?? '';
       if (!/^[0-3]$/.test(index)) throw new G2bError(400, 'INVALID_QUERY', '조회 구간이 올바르지 않습니다.');
       const query = parseSearch(params);
+      if (!query.keyword) throw new G2bError(400, 'KEYWORD_REQUIRED', '철거·석면 등 검색할 공고명을 입력해 주세요.');
       const key = JSON.stringify([query.type, query.from, query.to, query.keyword, Number(index)]);
       const result = await loadPublicSearch(key, () => api.startNotices(query, Number(index)), { force: params.get('refresh') === '1' });
       return { status: 200, body: result.body, cacheStatus: result.status };
@@ -40,9 +42,10 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
     }
     return { status: 404, body: { error: { code: 'NOT_FOUND', message: '존재하지 않는 API입니다.' } } };
   } catch (error) {
-    const known = error instanceof G2bError ? error : new G2bError(500, 'INTERNAL_ERROR', '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    const body: G2bApiError = { error: { code: known.code, message: known.message } };
-    return { status: known.status, body };
+    const known = error instanceof G2bError || error instanceof ProviderQuotaError ? error : new G2bError(500, 'INTERNAL_ERROR', '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    const retryAfterSeconds = known instanceof ProviderQuotaError ? known.retryAfterSeconds : undefined;
+    const body: G2bApiError = { error: { code: known.code, message: known.message, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) } };
+    return { status: known.status, body, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) };
   }
 }
 
@@ -72,6 +75,7 @@ export async function nodeApiHandler(req: NodeRequest, res: NodeResponse) {
   const url = new URL(req.url || '/', 'http://localhost');
   const result = await handleG2bRequest(url.pathname, url.searchParams);
   res.statusCode = result.status;
+  if (result.retryAfterSeconds) res.setHeader('Retry-After', String(result.retryAfterSeconds));
   if (result.cacheStatus) res.setHeader('X-Search-Cache', result.cacheStatus);
   // Only public, complete search snapshots are shared. Errors and explicit refreshes never enter CDN cache.
   if (url.pathname === '/api/notices-start' && result.status === 200 && url.searchParams.get('refresh') !== '1' && result.cacheStatus !== 'STALE') {

@@ -36,9 +36,28 @@ export function currentNotice(bid: BidNotice, now = new Date()): BidNotice {
   return Number.isFinite(deadline) && deadline < now.getTime() ? { ...bid, status: '마감' } : bid;
 }
 
+export class ApiError extends Error {
+  constructor(message: string, public readonly code: string, public readonly status: number, public readonly retryAfterSeconds?: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+function retryAfter(response: Response, value: unknown): number | undefined {
+  const header = response.headers.get('Retry-After');
+  const seconds = header === null ? Number.NaN : /^\d+$/.test(header) ? Number(header) : (Date.parse(header) - Date.now()) / 1000;
+  const body = typeof value === 'number' ? value : Number.NaN;
+  const valid = [seconds, body].filter(number => Number.isFinite(number) && number >= 0);
+  return valid.length ? Math.ceil(Math.max(...valid)) : undefined;
+}
+
 export async function fetchApi<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal, headers: { Accept: 'application/json' } });
   const data = await response.json().catch(() => null);
-  if (!response.ok || !data || data.error) throw new Error(data?.error?.message || '나라장터 데이터를 가져오지 못했습니다. 잠시 후 다시 조회해 주세요.');
+  if (!response.ok || !data || data.error) throw new ApiError(
+    typeof data?.error?.message === 'string' ? data.error.message : '나라장터 데이터를 가져오지 못했습니다. 잠시 후 다시 조회해 주세요.',
+    typeof data?.error?.code === 'string' ? data.error.code : 'API_ERROR', response.status,
+    retryAfter(response, data?.error?.retryAfterSeconds),
+  );
   return data as T;
 }

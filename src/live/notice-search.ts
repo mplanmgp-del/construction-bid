@@ -1,10 +1,11 @@
 import type { G2bBusinessType, G2bNoticePage } from '../g2b-types';
-import { fetchApi, mergeById } from './client';
+import { ApiError, fetchApi, mergeById } from './client';
 import { startSearchWindows } from './start-range';
 
 export interface NoticeQuery { type: G2bBusinessType | '공사·용역'; from: string; to: string; keyword: string }
 
 export async function fetchStartedNotices(query: NoticeQuery, signal: AbortSignal, progress: (done: number, total: number) => void, options: { force?: boolean } = {}): Promise<G2bNoticePage> {
+  if (!query.keyword.trim()) throw new ApiError('검색할 공고명을 입력해 주세요.', 'KEYWORD_REQUIRED', 400);
   const types: G2bBusinessType[] = query.type === '공사·용역' ? ['공사', '용역'] : [query.type];
   const jobs = startSearchWindows(query.from, query.to).flatMap((_, window) => types.map(type => ({ type, window })));
   const results: G2bNoticePage[] = [];

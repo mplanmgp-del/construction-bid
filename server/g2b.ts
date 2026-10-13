@@ -3,6 +3,7 @@ import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage, G2bOpeningResult,
 import { mapDetailSections } from './g2b-detail.ts';
 import { createRelatedLoader } from './g2b-related.ts';
 import { startSearchWindows } from '../src/live/start-range.ts';
+import { checkProviderQuota, recordProviderQuota, ProviderQuotaError, PROVIDER_QUOTA_COOLDOWN_MS } from './provider-quota.ts';
 
 type Row = Record<string, unknown>;
 const BID_BASE = 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/';
@@ -139,9 +140,9 @@ export function parseSearch(params: URLSearchParams, maximumDays = 31): SearchQu
   if (keyword.length > 100 || /[\u0000-\u001f]/.test(keyword)) throw new G2bError(400, 'INVALID_QUERY', '검색어는 100자 이내로 입력해 주세요.');
   return { type, from, to, keyword, page: integerParam(params.get('page'), 1, 10_000), pageSize: integerParam(params.get('pageSize'), 100, 100) };
 }
-function providerError(code: string): G2bError {
+function providerError(code: string): G2bError | ProviderQuotaError {
   if (['20', '30', '31'].includes(code)) return new G2bError(503, 'G2B_AUTH_ERROR', '나라장터 API 인증 또는 이용 권한을 확인해 주세요. 서버 인증키와 활용신청 승인 상태 확인이 필요합니다.');
-  if (['22', '23'].includes(code)) return new G2bError(429, 'G2B_QUOTA_EXCEEDED', '공공데이터 API 호출 한도에 도달했습니다. 잠시 후 다시 조회해 주세요.');
+  if (['22', '23'].includes(code)) return new ProviderQuotaError(PROVIDER_QUOTA_COOLDOWN_MS / 1000);
   return new G2bError(502, 'G2B_PROVIDER_ERROR', '나라장터에서 정상 응답을 받지 못했습니다. 잠시 후 다시 조회해 주세요.');
 }
 export function readProviderPayload(payload: unknown): { items: Row[]; totalCount: number } {
@@ -159,8 +160,11 @@ export function readProviderPayload(payload: unknown): { items: Row[]; totalCoun
   return { items, totalCount };
 }
 
-interface ClientOptions { serviceKey?: string; fetcher?: typeof fetch; now?: () => number }
-export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }: ClientOptions) {
+interface ClientOptions {
+  serviceKey?: string; fetcher?: typeof fetch; now?: () => number;
+  quotaGuard?: { assertAvailable: typeof checkProviderQuota; trip: typeof recordProviderQuota };
+}
+export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now, quotaGuard = { assertAvailable: checkProviderQuota, trip: recordProviderQuota } }: ClientOptions) {
   const cache = new Map<string, { until: number; value: unknown }>();
   const pending = new Map<string, Promise<unknown>>();
   async function cached<T>(key: string, loader: () => Promise<T>): Promise<T> {
@@ -177,24 +181,32 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
   }
   async function request(base: string, operation: string, params: Record<string, string>, timeoutMs = 15_000) {
     if (!serviceKey?.trim()) throw new G2bError(503, 'G2B_NOT_CONFIGURED', '실제 공고 연동을 위한 나라장터 API 인증키가 아직 서버에 설정되지 않았습니다.');
-    return cached(`provider:${operation}:${new URLSearchParams(params)}`, async () => {
+    return cached(`provider:${base}:${operation}:${new URLSearchParams(params)}`, async () => {
       const url = new URL(operation, base);
       let key = serviceKey.trim();
       try { if (key.includes('%')) key = decodeURIComponent(key); } catch { throw providerError('30'); }
+      // Cached successes remain usable. Only a new provider request needs quota permission.
+      await quotaGuard.assertAvailable(key, base, now);
       url.search = new URLSearchParams({ ...params, type: 'json', serviceKey: key }).toString();
       let response: Response;
       try { response = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'error', headers: { Accept: 'application/json' } }); }
       catch { throw new G2bError(504, 'G2B_UNAVAILABLE', '나라장터에 연결할 수 없거나 응답 시간이 초과되었습니다. 잠시 후 다시 조회해 주세요.'); }
-      // Never forward provider bodies/errors/URLs: they can contain the service key.
-      let body: string;
-      try { body = await response.text(); } catch { throw providerError('INVALID'); }
-      if (body.length > 15_000_000) throw providerError('INVALID');
-      let payload: unknown;
-      try { payload = JSON.parse(body); }
-      catch { throw providerError(body.match(/<returnReasonCode>\s*(\d+)\s*<\/returnReasonCode>/)?.[1] || 'INVALID'); }
-      const parsed = readProviderPayload(payload);
-      if (!response.ok) throw providerError(String(response.status));
-      return parsed;
+      try {
+        if (response.status === 429) throw new ProviderQuotaError(PROVIDER_QUOTA_COOLDOWN_MS / 1000);
+        // Never forward provider bodies/errors/URLs: they can contain the service key.
+        let body: string;
+        try { body = await response.text(); } catch { throw providerError('INVALID'); }
+        if (body.length > 15_000_000) throw providerError('INVALID');
+        let payload: unknown;
+        try { payload = JSON.parse(body); }
+        catch { throw providerError(body.match(/<(?:returnReasonCode|resultCode)>\s*(\d+)\s*<\/(?:returnReasonCode|resultCode)>/)?.[1] || 'INVALID'); }
+        const parsed = readProviderPayload(payload);
+        if (!response.ok) throw providerError(String(response.status));
+        return parsed;
+      } catch (error) {
+        if (error instanceof ProviderQuotaError) await quotaGuard.trip(key, base, now);
+        throw error;
+      }
     });
   }
   async function allRegions(query: SearchQuery, deadline = Infinity) {
@@ -240,7 +252,10 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
           index.set(identity(row), names);
         }
         items.forEach(item => { const names = unique(index.get(`${item.number}:${item.revision}`) || []); item.allowedRegions = names.length ? names : null; });
-      } catch { warnings.push('참가 가능 지역을 불러오지 못했습니다. 확인되지 않은 공고는 제외하지 않고 확인 필요로 표시합니다.'); }
+      } catch (error) {
+        warnings.push(error instanceof ProviderQuotaError ? '나라장터 호출 한도로 지역조건 추가 조회를 중단했습니다. 확인되지 않은 지역은 공고 상세에서 확인해 주세요.'
+          : '참가 가능 지역을 불러오지 못했습니다. 확인되지 않은 공고는 제외하지 않고 확인 필요로 표시합니다.');
+      }
     }
     return { items, totalCount: result.totalCount, page: query.page, pageSize: query.pageSize,
       hasMore: query.page * query.pageSize < result.totalCount, fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings };
@@ -253,6 +268,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       request(BID_BASE, 'getBidPblancListInfoPrtcptPsblRgn', params),
       request(BID_BASE, 'getBidPblancListInfoLicenseLimit', params),
     ]);
+    const quotaFailure = [general, baseAmounts, regions, licenses].find(result => result.status === 'rejected' && result.reason instanceof ProviderQuotaError);
     const matches = (row: Row) => text(row.bidNtceNo) === number && /^\d{1,3}$/.test(text(row.bidNtceOrd))
       && text(row.bidNtceOrd).padStart(3, '0') === revision && (!text(row.bsnsDivNm) || text(row.bsnsDivNm) === type);
     const regionComplete = regions.status === 'fulfilled' && regions.value.items.length >= regions.value.totalCount;
@@ -266,6 +282,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     const generalRows = generalComplete && general.status === 'fulfilled' ? general.value.items.filter(matches) : [];
     // Do not silently pick the first item when a provider returns duplicate/ambiguous identities.
     const noticeRow = generalRows.length === 1 ? generalRows[0] : undefined;
+    if (!noticeRow && quotaFailure?.status === 'rejected') throw quotaFailure.reason;
     const baseComplete = baseAmounts.status === 'fulfilled' && baseAmounts.value.items.length >= baseAmounts.value.totalCount;
     const baseRows = baseComplete && baseAmounts.status === 'fulfilled' ? baseAmounts.value.items.filter(matches) : [];
     const names = unique(regionRows.map(row => text(row.prtcptPsblRgnNm)));
@@ -277,6 +294,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       ...(notice ? { notice } : {}), sourceUrl,
       sections: mapDetailSections({ row: noticeRow, type, regionRows, licenseRows, baseRows }),
       warnings: [
+        ...(quotaFailure ? ['나라장터 호출 한도로 일부 부가정보 조회를 중단했습니다. 확인된 공고 정보를 표시합니다.'] : []),
         ...(!noticeRow ? ['해당 공고의 일반 상세정보를 확인하지 못했습니다. 공고번호·차수와 나라장터 원문을 확인해 주세요.'] : []),
         ...(!baseComplete ? ['기초금액 공개정보를 모두 불러오지 못했습니다. 금액 상세는 나라장터 원문을 확인해 주세요.'] : []),
         ...(!regionComplete ? ['지역조건을 모두 확인하지 못했습니다. 공고 원문을 확인해 주세요.'] : []),
@@ -323,6 +341,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     });
   }
   async function startNotices(query: SearchQuery, windowIndex: number): Promise<G2bNoticePage> {
+    if (!query.keyword.trim()) throw new G2bError(400, 'KEYWORD_REQUIRED', '철거·석면 등 검색할 공고명을 입력해 주세요.');
     const window = startSearchWindows(query.from, query.to)[windowIndex];
     if (!window || !Number.isInteger(windowIndex) || windowIndex < 0) throw new G2bError(400, 'INVALID_QUERY', '조회 구간이 올바르지 않습니다.');
     return cached(`start:${query.type}:${query.from}:${query.to}:${query.keyword}:${windowIndex}`, async () => {
@@ -367,7 +386,10 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
           }
           items.forEach(item => { const names = unique(index.get(`${item.number}:${item.revision}`) ?? []); item.allowedRegions = names.length ? names : null; });
           if (!regions.complete) warnings.push('일부 참가 가능 지역은 상세 공고에서 확인해 주세요.');
-        } catch { warnings.push('참가 가능 지역 조회에 실패했습니다. 상세 공고에서 확인해 주세요.'); }
+        } catch (error) {
+          warnings.push(error instanceof ProviderQuotaError ? '나라장터 호출 한도로 지역조건 추가 조회를 중단했습니다. 확인되지 않은 지역은 공고 상세에서 확인해 주세요.'
+            : '참가 가능 지역 조회에 실패했습니다. 상세 공고에서 확인해 주세요.');
+        }
       }
       return { items, totalCount: items.length, page: 1, pageSize: items.length, hasMore: false, fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings };
     });

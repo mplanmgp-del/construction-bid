@@ -94,5 +94,5 @@ export interface G2bResultSummary {
 }
 
 export interface G2bApiError {
-  error: { code: string; message: string };
+  error: { code: string; message: string; retryAfterSeconds?: number };
 }
