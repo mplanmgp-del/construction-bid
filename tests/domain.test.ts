@@ -87,8 +87,8 @@ describe('지역 검색과 검색조건', () => {
     notice({ id: 'national', allowedRegions: ['전국'] }),
   ];
 
-  it('자동 지역필터는 제외만 숨기며 확인 필요는 보존한다', () => {
-    expect(ids(filterNotices(regions, filters({ autoRegion: true }), company))).toEqual(['match', 'review', 'national']);
+  it('자동 지역필터는 지역 일치와 전국 공고만 표시한다', () => {
+    expect(ids(filterNotices(regions, filters({ autoRegion: true }), company))).toEqual(['match', 'national']);
   });
 
   it('제외공고 보기에서는 자동 지역필터가 켜져 있어도 제외공고를 보여준다', () => {
@@ -98,10 +98,11 @@ describe('지역 검색과 검색조건', () => {
   it('자동 지역필터를 해제하면 모든 판정의 공고를 볼 수 있다', () => {
     expect(ids(filterNotices(regions, filters(), company))).toEqual(['match', 'exclude', 'review', 'national']);
     expect(ids(filterNotices(regions, filters({ regionView: 'review' }), company))).toEqual(['review']);
+    expect(ids(filterNotices(regions, filters({ autoRegion: true, regionView: 'review' }), company))).toEqual(['review']);
   });
 
   it('현장 위치는 참가 가능 지역과 별도 조건으로 검색한다', () => {
-    expect(ids(filterNotices(regions, filters({ siteProvince: '경기', autoRegion: true }), company))).toEqual(['match', 'review', 'national']);
+    expect(ids(filterNotices(regions, filters({ siteProvince: '경기', autoRegion: true }), company))).toEqual(['match', 'national']);
     expect(filterNotices(regions, filters({ siteProvince: '서울특별시' }), company)).toHaveLength(0);
   });
 

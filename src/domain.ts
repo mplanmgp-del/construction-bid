@@ -128,7 +128,7 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
     if (filters.deadlineTo && (!deadlineDate || deadlineDate > filters.deadlineTo)) return false;
     const region = assessRegion(bid, profile).status;
     if (filters.regionView !== 'all') return region === filters.regionView;
-    return !filters.autoRegion || region !== 'excluded';
+    return !filters.autoRegion || region === 'matched';
   }).sort((a, b) => {
     if (filters.sort === 'amountAsc' || filters.sort === 'amountDesc') {
       const first = priceOrNull(a.estimatedPrice);
