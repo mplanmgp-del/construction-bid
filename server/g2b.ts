@@ -329,14 +329,14 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       const getPage = (page: number) => {
         const remaining = finishBy - now();
         if (remaining <= 0) throw new G2bError(504, 'SEARCH_INCOMPLETE', '전체 공고 조회가 끝나지 않았습니다. 다시 조회하거나 기간·검색어를 좁혀 주세요.');
-        return request(BID_BASE, operation, { inqryDiv: '1', inqryBgnDt: window.from.replaceAll('-', '') + '0000', inqryEndDt: window.to.replaceAll('-', '') + '2359', pageNo: String(page), numOfRows: '999', ...(query.keyword ? { bidNtceNm: query.keyword } : {}) }, Math.min(15_000, remaining));
+        return request(BID_BASE, operation, { inqryDiv: '1', inqryBgnDt: window.from.replaceAll('-', '') + '0000', inqryEndDt: window.to.replaceAll('-', '') + '2359', pageNo: String(page), numOfRows: '100', ...(query.keyword ? { bidNtceNm: query.keyword } : {}) }, Math.min(15_000, remaining));
       };
       const first = await getPage(1);
-      const pages = Math.ceil(first.totalCount / 999);
-      if (pages > 30) throw new G2bError(422, 'SEARCH_TOO_BROAD', '조회할 원본 공고가 많습니다. 공고명 검색어를 입력해 주세요. 일부만 표시하지 않도록 조회를 중단했습니다.');
+      const pages = Math.ceil(first.totalCount / 100);
+      if (pages > 300) throw new G2bError(422, 'SEARCH_TOO_BROAD', '조회할 원본 공고가 많습니다. 공고명 검색어를 입력해 주세요. 일부만 표시하지 않도록 조회를 중단했습니다.');
       const rows = [...first.items];
       let next = 2;
-      await Promise.all(Array.from({ length: Math.min(3, Math.max(0, pages - 1)) }, async () => {
+      await Promise.all(Array.from({ length: Math.min(6, Math.max(0, pages - 1)) }, async () => {
         while (next <= pages) {
           const result = await getPage(next++);
           if (result.totalCount !== first.totalCount) throw new G2bError(409, 'SEARCH_CHANGED', '조회 중 원본 공고가 변경되었습니다. 다시 조회해 주세요.');

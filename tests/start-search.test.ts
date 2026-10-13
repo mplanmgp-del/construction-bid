@@ -20,15 +20,15 @@ it('includes older postings by Korean bidding start date, includes both day boun
   expect(result.totalCount).toBe(2); expect(result.items.map(x => x.number)).toEqual(['R0', 'R1']);
   expect(result.items[0].postedAt).toContain('2026-09-28'); expect(result.items[0].biddingStartAt).toBe('2026-10-07T00:00:00+09:00');
 });
-it('reads the final provider page automatically instead of returning only the first 999 rows', async () => {
+it('reads the final provider page automatically instead of returning only the first 100 rows', async () => {
   const fetcher = vi.fn(async (input: URL | Request | string) => {
     const url = new URL(String(input));
     if (url.pathname.includes('PrtcptPsblRgn')) return response([]);
     const second = url.searchParams.get('pageNo') === '2';
-    return response(Array.from({ length: second ? 1 : 999 }, (_, i) => ({ bidNtceNo: `R${second ? 999 : i}`, bidNtceOrd: '000', bidBeginDt: '2026-10-07 09:00:00' })), 1000);
+    return response(Array.from({ length: second ? 1 : 100 }, (_, i) => ({ bidNtceNo: `R${second ? 100 : i}`, bidNtceOrd: '000', bidBeginDt: '2026-10-07 09:00:00' })), 101);
   });
   const result = await createG2bClient({ serviceKey: 'test', fetcher: fetcher as typeof fetch }).startNotices(query, 0);
-  expect(result.items).toHaveLength(1000); expect(result.hasMore).toBe(false);
+  expect(result.items).toHaveLength(101); expect(result.hasMore).toBe(false);
 });
 it('rejects truncated or duplicate pages instead of claiming complete search', async () => {
   const fetcher = vi.fn(async () => response([{ bidNtceNo: 'R1', bidNtceOrd: '000' }], 3));
