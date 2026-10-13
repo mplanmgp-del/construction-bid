@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BidNotice } from '../types';
 import type { G2bNoticePage, G2bNoticeDetail } from '../g2b-types';
 import { currentNotice, mergeById, recentDates } from './client';
-import { fetchNoticePage, type NoticeQuery } from './notice-search';
+import { fetchStartedNotices, type NoticeQuery } from './notice-search';
 export type { NoticeQuery } from './notice-search';
 
 export function useLiveNotices(enabled: boolean) {
@@ -10,6 +10,7 @@ export function useLiveNotices(enabled: boolean) {
   const [items, setItems] = useState<BidNotice[]>([]);
   const [meta, setMeta] = useState<G2bNoticePage | null>(null);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState('');
   const request = useRef<AbortController | null>(null);
   const sequence = useRef(0);
@@ -21,7 +22,7 @@ export function useLiveNotices(enabled: boolean) {
     setLoading(true); setError('');
     if (page === 1) { setItems([]); setMeta(null); }
     try {
-      const result = await fetchNoticePage(query, page, controller.signal);
+      const result = await fetchStartedNotices(query, controller.signal, (done, total) => { if (token === sequence.current) setProgress({ done, total }); });
       if (token !== sequence.current) return;
       setItems(previous => mergeById(page === 1 ? [] : previous, result.items.map(item => currentNotice({ ...item, source: 'live' }))));
       setMeta(result);
@@ -47,7 +48,7 @@ export function useLiveNotices(enabled: boolean) {
       licenses: detail.licenseComplete ? detail.licenses : bid.licenses,
     } : bid));
   }
-  return { query, setQuery, items, meta, loading, error, applyDetail,
+  return { query, setQuery, items, meta, loading, progress, error, applyDetail,
     refresh: () => setRefreshCount(value => value + 1),
     loadMore: () => { if (!loading && meta?.hasMore) void load(meta.page + 1); },
   };

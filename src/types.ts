@@ -16,6 +16,7 @@ export interface BidNotice {
   noticeKind?: string;
   contractMethod: string; status: BidStatus;
   postedAt: string; deadline: string; openingAt: string; registrationDeadline: string;
+  biddingStartAt?: string;
   licenses: string[]; duration: string; description: string; requirements: string[];
   documents: { name: string; size: string; url?: string }[]; revised: boolean;
   source?: 'live' | 'demo'; detailUrl?: string;

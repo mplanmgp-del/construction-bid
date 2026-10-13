@@ -2,6 +2,7 @@ import type { BidNotice, Category } from '../src/types.ts';
 import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage, G2bOpeningResult, G2bResultPage, G2bResultSummary } from '../src/g2b-types.ts';
 import { mapDetailSections } from './g2b-detail.ts';
 import { createRelatedLoader } from './g2b-related.ts';
+import { startSearchWindows } from '../src/live/start-range.ts';
 
 type Row = Record<string, unknown>;
 const BID_BASE = 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/';
@@ -97,7 +98,7 @@ export function mapNotice(row: Row, type: G2bBusinessType, now = Date.now()): Bi
     allowedRegions: null,
     // presmptPrce is the official estimated-price field. Never fall back to budget/base price.
     estimatedPrice: money(row.presmptPrce), plannedAmount: money(row.bdgtAmt), contractMethod: text(row.cntrctCnclsMthdNm) || '미제공', status,
-    postedAt: koreanTimestamp(row.bidNtceDt), deadline, openingAt: koreanTimestamp(row.opengDt),
+    postedAt: koreanTimestamp(row.bidNtceDt), biddingStartAt: begin, deadline, openingAt: koreanTimestamp(row.opengDt),
     registrationDeadline: koreanTimestamp(row.bidQlfctRgstDt), licenses: [], duration: '원문 확인',
     description: text(row.chgNtceRsn) || '나라장터에서 수집한 실제 공고입니다. 세부 공사 범위와 참가조건은 원문 및 첨부파일을 확인해 주세요.',
     requirements: unique([text(row.aplBssCntnts), special ? '공동수급 또는 지사 투찰 관련 조건이 있어 원문 확인이 필요합니다.' : '', '공종 분류는 공고명에서 추정한 참고용 분류입니다.']),
@@ -196,11 +197,11 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       return parsed;
     });
   }
-  async function allRegions(query: SearchQuery) {
+  async function allRegions(query: SearchQuery, deadline = Infinity) {
     return cached(`regions:${query.from}:${query.to}`, async () => {
       const rows: Row[] = [];
       // Keep the complete request below the deployed 60s function limit, even if every page is slow.
-      const finishBy = now() + 30_000;
+      const finishBy = Math.min(now() + 30_000, deadline);
       for (let page = 1; page <= MAX_REGION_PAGES; page++) {
         const remaining = finishBy - now();
         if (remaining <= 0) break;
@@ -319,5 +320,48 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       };
     });
   }
-  return { notices, detail, results, related, resultSummary };
+  async function startNotices(query: SearchQuery, windowIndex: number): Promise<G2bNoticePage> {
+    const window = startSearchWindows(query.from, query.to)[windowIndex];
+    if (!window || !Number.isInteger(windowIndex) || windowIndex < 0) throw new G2bError(400, 'INVALID_QUERY', '조회 구간이 올바르지 않습니다.');
+    return cached(`start:${query.type}:${query.from}:${query.to}:${query.keyword}:${windowIndex}`, async () => {
+      const finishBy = now() + 40_000;
+      const operation = query.type === '공사' ? 'getBidPblancListInfoCnstwkPPSSrch' : 'getBidPblancListInfoServcPPSSrch';
+      const getPage = (page: number) => {
+        const remaining = finishBy - now();
+        if (remaining <= 0) throw new G2bError(504, 'SEARCH_INCOMPLETE', '전체 공고 조회가 끝나지 않았습니다. 다시 조회하거나 기간·검색어를 좁혀 주세요.');
+        return request(BID_BASE, operation, { inqryDiv: '1', inqryBgnDt: window.from.replaceAll('-', '') + '0000', inqryEndDt: window.to.replaceAll('-', '') + '2359', pageNo: String(page), numOfRows: '999', ...(query.keyword ? { bidNtceNm: query.keyword } : {}) }, Math.min(15_000, remaining));
+      };
+      const first = await getPage(1);
+      const pages = Math.ceil(first.totalCount / 999);
+      if (pages > 30) throw new G2bError(422, 'SEARCH_TOO_BROAD', '조회할 원본 공고가 많습니다. 공고명 검색어를 입력해 주세요. 일부만 표시하지 않도록 조회를 중단했습니다.');
+      const rows = [...first.items];
+      let next = 2;
+      await Promise.all(Array.from({ length: Math.min(3, Math.max(0, pages - 1)) }, async () => {
+        while (next <= pages) {
+          const result = await getPage(next++);
+          if (result.totalCount !== first.totalCount) throw new G2bError(409, 'SEARCH_CHANGED', '조회 중 원본 공고가 변경되었습니다. 다시 조회해 주세요.');
+          rows.push(...result.items);
+        }
+      }));
+      if (rows.length !== first.totalCount || new Set(rows.map(identity)).size !== rows.length) throw new G2bError(502, 'SEARCH_INCOMPLETE', '전체 공고 수집을 확인하지 못했습니다. 다시 조회해 주세요.');
+      const start = Date.parse(`${query.from}T00:00:00+09:00`), end = Date.parse(`${query.to}T23:59:59+09:00`);
+      const items = rows.filter(row => { const timestamp = Date.parse(koreanTimestamp(row.bidBeginDt)); return timestamp >= start && timestamp <= end; }).map(row => mapNotice(row, query.type, now()));
+      // Membership stays unknown unless all region pages were obtained. Detail lookup can refine it.
+      const warnings: string[] = [];
+      if (items.length && finishBy - now() > 5000) {
+        try {
+          const regions = await allRegions({ ...query, ...window }, finishBy);
+          const index = new Map<string, string[]>();
+          for (const row of regions.rows) {
+            if (text(row.bsnsDivNm) && text(row.bsnsDivNm) !== query.type) continue;
+            index.set(identity(row), [...(index.get(identity(row)) ?? []), text(row.prtcptPsblRgnNm)]);
+          }
+          items.forEach(item => { const names = unique(index.get(`${item.number}:${item.revision}`) ?? []); item.allowedRegions = names.length ? names : null; });
+          if (!regions.complete) warnings.push('일부 참가 가능 지역은 상세 공고에서 확인해 주세요.');
+        } catch { warnings.push('참가 가능 지역 조회에 실패했습니다. 상세 공고에서 확인해 주세요.'); }
+      }
+      return { items, totalCount: items.length, page: 1, pageSize: items.length, hasMore: false, fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings };
+    });
+  }
+  return { notices, startNotices, detail, results, related, resultSummary };
 }

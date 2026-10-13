@@ -13,6 +13,11 @@ function serverClient() {
 export async function handleG2bRequest(path: string, params: URLSearchParams, api: Client = serverClient()): Promise<{ status: number; body: unknown }> {
   try {
     if (path === '/api/notices') return { status: 200, body: await api.notices(parseSearch(params)) };
+    if (path === '/api/notices-start') {
+      const index = params.get('window') ?? '';
+      if (!/^[0-3]$/.test(index)) throw new G2bError(400, 'INVALID_QUERY', '조회 구간이 올바르지 않습니다.');
+      return { status: 200, body: await api.startNotices(parseSearch(params), Number(index)) };
+    }
     if (path === '/api/results') return { status: 200, body: await api.results(parseSearch(params, 7)) };
     if (path === '/api/detail' || path === '/api/related' || path === '/api/result-summary') {
       const number = params.get('number') || '', revision = params.get('revision') || '', type = params.get('type');
