@@ -134,10 +134,10 @@ describe('지역 검색과 검색조건', () => {
   it('카테고리·공고 구분·면허·상태·계약방법 조건을 함께 적용한다', () => {
     const bids = [
       notice({ id: 'wanted', category: '석면', type: '용역', licenses: ['석면해체·제거업'], contractMethod: '일반경쟁' }),
-      notice({ id: 'closed', category: '석면', type: '용역', licenses: ['석면해체·제거업'], contractMethod: '일반경쟁', status: '마감' }),
+      notice({ id: 'closed', category: '석면', type: '용역', licenses: ['석면해체·제거업'], contractMethod: '일반경쟁', status: '마감', deadline: '2026-10-10T14:00:00+09:00', openingAt: '2026-10-10T15:00:00+09:00' }),
       notice({ id: 'different' }),
     ];
-    expect(ids(filterNotices(bids, filters({ category: '석면', type: '용역', license: '석면해체·제거업', status: '접수중', contractMethod: '일반경쟁' }), company))).toEqual(['wanted']);
+    expect(ids(filterNotices(bids, filters({ category: '석면', type: '용역', license: '석면해체·제거업', status: '진행중', contractMethod: '일반경쟁' }), company, Date.parse('2026-10-13T10:00:00+09:00')))).toEqual(['wanted']);
   });
 
   it('마감일 범위의 양 끝 날짜를 포함한다', () => {

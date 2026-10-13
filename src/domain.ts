@@ -1,5 +1,6 @@
 import type { BidNotice, CompanyProfile, RegionAssessment, SearchFilters } from './types';
 import { DEMO_TODAY, DISTRICTS } from './data';
+import { noticeState } from './notice-status';
 
 const provinceAliases: Record<string, string> = {
   서울: '서울특별시', 서울특별시: '서울특별시', 부산: '부산광역시', 부산광역시: '부산광역시',
@@ -100,7 +101,7 @@ function koreanDate(value: string): string {
   return Number.isFinite(time) ? new Date(time + 9 * 60 * 60 * 1000).toISOString().slice(0, 10) : '';
 }
 
-export function filterNotices(notices: BidNotice[], filters: SearchFilters, profile: CompanyProfile): BidNotice[] {
+export function filterNotices(notices: BidNotice[], filters: SearchFilters, profile: CompanyProfile, now = Date.now()): BidNotice[] {
   const minimum = amountBound(filters.minAmount);
   const maximum = amountBound(filters.maxAmount);
   if (Number.isNaN(minimum) || Number.isNaN(maximum) || (minimum !== null && maximum !== null && minimum > maximum)) return [];
@@ -118,7 +119,7 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
     if (filters.type !== '전체' && bid.type !== filters.type) return false;
     if (filters.siteProvince !== '전체' && (!siteProvince || canonicalProvince(bid.province) !== siteProvince)) return false;
     if (filters.license !== '전체' && !bid.licenses.some(license => canonicalLicense(license) === canonicalLicense(filters.license))) return false;
-    if (filters.status !== '전체' && bid.status !== filters.status) return false;
+    if (filters.status !== '전체' && noticeState(bid, now).label !== filters.status) return false;
     if (filters.contractMethod !== '전체' && bid.contractMethod !== filters.contractMethod) return false;
     const price = priceOrNull(bid.estimatedPrice);
     if ((minimum !== null || maximum !== null) && price === null) return false;

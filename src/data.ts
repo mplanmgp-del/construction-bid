@@ -59,7 +59,7 @@ export const DEMO_PROFILES: CompanyProfile[] = [
 
 export const DEFAULT_FILTERS: SearchFilters = {
   keyword: '', excludeKeyword: '', category: '철거·해체', type: '전체', siteProvince: '전체',
-  license: '전체', minAmount: '', maxAmount: '', status: '접수중', contractMethod: '전체',
+  license: '전체', minAmount: '', maxAmount: '', status: '진행중', contractMethod: '전체',
   deadlineFrom: '', deadlineTo: '', regionView: 'all', autoRegion: false, sort: 'deadline',
 };
 

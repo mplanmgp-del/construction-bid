@@ -7,6 +7,7 @@ import { currentNotice, fetchApi, koreanToday, safeG2bUrl } from '../live/client
 import { PublicResults } from '../live/PublicResults';
 import { CompleteNoticeDetails } from '../live/CompleteNoticeDetails';
 import { PendingNoticeDetails } from '../live/NoticeSummary';
+import { noticeState } from '../notice-status';
 
 interface BidDetailProps {
   bid: BidNotice;
@@ -17,6 +18,7 @@ interface BidDetailProps {
   onToggleBookmark: () => void;
   onEnriched?: (detail: G2bNoticeDetail) => void;
   preparation?: ReactNode;
+  now?: number;
 }
 
 type DetailTab = 'overview' | 'terms' | 'documents' | 'results' | 'preparation';
@@ -69,7 +71,7 @@ function downloadSampleDocument(bid: BidNotice, documentName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment, isBookmarked, onClose, onToggleBookmark, onEnriched, preparation }: BidDetailProps) {
+export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment, isBookmarked, onClose, onToggleBookmark, onEnriched, preparation, now = Date.now() }: BidDetailProps) {
   const id = useId();
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   const drawer = useRef<HTMLElement>(null);
@@ -144,6 +146,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
   useEffect(() => setActiveTab('overview'), [bid.id]);
 
   const days = daysUntil(bid.deadline, isLive ? koreanToday() : undefined);
+  const state = noticeState(bid, now);
   const deadlineLabel = bid.status === '취소' ? '취소된 공고' : bid.status === '마감' || days < 0 ? '제출 마감'
     : !Number.isFinite(days) ? '마감일 확인 필요' : days === 0 ? '오늘 마감' : `마감 D-${days}`;
   const regionStatusLabel = assessment.status === 'matched' ? '지역 일치' : assessment.status === 'excluded' ? '지역 제외' : '확인 필요';
@@ -171,7 +174,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
         </div>
         <div className="detail-heading">
           <div className="detail-heading-badges">
-            <span className={`badge ${bid.status === '접수중' ? 'detail-status-open' : bid.status === '접수예정' ? 'detail-status-upcoming' : 'detail-status-ended'}`}>{bid.status}</span>
+            <span className={`nl-state is-${state.tone}`} title={state.description}>{state.label}</span>
             <span className="detail-category">{bid.type} · {bid.category}</span>
             {bid.revised && <span className="badge badge-amber">정정</span>}
           </div>
