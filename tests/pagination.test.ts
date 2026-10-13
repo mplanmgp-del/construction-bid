@@ -1,20 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { pageItems } from '../src/pagination';
+import { pageGroup } from '../src/pagination';
 
-describe('compact pagination', () => {
-  it('shows all pages for a short result', () => {
-    expect(pageItems(1, 1)).toEqual([1]);
-    expect(pageItems(4, 7)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-  });
-  it('keeps the first, current and last pages reachable without an unbounded button row', () => {
-    for (let current = 1; current <= 38; current++) {
-      const items = pageItems(current, 38);
-      expect(items.length).toBeLessThanOrEqual(7);
-      expect(items).toContain(current);
-      expect(items[0]).toBe(1);
-      expect(items.at(-1)).toBe(38);
-      const numbers = items.filter((item): item is number => typeof item === 'number');
-      expect(numbers).toEqual([...new Set(numbers)].sort((a, b) => a - b));
+describe('ten-page groups', () => {
+  it('keeps pages 1 through 10 in the first group', () => {
+    for (const current of [1, 5, 10]) {
+      expect(pageGroup(current, 38)).toEqual({ items: [1,2,3,4,5,6,7,8,9,10], previous: null, next: 11 });
     }
+  });
+  it('moves arrows between the first pages of adjacent groups', () => {
+    expect(pageGroup(11, 38)).toEqual({ items: [11,12,13,14,15,16,17,18,19,20], previous: 1, next: 21 });
+    expect(pageGroup(20, 38).next).toBe(21);
+    expect(pageGroup(21, 38).previous).toBe(11);
+  });
+  it('does not offer nonexistent pages at the end', () => {
+    expect(pageGroup(38, 38)).toEqual({ items: [31,32,33,34,35,36,37,38], previous: 21, next: null });
+    expect(pageGroup(10, 10).next).toBeNull();
+    expect(pageGroup(1, 1)).toEqual({ items: [1], previous: null, next: null });
+    expect(pageGroup(11, 13)).toEqual({ items: [11,12,13], previous: 1, next: null });
   });
 });
