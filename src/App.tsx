@@ -61,11 +61,6 @@ export default function App() {
     if (member.recoveryMode) { setMode('live'); setView('profile'); setSelectedBid(null); setMobileFilters(false); }
   }, [member.recoveryMode]);
 
-  function switchMode(next: 'live' | 'demo') {
-    setMode(next); setView('notices'); setSelectedBid(null); setPage(1); setSearchInput('');
-    setFilters({ ...DEFAULT_FILTERS, ...(next === 'live' ? { category: '전체', status: '전체' } : {}), autoRegion: next === 'live' ? member.workspace?.preferences.autoRegion ?? true : state.preferences[state.activeProfileId]?.autoRegion ?? true });
-  }
-
   useEffect(() => { if (view === 'notices') noticeFiltersRef.current = filters; }, [filters, view]);
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 3500); return () => window.clearTimeout(timer); }, [toast]);
   useEffect(() => {
@@ -192,7 +187,7 @@ export default function App() {
     <header className="app-header"><div className="header-inner">
       <button className="brand" onClick={() => navigate('notices')} aria-label="공사입찰 검색 홈"><span className="brand-mark"><span /><span /><span /></span><span>공사입찰 <b>검색</b></span></button>
       <nav className="main-nav" aria-label="주 메뉴"><button className={view === 'notices' ? 'active' : ''} onClick={() => navigate('notices')}><ClipboardList size={17} /><span>입찰공고</span></button><button className={view === 'bookmarks' ? 'active' : ''} onClick={() => navigate('bookmarks')}><Bookmark size={17} /><span>관심공고</span>{bookmarks.length > 0 && <span className="nav-count">{bookmarks.length}</span>}</button><button className={view === 'profile' ? 'active' : ''} onClick={() => navigate('profile')}><UserRound size={17} /><span>내 정보</span></button>{mode === 'live' && <button className={view === 'results' ? 'active' : ''} onClick={() => navigate('results')}><FileSearch size={17} /><span>개찰결과</span></button>}</nav>
-      <div className="header-account"><label className="mode-select"><span className="sr-only">데이터 모드</span><select aria-label="데이터 모드" value={mode} onChange={event => switchMode(event.target.value as 'live' | 'demo')}><option value="live">실제 나라장터</option><option value="demo">예시 체험</option></select></label>{mode === 'live' ? <button className="button button-secondary" onClick={() => navigate('profile')}>{member.user ? '내 계정' : '로그인'}</button> : <div className="account-select"><span className="account-avatar">{profile.companyName[0] || '업'}</span><label className="sr-only" htmlFor="demo-profile-switch">테스트 업체 전환</label><select id="demo-profile-switch" value={profile.id} onChange={event => switchProfile(event.target.value)}>{state.profiles.map(item => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select><ChevronDown size={15} /></div>}</div>
+      <div className="header-account">{mode === 'live' ? <button className="button button-secondary" onClick={() => navigate('profile')}>{member.user ? '내 계정' : '로그인'}</button> : <div className="account-select"><span className="account-avatar">{profile.companyName[0] || '업'}</span><label className="sr-only" htmlFor="demo-profile-switch">테스트 업체 전환</label><select id="demo-profile-switch" value={profile.id} onChange={event => switchProfile(event.target.value)}>{state.profiles.map(item => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select><ChevronDown size={15} /></div>}</div>
     </div></header>
 
     <main className="main-container">

@@ -13,7 +13,7 @@
 
 .filter-heading-actions .mobile-filter-close{display:none}@media(max-width:1000px){.filter-heading-actions .mobile-filter-close{display:inline-flex}}
 /* Live procurement and member workspaces */
-.mode-select select { border: 1px solid #d9e0eb; background: #fff; border-radius: 8px; padding: 9px 12px; color: #23405e; font: inherit; font-size: 12px; }
+
 .live-member-status { margin-top: 18px; color: #53657c; font-size: 12px; line-height: 1.6; }
 .live-query { margin-bottom: 18px; padding: 19px 22px; }
 .live-query-heading { display: flex; gap: 14px; align-items: baseline; margin-bottom: 14px; }
@@ -53,5 +53,5 @@
 .detail-tabs { overflow-x: auto; }
 .detail-tabs button { flex-shrink: 0; white-space: nowrap; }
 @media (max-width: 1000px) { .header-inner { flex-wrap: wrap; } .main-nav { order: 3; flex-basis: 100%; } .header-account { margin-left: auto; } .live-query { padding: 16px; } }
-@media (max-width: 640px) { .live-query-heading { flex-wrap: wrap; gap: 5px; } .live-query label { flex: 1; min-width: 120px; } .live-query label:first-child { flex-basis: 100%; } .live-query input { width: 100%; } .live-scope { padding: 13px 16px; } .public-results { padding: 18px 14px; } .public-result-card dl { grid-template-columns: repeat(2,minmax(0,1fr)); } .mode-select select { max-width: 130px; padding: 8px 5px; font-size: 11px; } .header-account .button { padding: 7px 9px; min-height: 32px; font-size: 11px; } .header-account { gap: 6px; } .main-nav { overflow-x: auto; } .detail-tabs button { padding-left: 10px; padding-right: 10px; } }
+@media (max-width: 640px) { .live-query-heading { flex-wrap: wrap; gap: 5px; } .live-query label { flex: 1; min-width: 120px; } .live-query label:first-child { flex-basis: 100%; } .live-query input { width: 100%; } .live-scope { padding: 13px 16px; } .public-results { padding: 18px 14px; } .public-result-card dl { grid-template-columns: repeat(2,minmax(0,1fr)); }  .header-account .button { padding: 7px 9px; min-height: 32px; font-size: 11px; } .header-account { gap: 6px; } .main-nav { overflow-x: auto; } .detail-tabs button { padding-left: 10px; padding-right: 10px; } }
 .preparation-chip { padding: 3px 6px; border-radius: 4px; background: #edf2ff; color: #365e99; font-size: 10px; white-space: nowrap; }
