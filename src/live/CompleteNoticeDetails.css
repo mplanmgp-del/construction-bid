@@ -48,3 +48,12 @@ body.fnd-document{margin:0;min-width:280px;background:#f4f6fa;font-family:'Noto 
 @media(max-width:600px){.fnd-header-original{display:none}.fnd-hero-top{align-items:flex-start}.fnd-hero-actions{margin-left:auto}.fnd-data-footer button{min-height:44px}.fnd-error-state>a{min-height:44px}.fnd-page .fnd-section{scroll-margin-top:146px}}
 @media(prefers-reduced-motion:reduce){.fnd-page *,.fnd-complete *{scroll-behavior:auto!important;transition:none!important}.fnd-spin{animation:none}}
 @media print{body.fnd-document{background:white}.fnd-page{padding:0;background:white}.fnd-page-header,.fnd-breadcrumb,.fnd-hero-actions,.fnd-jumpbar,.fnd-tool-actions,.fnd-page-end,.fnd-mobile-bottom,.fnd-toast,.fnd-data-footer button{display:none!important}.fnd-page-main{padding:0;max-width:none}.fnd-hero,.fnd-section,.fnd-key-summary{box-shadow:none;break-inside:avoid}.fnd-section-content[hidden]{display:block!important}.fnd-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fnd-field{font-size:10px;grid-template-columns:100px minmax(0,1fr)}.fnd-field dt,.fnd-field dd{padding:8px}.fnd-section-note{font-size:9px!important}.fnd-section-list{gap:14px}.fnd-hero h1{font-size:23px}.fnd-detail-tools{margin-top:20px}}
+
+/* Price summary: distinct amounts, followed by bid dates. */
+.fnd-key-summary{grid-template-columns:1.15fr 1.15fr 1fr 1fr;gap:20px}
+.fnd-key-summary .fnd-estimate{padding-right:0}
+.fnd-key-summary .fnd-estimate>strong{font-size:clamp(22px,2.2cqi,31px);letter-spacing:-1px}
+.fnd-base-amount{border-left:1px solid #e5eaf1;padding-left:22px}
+.fnd-base-amount>strong{color:#167a78}
+@container(max-width:850px){.fnd-key-summary{grid-template-columns:1fr 1fr;gap:18px 22px}.fnd-key-summary .fnd-estimate{grid-column:auto;padding-bottom:16px;border-bottom:1px solid #e5eaf1}.fnd-base-amount{border-left:0;padding-left:0}.fnd-summary-date{border-left:0;padding-left:0}.fnd-key-summary .fnd-estimate>strong{font-size:clamp(22px,4cqi,30px)}}
+@container(max-width:355px){.fnd-key-summary{gap:16px 10px}.fnd-key-summary .fnd-estimate>strong{font-size:21px}.fnd-estimate>small{font-size:10px}}

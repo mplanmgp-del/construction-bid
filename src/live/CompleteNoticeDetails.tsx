@@ -71,9 +71,13 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true, printRe
     setCollapsed(previous => { const next = new Set(previous); if (next.has(sectionId)) next.delete(sectionId); else next.add(sectionId); return next; });
   }
 
+  const baseAmounts = sections.flatMap(section => section.fields.filter(field => field.key === 'bssamt'));
+  const baseAmount = baseAmounts.length === 1 ? baseAmounts[0].value : null;
+
   return <div className="fnd-complete">
     {showSummary && <div className="fnd-key-summary" aria-label="입찰 핵심 정보">
       <div className="fnd-estimate"><span>추정가격</span><strong>{formatPrice(bid.estimatedPrice)}</strong><small>공고에 공개된 추정가격 기준</small></div>
+      <div className="fnd-estimate fnd-base-amount"><span>기초금액</span><strong>{baseAmounts.length > 1 ? '복수 금액' : baseAmount || '미제공'}</strong><small>{baseAmounts.length > 1 ? '아래 기초금액 공개 내역에서 확인' : '공개된 기초금액 기준'}</small></div>
       <div className="fnd-summary-date"><CalendarClock size={20} /><span>입찰서 제출마감</span><strong>{formatDateTime(bid.deadline)}</strong></div>
       <div className="fnd-summary-date"><FileCheck2 size={20} /><span>개찰일시</span><strong>{formatDateTime(bid.openingAt)}</strong></div>
     </div>}
