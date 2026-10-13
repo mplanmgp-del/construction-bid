@@ -2,7 +2,8 @@ import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type 
 import { Building2, CalendarClock, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardList, ExternalLink, FileCheck2, FileText, HardHat, Info, Landmark, Paperclip, Phone, Search, ShieldCheck, Wallet, X } from 'lucide-react';
 import type { G2bDetailSection, G2bNoticeDetail, G2bRelatedDetail } from '../g2b-types';
 import type { BidNotice } from '../types';
-import { formatDateTime, formatPrice } from '../domain';
+import { formatDateTime } from '../domain';
+import { NoticeSummary } from './NoticeSummary';
 import { safeG2bUrl } from './client';
 import { RelatedNoticeDetails } from './RelatedNoticeDetails';
 import { NoticePrintDialog } from '../print/NoticePrintDialog';
@@ -71,16 +72,8 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true, printRe
     setCollapsed(previous => { const next = new Set(previous); if (next.has(sectionId)) next.delete(sectionId); else next.add(sectionId); return next; });
   }
 
-  const baseAmounts = sections.flatMap(section => section.fields.filter(field => field.key === 'bssamt'));
-  const baseAmount = baseAmounts.length === 1 ? baseAmounts[0].value : null;
-
   return <div className="fnd-complete">
-    {showSummary && <div className="fnd-key-summary" aria-label="입찰 핵심 정보">
-      <div className="fnd-estimate"><span>추정가격</span><strong>{formatPrice(bid.estimatedPrice)}</strong><small>공고에 공개된 추정가격 기준</small></div>
-      <div className="fnd-estimate fnd-base-amount"><span>기초금액</span><strong>{baseAmounts.length > 1 ? '복수 금액' : baseAmount || '미제공'}</strong><small>{baseAmounts.length > 1 ? '아래 기초금액 공개 내역에서 확인' : '공개된 기초금액 기준'}</small></div>
-      <div className="fnd-summary-date"><CalendarClock size={20} /><span>입찰서 제출마감</span><strong>{formatDateTime(bid.deadline)}</strong></div>
-      <div className="fnd-summary-date"><FileCheck2 size={20} /><span>개찰일시</span><strong>{formatDateTime(bid.openingAt)}</strong></div>
-    </div>}
+    {showSummary && <NoticeSummary bid={bid} detail={detail} />}
     <div className="fnd-jumpbar" aria-label="공고 상세 구역 이동">
       <div className="fnd-jump-scroll"><button type="button" className="fnd-related-jump" onClick={() => jumpTo('relatedData')}>계약·진행 이력·기관</button>{sections.map(section => <button type="button" key={section.id} onClick={() => jumpTo(section.id)}>{section.label}</button>)}<button type="button" onClick={() => jumpTo('documents')}>첨부서류 <span>{documents.length}</span></button></div>
     </div>

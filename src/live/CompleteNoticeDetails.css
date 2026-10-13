@@ -62,3 +62,12 @@ body.fnd-document{margin:0;min-width:280px;background:#f4f6fa;font-family:'Noto 
 .fnd-jumpbar,.fnd-page .fnd-jumpbar{position:static;top:auto;z-index:auto;backdrop-filter:none}
 .fnd-tool-actions{flex-wrap:wrap}
 @container(max-width:620px){.fnd-tool-actions .fnd-search{flex:1 1 100%;width:100%}.fnd-tool-actions>button{min-height:42px}.fnd-summary-date>strong{overflow-wrap:anywhere}}
+
+/* Initial and loaded views share the same summary geometry. */
+.fnd-pending-message{margin-top:24px;padding:26px;border:1px solid #dce6f4;border-radius:16px;background:#fff}
+.fnd-pending-message h3{margin:0 0 10px;color:#234466;font-size:17px}
+.fnd-pending-message p{margin:0;color:#596b85;font-size:14px;line-height:1.7}
+.fnd-skeleton-lines{display:grid;gap:16px;margin-top:28px}
+.fnd-skeleton-lines span{height:18px;border-radius:6px;background:#edf2f8}
+.fnd-skeleton-lines span:nth-child(2){width:85%}.fnd-skeleton-lines span:nth-child(3){width:65%}
+.fnd-key-summary .fnd-estimate>strong{overflow-wrap:anywhere}

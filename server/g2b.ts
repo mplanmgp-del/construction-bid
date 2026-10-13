@@ -95,7 +95,7 @@ export function mapNotice(row: Row, type: G2bBusinessType, now = Date.now()): Bi
     category: categoryFromTitle(title), province: site[0] || '', district: site.slice(1).join(' '),
     allowedRegions: null,
     // presmptPrce is the official estimated-price field. Never fall back to budget/base price.
-    estimatedPrice: money(row.presmptPrce), contractMethod: text(row.cntrctCnclsMthdNm) || '미제공', status,
+    estimatedPrice: money(row.presmptPrce), plannedAmount: money(row.bdgtAmt), contractMethod: text(row.cntrctCnclsMthdNm) || '미제공', status,
     postedAt: koreanTimestamp(row.bidNtceDt), deadline, openingAt: koreanTimestamp(row.opengDt),
     registrationDeadline: koreanTimestamp(row.bidQlfctRgstDt), licenses: [], duration: '원문 확인',
     description: text(row.chgNtceRsn) || '나라장터에서 수집한 실제 공고입니다. 세부 공사 범위와 참가조건은 원문 및 첨부파일을 확인해 주세요.',

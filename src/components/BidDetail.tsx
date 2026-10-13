@@ -6,6 +6,7 @@ import type { G2bNoticeDetail } from '../g2b-types';
 import { currentNotice, fetchApi, koreanToday, safeG2bUrl } from '../live/client';
 import { PublicResults } from '../live/PublicResults';
 import { CompleteNoticeDetails } from '../live/CompleteNoticeDetails';
+import { PendingNoticeDetails } from '../live/NoticeSummary';
 
 interface BidDetailProps {
   bid: BidNotice;
@@ -80,11 +81,12 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
   const tabs = isLive ? [...TABS.map(tab => tab.id === 'overview' ? { ...tab, label: '전체 상세' } : tab), { id: 'results' as const, label: '공개 결과' }, { id: 'preparation' as const, label: '투찰 준비' }] : TABS;
   const [detailStatus, setDetailStatus] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
+  const [failedRequest, setFailedRequest] = useState('');
+  const requestKey = `${inputBid.id}:${detailRetry}`;
   const [loadedDetail, setLoadedDetail] = useState<LoadedDetail | null>(null);
   const { bid, detail: detailData } = resolveDisplayedBid(inputBid, loadedDetail);
   const assessment = isLive ? assessRegion(bid, profile) : inputAssessment;
   useEffect(() => {
-    setLoadedDetail(null);
     if (!isLive) return;
     const abort = new AbortController();
     setDetailStatus('공고 일반·일정·금액·참가조건을 조회하는 중입니다.');
@@ -94,7 +96,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
       setLoadedDetail({ bidId: inputBid.id, data: detail });
       enrichAction.current?.(detail);
       setDetailStatus(detail.warnings.join(' · ') || '나라장터 공고와 금액 상세를 조회했습니다.');
-    }).catch(error => { if (!abort.signal.aborted) setDetailStatus(error instanceof Error ? error.message : '상세조건 조회에 실패했습니다.'); });
+    }).catch(error => { if (!abort.signal.aborted) { setFailedRequest(`${inputBid.id}:${detailRetry}`); setDetailStatus(error instanceof Error ? error.message : '상세조건 조회에 실패했습니다.'); } });
     return () => abort.abort();
   }, [inputBid.id, inputBid.number, inputBid.revision, inputBid.type, isLive, detailRetry]);
 
@@ -202,7 +204,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
           {isLive && activeTab === 'results' && <PublicResults bid={bid} />}
           {isLive && activeTab === 'preparation' && preparation}
           {isLive && activeTab === 'overview' && <div className="detail-live-status"><p role="status">{detailStatus}</p><div><button className="text-button" onClick={() => setDetailRetry(value => value + 1)}>새로 조회</button><a href={`/notice-detail.html?${new URLSearchParams({ number: bid.number, revision: bid.revision, type: bid.type })}`} target="_blank" rel="noopener noreferrer">넓은 화면으로 보기<ExternalLink size={14} /></a></div></div>}
-          {activeTab === 'overview' && (isLive && detailData ? <CompleteNoticeDetails detail={detailData} bid={bid} /> : <>
+          {activeTab === 'overview' && (isLive ? detailData ? <CompleteNoticeDetails detail={detailData} bid={bid} /> : <PendingNoticeDetails bid={bid} failed={failedRequest === requestKey} /> : <>
             <div className="detail-price-block"><span>추정가격</span><strong>{formatPrice(bid.estimatedPrice)}</strong><p>{bid.estimatedPrice === null ? '이 공고에는 추정가격이 제공되지 않았습니다.' : '금액 검색 및 정렬에 사용하는 추정가격입니다.'}</p></div>
             <section className="detail-section" aria-labelledby={`${id}-base-info`}>
               <h3 id={`${id}-base-info`}>기본정보</h3>
