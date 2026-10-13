@@ -49,3 +49,10 @@ it('fails the whole search if one automatic window fails', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: { message: '조회 실패' } }, { status: 503 })));
   await expect(fetchStartedNotices(query, new AbortController().signal, () => {})).rejects.toThrow('조회 실패');
 });
+
+it('automatically retries a transient provider failure without publishing partial results', async () => {
+  let calls = 0;
+  const fetcher = vi.fn(async () => ++calls === 1 ? new Response('Bad Gateway', { status: 502 }) : response([]));
+  const result = await createG2bClient({ serviceKey: 'test', fetcher: fetcher as typeof fetch }).startNotices(query, 0);
+  expect(result.totalCount).toBe(0); expect(calls).toBe(2);
+});

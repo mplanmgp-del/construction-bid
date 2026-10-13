@@ -326,10 +326,17 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     return cached(`start:${query.type}:${query.from}:${query.to}:${query.keyword}:${windowIndex}`, async () => {
       const finishBy = now() + 40_000;
       const operation = query.type === '공사' ? 'getBidPblancListInfoCnstwkPPSSrch' : 'getBidPblancListInfoServcPPSSrch';
-      const getPage = (page: number) => {
-        const remaining = finishBy - now();
-        if (remaining <= 0) throw new G2bError(504, 'SEARCH_INCOMPLETE', '전체 공고 조회가 끝나지 않았습니다. 다시 조회하거나 기간·검색어를 좁혀 주세요.');
-        return request(BID_BASE, operation, { inqryDiv: '1', inqryBgnDt: window.from.replaceAll('-', '') + '0000', inqryEndDt: window.to.replaceAll('-', '') + '2359', pageNo: String(page), numOfRows: '100', ...(query.keyword ? { bidNtceNm: query.keyword } : {}) }, Math.min(15_000, remaining));
+      const getPage = async (page: number) => {
+        // A transient provider failure must not force the user to restart the whole search.
+        for (let attempt = 0; ; attempt++) {
+          const remaining = finishBy - now();
+          if (remaining <= 0) throw new G2bError(504, 'SEARCH_INCOMPLETE', '전체 공고 조회가 끝나지 않았습니다. 다시 조회하거나 기간·검색어를 좁혀 주세요.');
+          try {
+            return await request(BID_BASE, operation, { inqryDiv: '1', inqryBgnDt: window.from.replaceAll('-', '') + '0000', inqryEndDt: window.to.replaceAll('-', '') + '2359', pageNo: String(page), numOfRows: '100', ...(query.keyword ? { bidNtceNm: query.keyword } : {}) }, Math.min(15_000, remaining));
+          } catch (error) {
+            if (attempt >= 1 || !(error instanceof G2bError) || !['G2B_PROVIDER_ERROR', 'G2B_UNAVAILABLE', 'G2B_INCOMPLETE_RESPONSE'].includes(error.code) || finishBy - now() < 5000) throw error;
+          }
+        }
       };
       const first = await getPage(1);
       const pages = Math.ceil(first.totalCount / 100);
