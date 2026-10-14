@@ -2,6 +2,7 @@ import { createG2bClient, G2bError, parseSearch } from './g2b.ts';
 import { loadPublicSearch } from './public-search-cache.ts';
 import { ProviderQuotaError } from './provider-quota.ts';
 import { CompanyLookupError } from './g2b-company.ts';
+import { OpeningResultsError } from './g2b-results.ts';
 import { createCompanyArchiveReader, parseCompanyHistoryQuery } from './company-history.ts';
 import type { G2bApiError, G2bNoticeRegionsPage } from '../src/g2b-types.ts';
 
@@ -72,11 +73,12 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
         ...(result.body.retryAfterSeconds ? { retryAfterSeconds: result.body.retryAfterSeconds } : {}) };
     }
     if (path === '/api/results') return { status: 200, body: await api.results(parseSearch(params, 7)) };
-    if (path === '/api/detail' || path === '/api/related' || path === '/api/result-summary') {
+    if (path === '/api/detail' || path === '/api/related' || path === '/api/result-summary' || path === '/api/opening-results') {
       const number = params.get('number') || '', revision = params.get('revision') || '', type = params.get('type');
       if (!/^[a-zA-Z0-9_-]{1,40}$/.test(number) || !/^\d{1,3}$/.test(revision) || (type !== '공사' && type !== '용역')) {
         throw new G2bError(400, 'INVALID_QUERY', '공고번호, 차수, 업무 구분을 확인해 주세요.');
       }
+      if (path === '/api/opening-results') return { status: 200, body: await api.openingResults({ number, revision: revision.padStart(3, '0'), type }) };
       if (path === '/api/result-summary') {
         const openingAt = params.get('openingAt') || '';
         if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\+09:00|Z)$/.test(openingAt) || !Number.isFinite(Date.parse(openingAt))) {
@@ -88,7 +90,7 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
     }
     return { status: 404, body: { error: { code: 'NOT_FOUND', message: '존재하지 않는 API입니다.' } } };
   } catch (error) {
-    const known = error instanceof G2bError || error instanceof ProviderQuotaError || error instanceof CompanyLookupError ? error : new G2bError(500, 'INTERNAL_ERROR', '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    const known = error instanceof G2bError || error instanceof ProviderQuotaError || error instanceof CompanyLookupError || error instanceof OpeningResultsError ? error : new G2bError(500, 'INTERNAL_ERROR', '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     const retryAfterSeconds = known instanceof ProviderQuotaError ? known.retryAfterSeconds : undefined;
     const body: G2bApiError = { error: { code: known.code, message: known.message, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) } };
     return { status: known.status, body, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) };
@@ -136,6 +138,12 @@ export async function nodeApiHandler(req: NodeRequest, res: NodeResponse) {
     if (!body.retryAfterSeconds && body.items.length > 0 && body.items.every(item => item.complete && !item.error)) {
       res.setHeader('Vercel-CDN-Cache-Control', 'public, max-age=300');
     }
+  }
+  // These contain public procurement data only. Share complete responses; a partial
+  // response or an explicit retry must reach the server so missing data can recover.
+  if (['/api/opening-results', '/api/result-summary'].includes(url.pathname) && result.status === 200 && url.searchParams.get('refresh') !== '1') {
+    const body = result.body as { complete?: boolean; warnings?: string[] };
+    if (body.complete && !body.warnings?.length) res.setHeader('Vercel-CDN-Cache-Control', 'public, max-age=120');
   }
   res.end(JSON.stringify(result.body));
 }

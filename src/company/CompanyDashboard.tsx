@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, BarChart3, Building2, CalendarDays, ChevronLeft, ChevronRight, Download, ExternalLink, FileCheck2, Info, LoaderCircle, MapPin, Phone, RefreshCw, Search, Trophy, Users } from 'lucide-react';
+import { ArrowRight, BarChart3, Building2, CalendarDays, ChevronLeft, ChevronRight, Download, ExternalLink, FileCheck2, Info, ListOrdered, LoaderCircle, MapPin, Phone, RefreshCw, Search, Trophy, Users } from 'lucide-react';
 import type { CompanyProfile } from '../types';
 import type { CompanyGroupSummary, CompanyHistory, CompanyParticipation, PublicCompany } from '../company-types';
+import { OpeningResultsPanel } from '../live/OpeningResultsPanel';
 import { fetchApi } from '../live/client';
 import './company-dashboard.css';
 
@@ -41,11 +42,14 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
   const [loading, setLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const [refresh, setRefresh] = useState(0);
+  const [openingRow, setOpeningRow] = useState<CompanyParticipation | null>(null);
   const searchController = useRef<AbortController | null>(null);
   const searchSequence = useRef(0);
   const searchPanel = useRef<HTMLDivElement | null>(null);
+  const openingTrigger = useRef<HTMLButtonElement | null>(null);
 
   function selectCompany(company: PublicCompany) {
+    setOpeningRow(null);
     setSelected(company); setHistory(null); setHistoryError(''); setDates({ from: '', to: '' });
     setFilter({ ...initialFilter }); setDateError(''); setMatches([]); setSearchMessage('');
   }
@@ -56,6 +60,7 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
     searchController.current?.abort();
     const controller = new AbortController(); searchController.current = controller;
     const sequence = ++searchSequence.current;
+    setOpeningRow(null);
     setSearch(query); setSearching(true); setSearchError(''); setSearchMessage(''); setMatches([]); setSelected(null); setHistory(null);
     try {
       const response = await fetchApi<{ items: PublicCompany[]; message?: string }>(`/api/companies?${new URLSearchParams({ q: query })}`, controller.signal);
@@ -74,6 +79,7 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
 
   useEffect(() => () => { ++searchSequence.current; searchController.current?.abort(); }, []);
   useEffect(() => {
+    setOpeningRow(null);
     if (!selected) { setLoading(false); return; }
     const controller = new AbortController();
     setLoading(true); setHistoryError(''); setHistory(null);
@@ -94,6 +100,14 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
   const pageGroup = Math.floor((filter.page - 1) / 10) * 10;
   const pages = Array.from({ length: Math.max(0, Math.min(10, pageCount - pageGroup)) }, (_, index) => pageGroup + index + 1);
   const chartMax = Math.max(1, ...(history?.monthly.map(month => month.participationCount) ?? []));
+  function openResults(row: CompanyParticipation, trigger: HTMLButtonElement) {
+    openingTrigger.current = trigger;
+    setOpeningRow(row);
+  }
+  function closeResults() {
+    setOpeningRow(null);
+    window.requestAnimationFrame(() => openingTrigger.current?.focus());
+  }
 
   return <section className="company-dashboard" aria-label="MY입찰관리">
     <header className="company-dashboard-heading">
@@ -161,7 +175,8 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
         </section>}
 
         <section className="company-history panel"><header className="company-section-heading"><div><h2>입찰 참여 이력 <span>{number(history.totalCount)}건</span></h2><p>{!filter.from && !filter.to ? '전체 기간' : `${date(filter.from) === '-' ? '처음' : date(filter.from)} ~ ${date(filter.to) === '-' ? '현재' : date(filter.to)}`} · 수집된 공개 이력</p></div><button className="button button-secondary" disabled={!history.items.length} onClick={() => exportPage(history.items, company)}><Download size={16} />현재 페이지 CSV</button></header><div className="company-history-tabs" role="group" aria-label="입찰 이력 결과 필터"><button aria-pressed={filter.outcome === 'all'} className={filter.outcome === 'all' ? 'active' : ''} onClick={() => setFilter({ ...filter, outcome: 'all', page: 1 })}>전체 참여</button><button aria-pressed={filter.outcome === 'won'} className={filter.outcome === 'won' ? 'active' : ''} onClick={() => setFilter({ ...filter, outcome: 'won', page: 1 })}>낙찰 이력</button></div>
-          {history.items.length ? <><div className="company-history-desktop company-table-scroll"><table><thead><tr><th scope="col">공고명 / 수요기관</th><th scope="col">결과</th><th scope="col">순위 / 참가업체</th><th scope="col">투찰금액</th><th scope="col">투찰률</th><th scope="col">낙찰금액</th><th scope="col">개찰일</th></tr></thead><tbody>{history.items.map(row => <tr key={row.id}><td className="company-history-title"><small>{row.type} · {row.number}-{row.revision}</small><NoticeTitle row={row} /><span>{row.agency || '-'}{row.method && ` · ${row.method}`}</span></td><td><Outcome row={row} /></td><td>{row.rank || '-'} / {row.participantCount == null ? '-' : number(row.participantCount)}</td><td className="company-amount">{money(row.bidAmount)}</td><td>{row.bidRate == null ? '-' : `${row.bidRate}%`}</td><td className="company-amount">{money(row.winningAmount)}</td><td>{date(row.openingAt)}</td></tr>)}</tbody></table></div><div className="company-history-mobile">{history.items.map(row => <article key={row.id}><div><span>{row.type} · {date(row.openingAt)}</span><Outcome row={row} /></div><NoticeTitle row={row} /><p>{row.agency || '-'}</p><dl><div><dt>순위 / 참가업체</dt><dd>{row.rank || '-'} / {row.participantCount == null ? '-' : number(row.participantCount)}</dd></div><div><dt>투찰률</dt><dd>{row.bidRate == null ? '-' : `${row.bidRate}%`}</dd></div><div><dt>투찰금액</dt><dd>{money(row.bidAmount)}</dd></div><div><dt>낙찰금액</dt><dd>{money(row.winningAmount)}</dd></div></dl></article>)}</div></> : <div className="company-section-empty">선택한 조건에 해당하는 수집 이력이 없습니다.</div>}
+          {openingRow && <OpeningResultsPanel key={`${openingRow.type}-${openingRow.number}-${openingRow.revision}`} row={openingRow} activeBusinessNumber={company.businessNumber} onClose={closeResults} onCompany={value => { void findCompanies(value); searchPanel.current?.scrollIntoView({ block: 'start' }); }} />}
+          {history.items.length ? <><div className="company-history-desktop company-table-scroll"><table><thead><tr><th scope="col">공고명 / 수요기관</th><th scope="col">결과</th><th scope="col">순위 / 참가업체</th><th scope="col">투찰금액</th><th scope="col">투찰률</th><th scope="col">낙찰금액</th><th scope="col">개찰일</th></tr></thead><tbody>{history.items.map(row => <tr key={row.id}><td className="company-history-title"><small>{row.type} · {row.number}-{row.revision}</small><NoticeTitle row={row} /><span>{row.agency || '-'}{row.method && ` · ${row.method}`}</span>{row.number && <button className="company-opening-trigger" onClick={event => openResults(row, event.currentTarget)}><ListOrdered size={14} />투찰업체·순위 보기</button>}</td><td><Outcome row={row} /></td><td>{row.rank || '-'} / {row.participantCount == null ? '-' : number(row.participantCount)}</td><td className="company-amount">{money(row.bidAmount)}</td><td>{row.bidRate == null ? '-' : `${row.bidRate}%`}</td><td className="company-amount">{money(row.winningAmount)}</td><td>{date(row.openingAt)}</td></tr>)}</tbody></table></div><div className="company-history-mobile">{history.items.map(row => <article key={row.id}><div><span>{row.type} · {date(row.openingAt)}</span><Outcome row={row} /></div><NoticeTitle row={row} /><p>{row.agency || '-'}</p><dl><div><dt>순위 / 참가업체</dt><dd>{row.rank || '-'} / {row.participantCount == null ? '-' : number(row.participantCount)}</dd></div><div><dt>투찰률</dt><dd>{row.bidRate == null ? '-' : `${row.bidRate}%`}</dd></div><div><dt>투찰금액</dt><dd>{money(row.bidAmount)}</dd></div><div><dt>낙찰금액</dt><dd>{money(row.winningAmount)}</dd></div></dl>{row.number && <button className="company-opening-trigger" onClick={event => openResults(row, event.currentTarget)}><ListOrdered size={15} />투찰업체·순위 보기<ChevronRight size={14} /></button>}</article>)}</div></> : <div className="company-section-empty">선택한 조건에 해당하는 수집 이력이 없습니다.</div>}
           <footer className="company-history-footer"><p>{history.totalCount ? `${number((history.page - 1) * history.pageSize + 1)}–${number(Math.min(history.page * history.pageSize, history.totalCount))} / ` : ''}{number(history.totalCount)}건</p><nav aria-label="업체 입찰 이력 페이지" className="company-pagination"><button disabled={pageGroup === 0} aria-label="이전 10개 페이지" onClick={() => setFilter({ ...filter, page: pageGroup })}><ChevronLeft size={17} /></button>{pages.map(page => <button key={page} className={page === filter.page ? 'active' : ''} aria-current={page === filter.page ? 'page' : undefined} onClick={() => setFilter({ ...filter, page })}>{page}</button>)}<button disabled={pageGroup + 10 >= pageCount} aria-label="다음 10개 페이지" onClick={() => setFilter({ ...filter, page: pageGroup + 11 })}><ChevronRight size={17} /></button></nav></footer>
         </section>
       </>}

@@ -24,6 +24,16 @@ create table if not exists bid_archive_private.jobs (
   failures integer not null default 0, last_error text,
   primary key(type,day)
 );
+alter table bid_archive_private.jobs add column if not exists last_snapshot_digest text;
+alter table bid_archive_private.jobs add column if not exists verified_at timestamptz;
+-- Older collectors completed a day after one traversal. Preserve every record,
+-- but recheck those snapshots before advertising verified coverage.
+update public.bid_archive_coverage c set complete=false
+  where c.complete and not exists(select 1 from bid_archive_private.jobs j
+    where j.type=c.type and j.day=c.day and j.verified_at is not null);
+update bid_archive_private.jobs set page=1,expected_total=null,completed_at=null,
+  started_at=now(),next_attempt=now()
+  where completed_at is not null and request_id is null and verified_at is null;
 create table if not exists bid_archive_private.seen (
   type text not null, day date not null, entry_id text not null,
   primary key(type,day,entry_id)
@@ -45,12 +55,12 @@ insert into public.bid_archive_health values(true,'preparing','공개 입찰 이
 
 create or replace function bid_archive_private.ingest(p_type text,p_day date,p_page integer,p_body jsonb)
 returns void language plpgsql security invoker set search_path = '' as $$
-declare j bid_archive_private.jobs%rowtype; n integer; expected integer; has_more boolean;
+declare j bid_archive_private.jobs%rowtype; n integer; expected integer; has_more boolean; snapshot_digest text;
 begin
   select * into strict j from bid_archive_private.jobs where type=p_type and day=p_day for update;
   if j.completed_at is not null then raise exception 'Completed snapshot cannot accept another page'; end if;
-  if j.page<>p_page or p_body->>'type'<>p_type or p_body->>'day'<>p_day::text or (p_body->>'page')::int<>p_page
-    or (p_body->>'pageSize')::int<>999 then raise exception 'Page identity mismatch'; end if;
+  if j.page is distinct from p_page or p_body->>'type' is distinct from p_type or p_body->>'day' is distinct from p_day::text
+    or (p_body->>'page')::int is distinct from p_page or (p_body->>'pageSize')::int is distinct from 999 then raise exception 'Page identity mismatch'; end if;
   n := (p_body->>'sourceCount')::int; expected := (p_body->>'totalCount')::int;
   has_more := (p_body->>'hasMore')::boolean;
   if n is null or expected is null or expected<0 or has_more is null
@@ -58,15 +68,18 @@ begin
     or has_more<>(p_page*999<expected) then raise exception 'Incomplete provider page'; end if;
   if j.expected_total is not null and j.expected_total<>expected then
     update bid_archive_private.jobs set page=1,expected_total=null,request_id=null,requested_at=null,
-      started_at=now(),next_attempt=now()+interval '1 minute',last_error='Provider total changed; restarting snapshot' where type=p_type and day=p_day;
+      started_at=now(),next_attempt=now()+interval '1 minute',failures=failures+1,
+      last_snapshot_digest=null,verified_at=null,last_error='Provider total changed; restarting snapshot' where type=p_type and day=p_day;
     delete from bid_archive_private.seen where type=p_type and day=p_day;
     return;
   end if;
-  if jsonb_typeof(p_body->'entries')<>'array' or jsonb_typeof(p_body->'notices')<>'array' or jsonb_typeof(p_body->'companies')<>'array' then raise exception 'Malformed snapshot'; end if;
+  if jsonb_typeof(p_body->'entries') is distinct from 'array' or jsonb_typeof(p_body->'notices') is distinct from 'array'
+    or jsonb_typeof(p_body->'companies') is distinct from 'array' then raise exception 'Malformed snapshot'; end if;
   if exists(select 1 from jsonb_array_elements(p_body->'entries') e join bid_archive_private.seen s
     on s.type=p_type and s.day=p_day and s.entry_id=e->>'id') then
     update bid_archive_private.jobs set page=1,expected_total=null,request_id=null,requested_at=null,
-      started_at=now(),next_attempt=now()+interval '2 minutes',last_error='Provider page ordering changed; restarting snapshot' where type=p_type and day=p_day;
+      started_at=now(),next_attempt=now()+interval '2 minutes',failures=failures+1,
+      last_snapshot_digest=null,verified_at=null,last_error='Provider page ordering changed; restarting snapshot' where type=p_type and day=p_day;
     delete from bid_archive_private.seen where type=p_type and day=p_day;
     return;
   end if;
@@ -86,20 +99,45 @@ begin
   insert into public.bid_archive_coverage(type,day,complete,updated_at) values(p_type,p_day,false,now())
     on conflict(type,day) do update set complete=false,updated_at=now();
   update bid_archive_private.jobs set page=case when has_more then p_page+1 else p_page end,
-    expected_total=expected,request_id=null,requested_at=null,failures=0,last_error=null,
+    expected_total=expected,request_id=null,requested_at=null,failures=case when has_more then failures else 0 end,last_error=null,
     completed_at=case when has_more then null else now() end,next_attempt=now()
     where type=p_type and day=p_day;
   if not has_more then
-    -- Only a complete, stable traversal may replace a day's previous provider snapshot.
+    select md5(expected::text || ':' || coalesce(string_agg(s.entry_id,',' order by s.entry_id),''))
+      into snapshot_digest from bid_archive_private.seen s where s.type=p_type and s.day=p_day;
+    if j.last_snapshot_digest is distinct from snapshot_digest then
+      -- Equal totals alone do not prove a stable dataset. A second complete
+      -- traversal must reproduce the same identities before any old row is hidden.
+      update bid_archive_private.jobs set page=1,expected_total=null,completed_at=null,
+        started_at=now(),next_attempt=now()+interval '5 minutes',last_snapshot_digest=snapshot_digest,
+        verified_at=null,failures=case when j.last_snapshot_digest is null then 0 else j.failures+1 end,
+        last_error='Full snapshot saved; awaiting matching verification'
+        where type=p_type and day=p_day;
+      delete from bid_archive_private.seen where type=p_type and day=p_day;
+      return;
+    end if;
+    -- Only two matching complete traversals may replace the previous snapshot.
     update public.bid_archive_entries e set archived=true from public.bid_archive_notices nt
       where e.notice_id=nt.id and nt.type=p_type and (nt.opening_at at time zone 'Asia/Seoul')::date=p_day
       and not exists(select 1 from bid_archive_private.seen s where s.type=p_type and s.day=p_day and s.entry_id=e.id);
     update public.bid_archive_coverage set complete=(p_day<(now() at time zone 'Asia/Seoul')::date),updated_at=now() where type=p_type and day=p_day;
+    update bid_archive_private.jobs set verified_at=now() where type=p_type and day=p_day;
     delete from bid_archive_private.seen where type=p_type and day=p_day;
     -- Backfill continues backwards. No user query span / rolling retention limit.
     if p_day>'0001-01-01'::date then insert into bid_archive_private.jobs(type,day) values(p_type,p_day-1) on conflict do nothing; end if;
   end if;
 end $$;
+
+create or replace function bid_archive_private.seed_failed_predecessors(p_today date)
+returns void language sql security invoker set search_path = '' as $$
+  -- A malformed historical day remains retryable without blocking every older
+  -- day. Enqueueing does not issue API calls; tick's shared limits still apply.
+  insert into bid_archive_private.jobs(type,day)
+    select j.type,j.day-1 from bid_archive_private.jobs j
+    where j.completed_at is null and j.failures>=2
+      and j.day<p_today and j.day>'0001-01-01'::date
+    on conflict(type,day) do nothing;
+$$;
 
 create or replace function bid_archive_private.tick()
 returns void language plpgsql security invoker set search_path = '' as $$
@@ -131,6 +169,7 @@ begin
       update public.bid_archive_health set status='retrying',message='원본 응답을 확인하고 있습니다. 저장된 이력은 조회할 수 있으며 수집은 자동으로 재시도합니다.',updated_at=now() where singleton;
     end;
   end loop;
+  perform bid_archive_private.seed_failed_predecessors(today);
   if pg_database_size(current_database())>=cfg.storage_ceiling then
     update public.bid_archive_health set status='storage',message='저장 공간 확장이 필요해 추가 수집을 대기 중입니다. 기존 이력의 조회 기간에는 제한이 없습니다.',updated_at=now() where singleton; return;
   end if;

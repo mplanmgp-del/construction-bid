@@ -3,8 +3,14 @@ import type { G2bBusinessType, G2bOpeningResult, G2bResultPage } from '../g2b-ty
 import type { BidNotice } from '../types';
 import { formatDateTime, formatPrice } from '../domain';
 import { dateRangeError, fetchApi, koreanToday, mergeById, recentDates } from './client';
+import { OpeningResultsPanel } from './OpeningResultsPanel';
 
 export function PublicResults({ bid }: { bid?: BidNotice }) {
+  if (bid) return <OpeningResultsPanel key={`${bid.type}-${bid.number}-${bid.revision}`} row={bid} embedded autoFocus={false} />;
+  return <LegacyPublicResults />;
+}
+
+function LegacyPublicResults({ bid }: { bid?: BidNotice }) {
   const [query, setQuery] = useState(() => {
     const openingDate = bid?.openingAt && Number.isFinite(Date.parse(bid.openingAt)) ? koreanToday(new Date(bid.openingAt)) : '';
     return { type: (bid?.type ?? '공사') as G2bBusinessType, ...(openingDate ? { from: openingDate, to: openingDate } : recentDates(1)) };

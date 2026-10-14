@@ -4,6 +4,7 @@ import { mapDetailSections } from './g2b-detail.ts';
 import { createRelatedLoader } from './g2b-related.ts';
 import { createCompanyLoader } from './g2b-company.ts';
 import { createArchivePageLoader } from './company-archive-page.ts';
+import { createOpeningResultsLoader, createOpeningSummaryLoader } from './g2b-results.ts';
 import { startSearchWindows } from '../src/live/start-range.ts';
 import { ProviderQuotaError, providerRetryAfter } from './provider-quota.ts';
 
@@ -318,34 +319,10 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       fetchedAt: new Date(now()).toISOString(), source: '나라장터 공공데이터개방표준서비스' };
   }
   const related = createRelatedLoader(request, now);
-  async function resultSummary(number: string, revision: string, type: G2bBusinessType, openingAt: string): Promise<G2bResultSummary> {
-    return cached(`result-summary:${type}:${number}:${revision}:${openingAt}`, async () => {
-      const date = new Date(Date.parse(openingAt) + 9 * 3600_000).toISOString().slice(0, 16).replace(/[-T:]/g, '');
-      const rows: Row[] = [];
-      let complete = false;
-      const finishBy = now() + 30_000;
-      // The approved standard service filters by opening time, not notice number.
-      // Fetch only this minute; always join exact number, revision and business type locally.
-      for (let page = 1; page <= 10; page++) {
-        const remaining = finishBy - now();
-        if (remaining <= 0) break;
-        const result = await request(STANDARD_BASE, 'getDataSetOpnStdScsbidInfo', {
-          bsnsDivCd: type === '공사' ? '3' : '5', opengBgnDt: date, opengEndDt: date,
-          pageNo: String(page), numOfRows: '999',
-        }, Math.min(15_000, remaining));
-        rows.push(...result.items);
-        if (rows.length >= result.totalCount) { complete = true; break; }
-        if (!result.items.length) break;
-      }
-      const matched = rows.filter(row => text(row.bidNtceNo) === number && /^\d{1,3}$/.test(text(row.bidNtceOrd))
-        && text(row.bidNtceOrd).padStart(3, '0') === revision && text(row.bsnsDivNm) === type);
-      const states = unique(matched.map(row => text(row.opengRsltDivNm)));
-      return { number, revision, type, complete, fetchedAt: new Date(now()).toISOString(),
-        firstCompanies: unique(matched.filter(row => /^0*1$/.test(text(row.opengRank))).map(row => text(row.bidprcCorpNm))),
-        winnerCompanies: unique(matched.map(row => text(row.fnlSucsfCorpNm) || (row.sucsfYn === 'Y' ? text(row.bidprcCorpNm) : ''))),
-        result: states.length === 1 ? states[0] : '',
-      };
-    });
+  const openingResults = createOpeningResultsLoader(request, now);
+  const openingSummary = createOpeningSummaryLoader(request, now);
+  async function resultSummary(number: string, revision: string, type: G2bBusinessType, _openingAt: string): Promise<G2bResultSummary> {
+    return openingSummary({ number, revision, type });
   }
   async function startNotices(query: SearchQuery, windowIndex: number): Promise<G2bNoticePage> {
     if (!query.keyword.trim()) throw new G2bError(400, 'KEYWORD_REQUIRED', '철거·석면 등 검색할 공고명을 입력해 주세요.');
@@ -390,5 +367,5 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     });
   }
   return { notices, startNotices, detail, results, related, resultSummary, participationRegions, noticeRegions,
-    company: createCompanyLoader(request, now), archivePage: createArchivePageLoader(request, now) };
+    openingResults, company: createCompanyLoader(request, now), archivePage: createArchivePageLoader(request, now) };
 }
