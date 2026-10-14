@@ -3,7 +3,7 @@ import type { NoticeOpeningResults, OpeningResultGroup, OpeningResultsQuery } fr
 import type { RelatedRequest } from './g2b-related.ts';
 
 type Row = Record<string, unknown>;
-type Collected = { rows: Row[]; complete: boolean; warnings: string[]; error?: unknown };
+type Collected = { rows: Row[]; complete: boolean; warnings: string[]; error?: unknown; pageLimitExceeded?: boolean };
 const BASE = 'https://apis.data.go.kr/1230000/as/ScsbidInfoService/';
 const PAGE_SIZE = 999;
 const MAX_PAGES = 100;
@@ -40,12 +40,12 @@ const exact = (row: Row, q: OpeningResultsQuery) => text(row.bidNtceNo) === q.nu
   && /^\d{1,3}$/.test(text(row.bidNtceOrd)) && text(row.bidNtceOrd).padStart(3, '0') === q.revision;
 
 /** The newly approved service supports exact notice lookup: no date-wide participant scans. */
-function collector(request: RelatedRequest, now: () => number, q: OpeningResultsQuery, finishBy: number) {
+function collector(request: RelatedRequest, now: () => number, q: OpeningResultsQuery, finishBy: number, maxPages = MAX_PAGES) {
   return async (operation: string, label: string, byDivision = false): Promise<Collected> => {
     const rows: Row[] = [], seen = new Set<string>();
     let total: number | undefined;
     try {
-      for (let page = 1; page <= MAX_PAGES; page++) {
+      for (let page = 1; page <= maxPages; page++) {
         const remaining = finishBy - now();
         if (remaining <= 0) throw new OpeningResultsError(504, 'OPENING_INCOMPLETE', '결과 조회를 모두 완료하지 못했습니다.');
         const result = await request(BASE, operation, {
@@ -71,10 +71,11 @@ function collector(request: RelatedRequest, now: () => number, q: OpeningResults
             warnings: wrongNotice || invalidGroup ? [`${label}의 일부 공고·입찰분류·재입찰 번호를 확인하지 못했습니다.`] : [] };
         }
       }
-      throw new OpeningResultsError(502, 'OPENING_INCOMPLETE', '공개 결과가 많아 일부만 조회되었습니다.');
+      throw new OpeningResultsError(502, 'OPENING_PAGE_LIMIT', '공개 결과가 많아 일부만 조회되었습니다.');
     } catch (error) {
       return { rows: rows.filter(row => exact(row, q) && groupIdentity(row)), complete: false,
-        warnings: [`${label}을 모두 불러오지 못했습니다. 다시 조회해 주세요.`], error };
+        warnings: [`${label}을 모두 불러오지 못했습니다. 다시 조회해 주세요.`], error,
+        pageLimitExceeded: error instanceof OpeningResultsError && error.code === 'OPENING_PAGE_LIMIT' };
     }
   };
 }
@@ -104,9 +105,11 @@ export function createOpeningSummaryLoader(request: RelatedRequest, now = Date.n
 }
 
 export function createOpeningResultsLoader(request: RelatedRequest, now = Date.now) {
-  return async (q: OpeningResultsQuery): Promise<NoticeOpeningResults> => {
+  return async (q: OpeningResultsQuery, options: { archive?: boolean } = {}): Promise<NoticeOpeningResults> => {
     validate(q);
-    const collect = collector(request, now, q, now() + 45_000), suffix = q.type === '공사' ? 'Cnstwk' : 'Servc';
+    // The background worker reserves 15 provider calls per notice. Interactive
+    // detail reads keep their existing full pagination allowance.
+    const collect = collector(request, now, q, now() + 45_000, options.archive ? 3 : MAX_PAGES), suffix = q.type === '공사' ? 'Cnstwk' : 'Servc';
     const [opening, winners, participants, failing, rebids] = await Promise.all([
       collect(`getOpengResultListInfo${suffix}`, '개찰 결과', true), collect(`getScsbidListSttus${suffix}`, '최종 낙찰 결과', true),
       collect('getOpengResultListInfoOpengCompt', '참가업체 결과'), collect('getOpengResultListInfoFailing', '유찰 결과'),
@@ -164,6 +167,7 @@ export function createOpeningResultsLoader(request: RelatedRequest, now = Date.n
     for (const group of items) group.participants.sort((a, b) => (integer(a.rank) ?? Infinity) - (integer(b.rank) ?? Infinity) || a.companyName.localeCompare(b.companyName, 'ko'));
     const complete = sources.every(source => source.complete) && warnings.length === 0;
     return { ...q, fetchedAt: new Date(now()).toISOString(), source: '나라장터 낙찰정보서비스', complete, warnings: unique(warnings),
+      ...(options.archive ? { archiveLimitExceeded: sources.some(source => source.pageLimitExceeded) } : {}),
       participantCount: items.reduce((count, group) => count + group.participants.length, 0), groups: items, summary: summary(q, opening, winners, now) };
   };
 }

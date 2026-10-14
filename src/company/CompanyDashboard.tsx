@@ -3,6 +3,7 @@ import { ArrowRight, BarChart3, Building2, CalendarDays, ChevronLeft, ChevronRig
 import type { CompanyProfile } from '../types';
 import type { CompanyGroupSummary, CompanyHistory, CompanyParticipation, PublicCompany } from '../company-types';
 import { OpeningResultsPanel } from '../live/OpeningResultsPanel';
+import { CompanyAwardsPanel } from './CompanyAwardsPanel';
 import { fetchApi } from '../live/client';
 import './company-dashboard.css';
 
@@ -43,12 +44,14 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
   const [historyError, setHistoryError] = useState('');
   const [refresh, setRefresh] = useState(0);
   const [openingRow, setOpeningRow] = useState<CompanyParticipation | null>(null);
+  const [historyMode, setHistoryMode] = useState<'participation' | 'awards'>('participation');
   const searchController = useRef<AbortController | null>(null);
   const searchSequence = useRef(0);
   const searchPanel = useRef<HTMLDivElement | null>(null);
   const openingTrigger = useRef<HTMLButtonElement | null>(null);
 
   function selectCompany(company: PublicCompany) {
+    setHistoryMode('participation');
     setOpeningRow(null);
     setSelected(company); setHistory(null); setHistoryError(''); setDates({ from: '', to: '' });
     setFilter({ ...initialFilter }); setDateError(''); setMatches([]); setSearchMessage('');
@@ -145,7 +148,9 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
         setDateError(''); setFilter({ ...filter, ...dates, page: 1 });
       }}><div className="company-period-label"><CalendarDays size={19} /><div><strong>개찰일 기준</strong><span>일수 제한 없이 조회</span></div></div><label>시작일<input type="date" value={dates.from} onChange={event => setDates({ ...dates, from: event.target.value })} /></label><span className="company-date-separator">~</span><label>종료일<input type="date" value={dates.to} onChange={event => setDates({ ...dates, to: event.target.value })} /></label><button className="button button-primary" disabled={loading}>적용</button><button type="button" className={`button button-secondary${!filter.from && !filter.to ? ' is-selected' : ''}`} disabled={loading} onClick={() => { setDates({ from: '', to: '' }); setDateError(''); setFilter({ ...filter, from: '', to: '', page: 1 }); }}>전체 기간</button><button type="button" className="company-refresh" disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={16} />새로고침</button>{dateError && <p className="company-error" role="alert">{dateError}</p>}</form>
 
-      <div className={`company-coverage${history?.coverage.status === 'unavailable' || historyError ? ' is-warning' : ''}`} role="status"><Info size={17} /><div><strong>{loading ? '업체 입찰 이력을 불러오고 있습니다.' : historyError ? '입찰 이력을 조회하지 못했습니다.' : history?.coverage.status === 'ready' ? '공개 자료 조회 현황' : '수집된 이력 기준'}</strong><p>{historyError || history?.coverage.message || '공개된 데이터를 확인한 뒤 조회 범위를 표시합니다.'}</p>{history?.coverage && <small>수집 범위 {date(history.coverage.from)} ~ {date(history.coverage.to)}{history.coverage.updatedAt && ` · 최근 반영 ${date(history.coverage.updatedAt)}`}</small>}</div>{historyError && <button className="button button-secondary" onClick={() => setRefresh(value => value + 1)}>다시 조회</button>}</div>
+      <div className="company-data-tabs" role="group" aria-label="업체 이력 종류"><button className={historyMode === 'participation' ? 'active' : ''} aria-pressed={historyMode === 'participation'} onClick={() => setHistoryMode('participation')}>입찰 참여·미낙찰 이력</button><button className={historyMode === 'awards' ? 'active' : ''} aria-pressed={historyMode === 'awards'} onClick={() => setHistoryMode('awards')}>확정 낙찰 직접 조회</button></div>
+      {historyMode === 'awards' ? <CompanyAwardsPanel key={`${company.businessNumber}:${refresh}`} company={company} from={filter.from} to={filter.to} /> : <>
+      <div className={`company-coverage${history?.coverage.status === 'unavailable' || historyError ? ' is-warning' : ''}`} role="status"><Info size={17} /><div><strong>{loading ? '업체 입찰 이력을 불러오고 있습니다.' : historyError ? '입찰 이력을 조회하지 못했습니다.' : history?.coverage.status === 'ready' ? '공개 자료 조회 현황' : '확인된 참여 이력 기준'}</strong><p>{historyError || history?.coverage.message || '공개된 데이터를 확인한 뒤 조회 범위를 표시합니다.'}</p>{history?.coverage && <small>{history.coverage.from && history.coverage.to ? `전체 수집을 마친 날짜 범위 ${date(history.coverage.from)} ~ ${date(history.coverage.to)}` : '과거 날짜별 전체 수집 진행 중'}{history.coverage.updatedAt && ` · 최근 반영 ${date(history.coverage.updatedAt)}`}</small>}<small>개찰 참가업체 기록을 기준으로 집계합니다. 개찰 없이 체결된 수의계약은 이 참여 통계에 포함하지 않습니다.</small></div>{historyError && <button className="button button-secondary" onClick={() => setRefresh(value => value + 1)}>다시 조회</button>}</div>
 
       {loading ? <div className="company-metric-grid" aria-label="입찰 실적 불러오는 중">{Array.from({ length: 4 }, (_, index) => <div key={index} className="company-metric-skeleton panel"><span /><strong /><span /></div>)}</div> : <div className="company-metric-grid">
         <article className="company-metric panel"><span className="company-metric-icon"><FileCheck2 size={21} /></span><p>입찰 참여</p><strong>{summary ? number(summary.participationCount) : '-'}<small>건</small></strong><span>{filter.from || filter.to ? '선택한 기간' : '저장된 전체 기간'} 기준</span></article>
@@ -179,6 +184,7 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
           {history.items.length ? <><div className="company-history-desktop company-table-scroll"><table><thead><tr><th scope="col">공고명 / 수요기관</th><th scope="col">결과</th><th scope="col">순위 / 참가업체</th><th scope="col">투찰금액</th><th scope="col">투찰률</th><th scope="col">낙찰금액</th><th scope="col">개찰일</th></tr></thead><tbody>{history.items.map(row => <tr key={row.id}><td className="company-history-title"><small>{row.type} · {row.number}-{row.revision}</small><NoticeTitle row={row} /><span>{row.agency || '-'}{row.method && ` · ${row.method}`}</span>{row.number && <button className="company-opening-trigger" onClick={event => openResults(row, event.currentTarget)}><ListOrdered size={14} />투찰업체·순위 보기</button>}</td><td><Outcome row={row} /></td><td>{row.rank || '-'} / {row.participantCount == null ? '-' : number(row.participantCount)}</td><td className="company-amount">{money(row.bidAmount)}</td><td>{row.bidRate == null ? '-' : `${row.bidRate}%`}</td><td className="company-amount">{money(row.winningAmount)}</td><td>{date(row.openingAt)}</td></tr>)}</tbody></table></div><div className="company-history-mobile">{history.items.map(row => <article key={row.id}><div><span>{row.type} · {date(row.openingAt)}</span><Outcome row={row} /></div><NoticeTitle row={row} /><p>{row.agency || '-'}</p><dl><div><dt>순위 / 참가업체</dt><dd>{row.rank || '-'} / {row.participantCount == null ? '-' : number(row.participantCount)}</dd></div><div><dt>투찰률</dt><dd>{row.bidRate == null ? '-' : `${row.bidRate}%`}</dd></div><div><dt>투찰금액</dt><dd>{money(row.bidAmount)}</dd></div><div><dt>낙찰금액</dt><dd>{money(row.winningAmount)}</dd></div></dl>{row.number && <button className="company-opening-trigger" onClick={event => openResults(row, event.currentTarget)}><ListOrdered size={15} />투찰업체·순위 보기<ChevronRight size={14} /></button>}</article>)}</div></> : <div className="company-section-empty">선택한 조건에 해당하는 수집 이력이 없습니다.</div>}
           <footer className="company-history-footer"><p>{history.totalCount ? `${number((history.page - 1) * history.pageSize + 1)}–${number(Math.min(history.page * history.pageSize, history.totalCount))} / ` : ''}{number(history.totalCount)}건</p><nav aria-label="업체 입찰 이력 페이지" className="company-pagination"><button disabled={pageGroup === 0} aria-label="이전 10개 페이지" onClick={() => setFilter({ ...filter, page: pageGroup })}><ChevronLeft size={17} /></button>{pages.map(page => <button key={page} className={page === filter.page ? 'active' : ''} aria-current={page === filter.page ? 'page' : undefined} onClick={() => setFilter({ ...filter, page })}>{page}</button>)}<button disabled={pageGroup + 10 >= pageCount} aria-label="다음 10개 페이지" onClick={() => setFilter({ ...filter, page: pageGroup + 11 })}><ChevronRight size={17} /></button></nav></footer>
         </section>
+      </>}
       </>}
     </>}
   </section>;

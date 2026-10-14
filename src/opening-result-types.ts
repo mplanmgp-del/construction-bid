@@ -43,6 +43,8 @@ export interface NoticeOpeningResults extends OpeningResultsQuery {
   source: string;
   complete: boolean;
   warnings: string[];
+  /** Archive requests only: the bounded page allowance was exhausted. Retrying the same allowance cannot complete this snapshot. */
+  archiveLimitExceeded?: boolean;
   /** Number of participant records actually returned, across all lots and rebid rounds. */
   participantCount: number;
   groups: OpeningResultGroup[];

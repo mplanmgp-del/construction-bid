@@ -89,6 +89,36 @@ describe('approved exact-notice opening service', () => {
     expect(result.summary.complete).toBe(false);
   });
 
+  it('bounds background archive pages without truncating the interactive result', async () => {
+    const source = Array.from({ length: 3000 }, (_, index) => ({ ...participant, prcbdrBizno: String(7000000000 + index), opengRank: String(index + 1) }));
+    const background = fixture({ getOpengResultListInfoOpengCompt: source });
+    const partial = await createOpeningResultsLoader(background, now)(query, { archive: true });
+    expect(partial.complete).toBe(false);
+    expect(partial.archiveLimitExceeded).toBe(true);
+    expect(partial.participantCount).toBe(2997);
+    expect(background.mock.calls.filter(call => call[1] === 'getOpengResultListInfoOpengCompt')).toHaveLength(3);
+    expect(background.mock.calls.length).toBeLessThanOrEqual(15);
+    const interactive = await createOpeningResultsLoader(fixture({ getOpengResultListInfoOpengCompt: source }), now)(query);
+    expect(interactive.complete).toBe(true);
+    expect(interactive.archiveLimitExceeded).not.toBe(true);
+    expect(interactive.participantCount).toBe(3000);
+  });
+
+  it('does not classify transient archive failures or a fully read third page as a page limit', async () => {
+    const source = Array.from({ length: 2997 }, (_, index) => ({ ...participant, prcbdrBizno: String(7000000000 + index), opengRank: String(index + 1) }));
+    const complete = await createOpeningResultsLoader(fixture({ getOpengResultListInfoOpengCompt: source }), now)(query, { archive: true });
+    expect(complete.complete).toBe(true);
+    expect(complete.archiveLimitExceeded).toBe(false);
+    const fallback = fixture();
+    const failure: RelatedRequest = async (...args) => {
+      if (args[1] === 'getOpengResultListInfoOpengCompt') throw new Error('temporary failure');
+      return fallback(...args);
+    };
+    const partial = await createOpeningResultsLoader(failure, now)(query, { archive: true });
+    expect(partial.complete).toBe(false);
+    expect(partial.archiveLimitExceeded).toBe(false);
+  });
+
   it('rejects total failures instead of returning a fabricated empty completed result', async () => {
     const error = new Error('provider access denied');
     const request: RelatedRequest = async () => { throw error; };

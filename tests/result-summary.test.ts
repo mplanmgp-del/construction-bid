@@ -36,7 +36,10 @@ describe('dedicated public result HTTP integration', () => {
     const api = createG2bClient({ serviceKey: 'test' });
     const loader = vi.spyOn(api, 'openingResults').mockResolvedValue({ complete: true } as never);
     expect((await handleG2bRequest('/api/opening-results', params(), api)).status).toBe(200);
-    expect(loader).toHaveBeenCalledWith({ number: identity.bidNtceNo, revision: '000', type: '공사' });
+    expect(loader).toHaveBeenCalledWith({ number: identity.bidNtceNo, revision: '000', type: '공사' }, { archive: false });
+    const archive = params(); archive.set('archive', '1');
+    expect((await handleG2bRequest('/api/opening-results', archive, api)).status).toBe(200);
+    expect(loader).toHaveBeenLastCalledWith({ number: identity.bidNtceNo, revision: '000', type: '공사' }, { archive: true });
     loader.mockClear(); const invalid = params(); invalid.set('revision', 'broken');
     expect((await handleG2bRequest('/api/opening-results', invalid, api)).status).toBe(400);
     expect(loader).not.toHaveBeenCalled();

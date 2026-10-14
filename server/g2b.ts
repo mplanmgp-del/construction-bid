@@ -3,6 +3,7 @@ import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage, G2bNoticeRegions,
 import { mapDetailSections } from './g2b-detail.ts';
 import { createRelatedLoader } from './g2b-related.ts';
 import { createCompanyLoader } from './g2b-company.ts';
+import { createCompanyAwardsLoader } from './company-awards.ts';
 import { createArchivePageLoader } from './company-archive-page.ts';
 import { createOpeningResultsLoader, createOpeningSummaryLoader } from './g2b-results.ts';
 import { startSearchWindows } from '../src/live/start-range.ts';
@@ -367,5 +368,5 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     });
   }
   return { notices, startNotices, detail, results, related, resultSummary, participationRegions, noticeRegions,
-    openingResults, company: createCompanyLoader(request, now), archivePage: createArchivePageLoader(request, now) };
+    openingResults, company: createCompanyLoader(request, now), companyAwards: createCompanyAwardsLoader(request, now), archivePage: createArchivePageLoader(request, now) };
 }
