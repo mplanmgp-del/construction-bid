@@ -1,6 +1,6 @@
-import { Star } from 'lucide-react';
+import { ChevronDown, Star } from 'lucide-react';
 import { assessRegion, assessSearchRegion, formatPrice } from '../domain';
-import type { BidNotice, CompanyProfile } from '../types';
+import { NOTICE_STATUSES, type BidNotice, type CompanyProfile, type SearchFilters } from '../types';
 import { noticeState } from '../notice-status';
 export { noticeState } from '../notice-status';
 import { needsResult, resultKey, useResultSummaries } from '../live/useResultSummaries';
@@ -13,12 +13,14 @@ export function HighlightTitle({ title, keyword }: { title: string; keyword: str
   return <>{title.split(pattern).map((part, index) => index % 2 ? <mark key={index}>{part}</mark> : part)}</>;
 }
 
-export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSelect, onOpen, onBookmark, now = Date.now(), searchProvince = '전체', resultsPaused = false }: {
+export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSelect, onOpen, onBookmark, now = Date.now(), searchProvince = '전체', resultsPaused = false, status = '전체', onStatusChange }: {
   bids: BidNotice[]; keyword: string; profile: CompanyProfile; bookmarks: string[];
   selected: string[]; onSelect: (ids: string[]) => void; onOpen: (bid: BidNotice) => void; onBookmark: (id: string) => void;
   now?: number;
   searchProvince?: string;
   resultsPaused?: boolean;
+  status?: SearchFilters['status'];
+  onStatusChange?: (status: SearchFilters['status']) => void;
 }) {
   const { entries, refresh } = useResultSummaries(bids, !resultsPaused);
   const checked = bids.length > 0 && bids.every(bid => selected.includes(bid.id));
@@ -27,7 +29,7 @@ export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSele
   function select(id: string) { onSelect(selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id]); }
   return <div className="notice-list">
     <table className="notice-grid"><caption className="sr-only">공고별 상태, 수요기관 및 공개 개찰 결과</caption>
-      <thead><tr><th className="nl-select"><input type="checkbox" aria-label="현재 페이지 공고 전체 선택" checked={checked} ref={input => { if (input) input.indeterminate = !checked && bids.some(bid => selected.includes(bid.id)); }} onChange={() => onSelect(checked ? selected.filter(id => !bids.some(bid => bid.id === id)) : [...new Set([...selected, ...bids.map(bid => bid.id)])])} /></th><th className="nl-title">공고명</th><th className="nl-status">상태</th><th className="nl-agency">수요기관</th><th className="nl-company">1순위 업체</th><th className="nl-company">낙찰업체</th><th className="nl-price">추정가격</th></tr></thead>
+      <thead><tr><th className="nl-select"><input type="checkbox" aria-label="현재 페이지 공고 전체 선택" checked={checked} disabled={!bids.length} ref={input => { if (input) input.indeterminate = !checked && bids.some(bid => selected.includes(bid.id)); }} onChange={() => onSelect(checked ? selected.filter(id => !bids.some(bid => bid.id === id)) : [...new Set([...selected, ...bids.map(bid => bid.id)])])} /></th><th className="nl-title">공고명</th><th className="nl-status">{onStatusChange ? <label className={`nl-status-filter${status !== '전체' ? ' is-active' : ''}`}><span aria-hidden="true">{status === '전체' ? '상태' : status}</span><ChevronDown size={14} aria-hidden="true" /><select aria-label="공고 상태 필터" value={status} onChange={event => onStatusChange(event.target.value as SearchFilters['status'])}>{['전체', ...NOTICE_STATUSES].map(value => <option key={value} value={value}>{value}</option>)}</select></label> : '상태'}</th><th className="nl-agency">수요기관</th><th className="nl-company">1순위 업체</th><th className="nl-company">낙찰업체</th><th className="nl-price">추정가격</th></tr></thead>
       <tbody>{bids.map(bid => {
         const entry = entries[resultKey(bid)];
         const result = entry?.data;
