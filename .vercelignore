@@ -5,3 +5,5 @@ outputs
 tests
 test-results
 playwright-report
+supabase/.temp
+운영계정-신청서-작성.png
