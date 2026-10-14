@@ -52,9 +52,28 @@ export function validateCompanyContractQuery(query: CompanyContractQuery): void 
 /** The official contract operations have NO business-number filter. Read exactly
  * one requested source page, then match the published corpList business number.
  * The caller advances pages/months; this function does not scan or store history. */
-export function createCompanyContractsLoader(request: RelatedRequest, now = Date.now) {
-  return async (query: CompanyContractQuery): Promise<CompanyContractPage> => {
-    validateCompanyContractQuery(query);
+export type ContractArchiveQuery = Omit<CompanyContractQuery, 'businessNumber'>;
+export type ArchivedContract = Omit<CompanyContract, 'businessNumber' | 'companyName' | 'shareRate'> & {
+  parties: { businessNumber: string; name: string; shareRate: number | null }[];
+};
+export interface ContractArchivePage extends ContractArchiveQuery {
+  contracts: ArchivedContract[];
+  pageSize: number;
+  sourceCount: number;
+  totalCount: number;
+  hasMore: boolean;
+  complete: boolean;
+  warnings: string[];
+  sourceFingerprint: string;
+  fetchedAt: string;
+  source: string;
+}
+
+/** One exact nationwide source page. The private database worker advances pages
+ * and only marks the range covered after every page and party has been validated. */
+export function createContractArchivePageLoader(request: RelatedRequest, now = Date.now) {
+  return async (query: ContractArchiveQuery): Promise<ContractArchivePage> => {
+    validateCompanyContractQuery({ ...query, businessNumber: '0000000000' });
     const result = await request(BASE,
       query.type === '공사' ? 'getCntrctInfoListCnstwkPPSSrch' : 'getCntrctInfoListServcPPSSrch', {
         inqryDiv: '1', inqryBgnDate: query.from.replaceAll('-', ''), inqryEndDate: query.to.replaceAll('-', ''),
@@ -68,7 +87,7 @@ export function createCompanyContractsLoader(request: RelatedRequest, now = Date
     if (query.page > Math.max(1, Math.ceil(totalCount / PAGE_SIZE))) {
       fail('COMPANY_CONTRACTS_CHANGED', '조회 중 계약 목록의 페이지 범위가 변경되었습니다. 이 구간을 다시 조회해 주세요.');
     }
-    const items: CompanyContract[] = [], warnings = new Set<string>(), sourceIds = new Set<string>();
+    const contracts: ArchivedContract[] = [], warnings = new Set<string>(), sourceIds = new Set<string>();
     for (const row of rows) {
       const kind = text(row.bsnsDivNm);
       if (kind && !(query.type === '공사' ? ['공사'] : ['용역', '일반용역', '기술용역']).includes(kind)) {
@@ -93,30 +112,50 @@ export function createCompanyContractsLoader(request: RelatedRequest, now = Date
         || companies.rows.some(cells => !/^\d{10}$/.test(cells[9].replace(/[\s-]/g, '')))) {
         warnings.add('일부 계약의 업체 목록을 확인하지 못했습니다. 이 페이지에 해당 업체의 추가 계약이 있을 수 있습니다.');
       }
-      const parties = companies.rows.filter(cells => cells[9].replace(/[\s-]/g, '') === query.businessNumber);
-      if (!parties.length) continue;
+      const partyNumbers = [...new Set(companies.rows.map(cells => cells[9].replace(/[\s-]/g, '')).filter(value => /^\d{10}$/.test(value)))];
+      const parties = partyNumbers.map(businessNumber => {
+        const matching = companies.rows.filter(cells => cells[9].replace(/[\s-]/g, '') === businessNumber);
+        return { businessNumber, name: matching.find(cells => cells[3])?.[3] || '',
+          shareRate: matching.length === 1 ? share(matching[0][6]) : null };
+      });
+      if (parties.some(party => !party.name)) warnings.add('일부 계약의 업체명을 확인하지 못해 해당 업체 연결을 저장하지 않았습니다.');
+      const identifiedParties = parties.filter(party => party.name);
+      // Retain the nationwide source count/fingerprint even when a party cannot
+      // be identified. A private ingest can save valid rows but cannot mark the
+      // range complete or archive older rows while any source warning exists.
+      if (!identifiedParties.length) continue;
       const contractAmount = money(row.thtmCntrctAmt), totalContractAmount = money(row.totCntrctAmt);
       if ((text(row.thtmCntrctAmt) && contractAmount === null) || (text(row.totCntrctAmt) && totalContractAmount === null)) {
         warnings.add('일부 계약금액의 형식을 확인하지 못해 해당 금액을 표시하지 않았습니다.');
       }
-      items.push({
-        id: `contract:${hash([query.type, unifiedContractNumber, contractNumber, query.businessNumber])}`,
-        businessNumber: query.businessNumber, type: query.type,
-        companyName: parties.find(cells => cells[3])?.[3] || '',
+      contracts.push({
+        id: `contract:${sourceId}`, type: query.type, parties: identifiedParties,
         title: text(row.cnstwkNm) || text(row.cntrctNm) || text(row.servcNm), agency: text(row.cntrctInsttNm),
         contractDate, contractNumber, unifiedContractNumber, referenceNumber: text(row.cntrctRefNo),
         noticeNumber: text(row.ntceNo), method: text(row.cntrctCnclsMthdNm), contractAmount, totalContractAmount,
-        // Multiple rows for one firm can describe different work classifications.
-        // Summing their shares would overstate a joint-contract share.
-        shareRate: parties.length === 1 ? share(parties[0][6]) : null,
         sourceUrl: sourceUrl(row.cntrctDtlInfoUrl) || sourceUrl(row.cntrctInfoUrl),
         registeredAt: timestamp(row.rgstDt), changedAt: timestamp(row.chgDt),
       });
     }
     const hasMore = query.page * PAGE_SIZE < totalCount;
-    return { ...query, items, pageSize: PAGE_SIZE, sourceCount: rows.length, totalCount, hasMore,
+    return { ...query, contracts, pageSize: PAGE_SIZE, sourceCount: rows.length, totalCount, hasMore,
       complete: !hasMore && warnings.size === 0, warnings: [...warnings],
       sourceFingerprint: hash([query.type, query.from, query.to, [...sourceIds].sort()]),
       fetchedAt: new Date(now()).toISOString(), source: '나라장터 계약정보서비스 · 계약 체결일 기준' };
+  };
+}
+
+export function createCompanyContractsLoader(request: RelatedRequest, now = Date.now) {
+  const loadPage = createContractArchivePageLoader(request, now);
+  return async (query: CompanyContractQuery): Promise<CompanyContractPage> => {
+    validateCompanyContractQuery(query);
+    const { businessNumber, ...sourceQuery } = query;
+    const { contracts, ...page } = await loadPage(sourceQuery);
+    const items = contracts.flatMap(({ parties, ...contract }) => {
+      const party = parties.find(item => item.businessNumber === businessNumber);
+      return party ? [{ ...contract, id: `contract:${hash([query.type, contract.unifiedContractNumber, contract.contractNumber, businessNumber])}`,
+        businessNumber, companyName: party.name, shareRate: party.shareRate }] : [];
+    });
+    return { ...page, businessNumber, items };
   };
 }

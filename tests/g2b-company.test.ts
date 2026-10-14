@@ -11,6 +11,15 @@ const page = (items: Record<string, unknown>[], totalCount = items.length) => ({
 const request = (override?: RelatedRequest) => vi.fn<RelatedRequest>(override || (async (_base, op) => op === basicOp ? page([basic]) : page([])));
 
 describe('public company loader', () => {
+  it('caps private profile collection at three source calls and preserves incomplete-field warnings', async () => {
+    const req = request(async (_base, op) => op === basicOp ? page([basic]) : page(Array.from({ length: 100 }, (_, index) => ({ bizno: biz, indstrytyNm: `업종${index}`, dtilPrdctClsfcNoNm: `품목${index}` })), 101));
+    const result = await createCompanyLoader(req, Date.now, { maxPages: 1 })(biz);
+    expect(req).toHaveBeenCalledTimes(3);
+    expect(result.company?.registrationDate).toBe(basic.rgstDt);
+    expect(result.company?.licenses).toHaveLength(100);
+    expect(result.warnings).toHaveLength(2);
+    expect(req.mock.calls.every(call => call[2].pageNo === '1')).toBe(true);
+  });
   it('uses exact business-number operations and only public allowlisted fields', async () => {
     const req = request(async (_base, op) => op === basicOp ? page([basic]) : op === licenseOp ? page([{ bizno: biz, indstrytyNm: '해체공사업', indstrytyCd: '4990', indstrytyStatsNm: '등록' }]) : page([{ bizno: biz, dtilPrdctClsfcNoNm: '공급품목', dtilPrdctClsfcNo: '1234567890' }]));
     const result = await createCompanyLoader(req)(biz);

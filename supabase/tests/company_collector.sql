@@ -3,6 +3,17 @@
 -- All fixtures use __collector_test_* IDs and reserved 999* business numbers.
 -- If an assertion aborts the transaction, execute ROLLBACK before further work.
 begin;
+select pg_advisory_xact_lock(62614001);
+
+-- The additive indexed collector bounds backfill by officially watched
+-- registration dates. Keep this older suite valid both before and after that
+-- migration without enabling collection or writing any permanent fixture.
+do $$ begin
+  if to_regclass('bid_archive_private.watched_companies') is not null then
+    execute $fixture$insert into bid_archive_private.watched_companies(business_number,registration_date)
+      values('9999900101','2019-01-01') on conflict(business_number) do nothing$fixture$;
+  end if;
+end $$;
 
 do $$
 declare

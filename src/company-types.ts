@@ -1,3 +1,5 @@
+import type { CompanyContract } from './company-contract-types.ts';
+
 export interface PublicCompany {
   businessNumber: string;
   name: string;
@@ -51,6 +53,8 @@ export interface CompanyHistory {
   businessTypes?: CompanyGroupSummary[];
   methods?: CompanyGroupSummary[];
   competitors?: { businessNumber: string; name: string; sharedCount: number; winCount: number }[];
+  contracts?: CompanyIndexedPage<CompanyContract>;
+  awards?: CompanyIndexedPage<CompanyParticipation>;
   coverage: {
     status: 'collecting' | 'ready' | 'unavailable';
     from: string | null;
@@ -58,4 +62,13 @@ export interface CompanyHistory {
     updatedAt: string | null;
     message: string;
   };
+}
+
+export interface CompanyIndexedPage<T> {
+  items: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  coverage: CompanyHistory['coverage'];
+  source?: string;
 }

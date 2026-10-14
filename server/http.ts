@@ -1,7 +1,9 @@
 import { createG2bClient, G2bError, parseSearch } from './g2b.ts';
+import { waitUntil } from '@vercel/functions';
 import { loadPublicSearch } from './public-search-cache.ts';
 import { ProviderQuotaError } from './provider-quota.ts';
 import { CompanyLookupError } from './g2b-company.ts';
+import { createCompanyArchiveReader, parseCompanyHistoryQuery } from './company-history.ts';
 import { OpeningResultsError } from './g2b-results.ts';
 import { validateCompanyAwardQuery } from './company-awards.ts';
 import type { CompanyAwardQuery } from '../src/company-award-types.ts';
@@ -17,8 +19,14 @@ function serverClient(force = false) {
   return client;
 }
 
-// MY history is read from the provider on demand, without an archive or a persistent result cache.
-export async function handleG2bRequest(path: string, params: URLSearchParams, api: Client = serverClient(path.startsWith('/api/company-') || path === '/api/companies' || params.get('refresh') === '1')): Promise<{ status: number; body: unknown; cacheStatus?: string; retryAfterSeconds?: number }> {
+function companyArchive() {
+  return createCompanyArchiveReader({ url: process.env.VITE_SUPABASE_URL,
+    key: process.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? process.env.VITE_SUPABASE_ANON_KEY });
+}
+
+// Interactive MY history reads the shared official-data index. The source page
+// routes remain bounded and are used by the private collector, not browser scans.
+export async function handleG2bRequest(path: string, params: URLSearchParams, api: Client = serverClient(path.startsWith('/api/company-') || path === '/api/archive-page' || params.get('refresh') === '1')): Promise<{ status: number; body: unknown; cacheStatus?: string; retryAfterSeconds?: number }> {
   try {
     if (path === '/api/company-participation') {
       return { status: 200, body: await api.companyParticipation({ businessNumber: (params.get('businessNumber') || '').replace(/[\s-]/g, ''),
@@ -35,20 +43,38 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
       return { status: 200, body: await api.companyAwards(query) };
     }
     if (path === '/api/companies' || path === '/api/company-history') {
+      const archive = companyArchive();
       if (path === '/api/company-history') {
-        throw new CompanyLookupError(410, 'LIVE_HISTORY_REQUIRED', 'MY입찰관리가 실시간 조회 방식으로 변경되었습니다. 페이지를 새로고침해 주세요.');
+        return { status: 200, body: await archive.combinedHistory(parseCompanyHistoryQuery(params)) };
       }
       const q = params.get('q')?.trim() || '';
       const bizno = q.replace(/[\s-]/g, '');
       if (/^\d{10}$/.test(bizno)) {
-        const result = await api.company(bizno);
+        const cached = params.get('refresh') !== '1' ? await archive.profile(bizno).catch(() => null) : null;
+        const basic = !cached?.company && params.get('refresh') !== '1' ? await archive.company(bizno).catch(() => null) : null;
+        const result = cached?.company ? cached : basic ? { company: basic,
+          warnings: ['저장된 공식 업체 정보입니다. 상세 기본정보는 백그라운드에서 갱신하며 수집된 이력은 바로 조회할 수 있습니다.'] } : await api.company(bizno);
+        if (result.company) waitUntil(archive.watch(bizno));
         return { status: 200, body: { items: result.company ? [result.company] : [], message: result.warnings.join(' ') } };
       }
+      const stored = params.get('source') === 'official' ? [] : await archive.search(q).catch(error => {
+        if (error instanceof CompanyLookupError && error.status === 400) throw error;
+        return [];
+      });
+      if (stored.length) return { status: 200, body: { items: stored, source: 'index', hasMore: stored.length === 30,
+        message: '수집된 공식 업체 명부에서 조회했습니다. 최대 30개 후보가 표시됩니다.' } };
       const year = Number(params.get('year') || new Date(Date.now() + 9 * 3600_000).getUTCFullYear());
       const page = Number(params.get('page') || '1');
-      return { status: 200, body: await api.companyNames(q, year, page) };
+      const result = await api.companyNames(q, year, page);
+      return { status: 200, body: { ...result, source: 'official',
+        message: `${params.get('source') === 'official' ? '' : '저장된 업체 명부에 일치하는 후보가 없어 '}${year}년 나라장터 등록 업체를 조회했습니다. 다른 연도는 공식 업체 더 찾기 또는 사업자등록번호로 조회해 주세요.` } };
     }
     if (path === '/api/archive-page') {
+      const source = params.get('source') || 'participation';
+      if (source === 'company') return { status: 200, body: await api.companyArchive((params.get('businessNumber') || '').replace(/[\s-]/g, '')) };
+      if (source === 'contracts') return { status: 200, body: await api.contractArchivePage({ type: params.get('type') as '공사' | '용역',
+        from: params.get('from') || '', to: params.get('to') || '', page: Number(params.get('page') || '1') }) };
+      if (source !== 'participation') throw new CompanyLookupError(400, 'INVALID_QUERY', '수집 자료 구분을 확인해 주세요.');
       const day = params.get('day') || '';
       const query = parseSearch(new URLSearchParams({ type: params.get('type') || '', from: day, to: day, page: params.get('page') || '1' }), 1);
       return { status: 200, body: await api.archivePage({ type: query.type, day, page: query.page }) };
@@ -126,7 +152,7 @@ export async function nodeApiHandler(req: NodeRequest, res: NodeResponse) {
   }
   // Region hydration uses bounded batches and must not consume the search/result allowance.
   const regionBatch = url.pathname === '/api/notice-regions';
-  const awardBatch = ['/api/company-awards', '/api/company-participation', '/api/company-contracts', '/api/companies'].includes(url.pathname);
+  const awardBatch = ['/api/company-awards', '/api/company-participation', '/api/company-contracts', '/api/company-history', '/api/companies'].includes(url.pathname);
   const buckets = regionBatch ? regionClients : awardBatch ? awardClients : clients;
   const forwarded = req.headers['x-forwarded-for'];
   const address = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0]?.trim() || 'local';

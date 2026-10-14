@@ -1,82 +1,53 @@
-# MY입찰관리
+# MY입찰관리: 공통 수집과 저장소 검색
 
-The top-level 개찰결과 menu is replaced by MY입찰관리. Public opening results remain available in each notice's details.
+2026-10-14 사용자가 사전 수집·서버 저장 방식으로 전환을 승인했다. 이전의 “업체를 누를 때마다 전국 API를 전부 조회” 방식은 더 이상 MY입찰관리의 기본 동작이 아니다.
 
-## Current architecture: direct official queries
+## 데이터 흐름과 저장 위치
 
-MY입찰관리 does **not** precollect company history or read saved history from the database. Opening the menu alone does not start history requests. The user searches for a company and selects a candidate, submits an exact business number, or clicks 내 업체 조회. Only then does the app load that company's official registration profile and start participation, final-award and contract queries.
+1. Supabase 공개 업체 목록을 업체명으로 검색한다. 미수집 업체는 공식 사용자정보 API로 추가 검색한다. 후보 선택과 내 업체 조회는 정확한 10자리 사업자번호를 사용한다.
+2. `/api/company-history`가 저장된 참여·낙찰·계약을 읽는다. 페이지 이동과 결과 필터 변경으로 전국 API를 다시 훑지 않는다.
+3. 조회한 사업자번호만 작업 대기열에 등록한다. 작업자가 공식 프로필을 확인하여 등록일을 저장한다. 브라우저가 업체명·등록일·금액을 DB에 입력하지 못한다.
+4. Supabase 예약 작업이 최신/과거 자료를 나누어 수집하고 페이지·재시도 위치를 저장한다. 브라우저를 닫아도 계속된다.
+5. 개별 공고 상세와 첨부 링크는 상세를 열 때 기존 API로 보완한다.
 
-- Blank dates mean the official procurement-company registration date through today in Asia/Seoul. There is no overall history-day limit. If the registration date is missing, the user must supply a start date; the app does not invent one.
-- Date changes begin a new direct traversal. Table pagination and outcome filters operate on rows already received, rather than querying the database or rereading the registration profile.
-- MY routes use a fresh provider client per request and return `Cache-Control: no-store`. The dashboard and source panels retain received rows/cursors only in the mounted browser view. Reloading, leaving the view or selecting another company starts a new lookup; stop/resume is not durable background work or a server archive.
-- Member profiles can still store an optional business number. Existing owner-only workspace access and older profiles remain compatible. Public lookup does not read another member's profile, bookmarks or notes.
-- `/api/company-history` is retired and returns **410 `LIVE_HISTORY_REQUIRED`**. It must not fall back to the preserved Supabase archive.
+화면과 API는 Vercel `construction-bid`, 영구 저장소는 Supabase 프로젝트 `zjmhmyzgsmglrictwqtd`이다. 사용자 PC, GitHub, Vercel 함수 파일 시스템에 공고 DB를 보관하지 않는다.
 
-The ordinary notice-search cache and per-notice result functionality are separate from these MY direct-history routes.
+## 자료 구분
 
-Vercel rewrites the four `/api/company-*` history routes to the single `api/company-data.ts` function. The fixed action map preserves public URLs and query parameters while keeping the deployment within the Hobby function-count limit.
-
-## Company candidates and exact selection
-
-`/api/companies` uses official `UsrInfoService02` data, not the former archive directory or a search-engine result page.
-
-- Name-keyword lookup requests basic company candidates by registration year and page. The UI works backwards from the current year, shows candidates as they arrive, and supports 업체 검색 중지 / 업체 더 찾기. Keyword search does not start the histories of every matching company.
-- Selecting a candidate submits its exact ten-digit business number. Direct business-number search performs the same exact lookup and checks returned identities before selecting a company.
-- Registration details, registered industries and supplied products are loaded for the selected company. Incomplete optional details produce an explicit warning; a failed registration request is not replaced with an archived name.
-- Business numbers are normalized for lookup, while company-name similarity alone never establishes participation, an award or a contract.
-
-## Source routes and date boundaries
-
-| App route | Official source / operation | Date and continuation | Company matching |
-| --- | --- | --- | --- |
-| `/api/company-participation` | `PubDataOpnStdService/getDataSetOpnStdScsbidInfo` | One opening day, one source page per app request; 공사/용역, newest day first | The source has no usable business-number filter. Read the national page and return only the exact company's rows. |
-| `/api/company-awards` | `ScsbidInfoService/getScsbidListSttusCnstwkPPSSrch` / `getScsbidListSttusServcPPSSrch` | Calendar-month slices of at most 31 inclusive opening days; server checks all pages within a bounded request | Official `bizno` filter, followed by another exact business-number check. |
-| `/api/company-contracts` | `CntrctInfoService/getCntrctInfoListCnstwkPPSSrch` / `getCntrctInfoListServcPPSSrch` | Calendar-month slices of at most 31 inclusive **contract-conclusion days**; one source page per app request | No official business-number filter. Read the national page and match the published `corpList` business number exactly. |
-
-Participation and contract pages request **999** source rows. National source `totalCount` and `sourceCount` describe traversal work, not this company's result count. A page with zero company matches does not finish a range while `hasMore` is true. The client continues through every page and date/type slice unless stopped or blocked.
-
-The standard participation service accepts only one opening day at a time. This per-request source restriction is handled by daily continuation; it is not an app history-range cap. Contract filtering uses the contract conclusion date, which can differ from the date the contract was registered in the API.
-
-Sources: [나라장터 낙찰정보서비스](https://www.data.go.kr/data/15129397/openapi.do), [나라장터 계약정보서비스](https://www.data.go.kr/data/15129427/openapi.do). Search-engine results cannot establish complete, authoritative participation or contract history.
-
-## Progress, limits and stop/resume
-
-The company panels and candidate lookup share `fetchCompanyApi` in `src/company/company-request.ts`, limiting concurrent browser-to-app company requests to **two**. This is a per-browser concurrency gate, not a global provider-quota guarantee; individual app requests can make multiple official calls. The server's existing burst guard and provider limits still apply.
-
-The user can stop a source panel and resume remaining work in the same view. Previously received results remain visible during normal stop/error handling. Quota errors stop that source's remaining requests instead of treating the error as an empty result. Missing, malformed or inconsistent responses stay incomplete. Changed totals or repeated pages require the affected interval to be checked again; contract retries retain the previous visible rows until a complete replacement traversal succeeds.
-
-Daily participation traversal and national contract traversal can require many calls, particularly for a company registered years ago. **Unlimited selectable dates do not mean unlimited traffic, instant results or guaranteed full-period completion.** Provider daily quotas, unavailable historical records, inconsistent pages, network failures and bounded server execution can interrupt a lookup. A partial response never means the company's lifetime history has been completely checked. An operational API quota increase may improve throughput, but cannot change these source guarantees by itself.
-
-The UI reports received results and completed/remaining slices separately. Before all slices finish, zero means “currently confirmed zero / still checking,” not “no history.” Results are displayed 30 at a time, with page-number groups of ten. Unknown public values remain `-`.
-
-## Participation, awards and contracts are separate
-
-- Participation contains submitted bids, including unsuccessful and unknown-outcome records. The standard service does not publish authoritative lot/rebid identifiers for these rows. Rank 1 alone is not promoted to a final award.
-- Final-award queries return official successful-award records with bid classification and rebid round. They do not return unsuccessful bidders or direct contracts made without a bidding notice. The dashboard's participation statistics are calculated from the participation rows received so far; they are not silently combined with separate award totals.
-- Contract history includes negotiated/direct contracts (`수의계약`) even when there is no notice number. It presents contract title, institution, conclusion date, method, published current contract total and the company's published share.
-- A joint contract's total amount is not the selected company's individual revenue. Unknown/ambiguous shares remain `-`. Full confirmed contract numbers retain amendment suffixes; original and amended records are not silently merged or added into an asserted lifetime award total.
-- Company-specific endpoints filter exact business identities on the server before returning rows. Received data and any visible totals remain scoped to the selected company.
-
-## Verification and observed limits
-
-Tests cover exact business identity, old profiles, multi-year/date-boundary traversal, page counts, repeated/changed pages, continuation after a zero-match page, unknown money, safe official links, amendment identities, quota/error propagation and preserving contract rows during restart. Client tests also cover the shared two-request gate and aborting queued requests. Run the relevant `tests/company-*.test.ts` suites and `npm run typecheck` after modifying these paths; successful tests alone are not live-provider acceptance.
-
-Live official-source verification for **2026-10-01 through 2026-10-14** read all **19 construction-contract pages** in that interval and found the following exact match:
-
-| Field | Verified official value |
+| 자료 | 공식 원본과 저장 내용 |
 | --- | --- |
-| Company | 주식회사 함께하는개발 (`8488802470`) |
-| Contract | 송파문화예술회관 여가교실 철거공사 |
-| Institution | 서울특별시 송파구 |
-| Contract conclusion date | 2026-10-07 |
-| Method / published amount | 수의계약 / 40,640,000원 |
-| Confirmed / unified contract number | `R26TA0229571200` / `R26TE18812747` |
-| Notice number | Not published |
+| 업체 | 사용자정보서비스: 사업자번호, 업체명, 등록일, 공개 프로필 |
+| 참여·미낙찰 | 공공데이터개방표준서비스: 공고·업체 연결, 투찰금액·율, 순위, 공개 낙찰 여부 |
+| 정밀 개찰 | 낙찰정보서비스: 공고 차수·분류·재입찰 회차별 참가자와 결과 |
+| 계약 | 계약정보서비스: 계약 식별자·변경 차수, 체결일, 금액, 참여업체와 공개 지분 |
+| 첨부 | 원문 링크. 파일 전체를 DB에 복제하지 않는다. |
 
-This proves ordinary monthly pagination can find the direct contract without a hard-coded company or title filter. It is **not** verification of the company's entire lifetime, all service contracts, or all unsuccessful participation. An award-only lookup would not find this contract because it has no competitive-award notice in the verified response.
+다른 회원의 업체도 공개 사업자번호로 조회할 수 있다. 회원 메모·관심공고·계정 정보는 소유자 전용 RLS 테이블에 남는다. 수주벗의 가공 자료를 수집하지 않으며 검색엔진 결과나 업체명 유사성만으로 이력을 연결하지 않는다.
 
-## Historical archive: preserved, disabled
+순위 1위를 확정 낙찰로 간주하지 않는다. 낙찰 패널은 수집된 참여 중 공식 낙찰 여부가 확인된 기록이며, 업체 최종 낙찰 전체를 확보했다고 주장하지 않는다. 별도 업체별 최종 낙찰 API는 보완 수단으로 유지한다.
 
-The previous Supabase implementation (`supabase/company-history.sql`, `company-collector.sql`, `company-notice-archive.sql` and their rollback tests) remains preserved for historical reference and data retention. Its settings were verified as **`enabled=false`** during this transition. The daily and precise-opening workers share this disabled setting; the current MY flow neither enqueues archive work nor queries it. Do not reactivate collectors as part of this direct-query workflow.
+입찰공고가 없는 수의계약도 계약정보서비스에서 자동 수집해 별도로 표시한다. 공동계약 총액을 업체 매출로 간주하지 않는다. 지분이 불명확하면 `-`로 표시한다. 변경 차수는 보존하며 원계약·변경계약 금액을 무조건 합산하지 않는다.
 
-Earlier collection and recovery verified public participation records, including 17 non-winning records for 함께하는개발. Those saved snapshots are historical evidence, not the current MY data source or proof of complete coverage. Existing public archive data and member-owned workspace data are retained; this change does not delete them. A future return to precollection would require a separate architecture decision, quota/capacity review and end-to-end verification.
+## 전체기간과 완전성
+
+- 첫 조회 대상은 공식 등록일부터 현재까지다. 사용자 조회 기간에 임의의 7일·1년 제한을 두지 않는다. 등록일이 확인되지 않았으면 확인 중으로 표시한다.
+- 전체기간 선택과 전체기간 수집 완료는 다르다. 과거 수집 중에는 확인된 기록과 수집 상태를 함께 표시한다. 수집된 0행을 평생 참여 이력 없음으로 확정하지 않는다.
+- 날짜/페이지 누락이나 오류가 있으면 미완료다. 두 번의 완전한 조회에서 공개 값까지 일치한 구간만 검증 완료로 처리한다. 수집 시각 자체는 비교에서 제외한다.
+- 과거 작업은 조회한 업체들의 검증된 등록일 경계까지 이어간다. 더 오래된 업체를 조회하면 필요한 과거 범위를 확장한다.
+- 원본 변경, 식별자 오류, 호출 한도 오류를 성공적인 0건으로 바꾸지 않는다. 표준 자료가 제공하지 않는 분류·재입찰 정보를 추측하지 않는다. 검증된 정밀 개찰 자료가 있는 공고는 effective view로 중복을 억제한다.
+
+## 트래픽과 용량
+
+검색은 공통 저장소를 읽으므로 회원마다 전국 원본을 재수집하지 않는다. 이후에도 신규·변경 확인, DB 읽기, 저장공간, 네트워크 비용은 발생한다.
+
+초기 적용 전 실측(2026-10-14): 참여 48,010행, 업체 30,356개, 공고 1,020개, DB 전체 54,605,491바이트(약 52.1MiB). 참여 테이블과 인덱스는 27,123,712바이트였다. 현재 표본이며 전국 수년치 용량의 보장값이 아니다. 첨부를 제외해도 전국 장기 이력은 무료 용량을 초과할 수 있다.
+
+일일 예산과 저장공간 보호 상한을 유지하며 최신용 예산을 예약한다. 상한에 도달하면 기존 자료를 지우지 않고 추가 수집을 대기한다. 유료 요금제 전환은 자동으로 하지 않는다. 1~3분은 작업 실행 목표이며 모든 전국 자료의 반영 보장 시간이 아니다. API 갱신 시각·페이지 수·승인 한도·저장공간에 영향을 받는다.
+
+## 운영과 검증
+
+기존 `company-history.sql`, `company-collector.sql`, `company-notice-archive.sql` 데이터는 보존한다. 추가 migration, 원본 endpoint 배포, rollback 테스트 후 수집을 활성화한다. 비공개 작업·설정·쓰기 함수는 공개하지 않는다. 공개 읽기 테이블에는 RLS와 읽기 전용 권한을 적용하며 서비스 역할 키를 클라이언트나 SQL에 복사하지 않는다.
+
+`/api/archive-page`의 source 분기로 기존 함수 수 안에서 수집을 제공한다. `npm test`, `npm run build`, SQL 테스트·권한 검사, 운영 자동 수집 행, 업체명 검색→업체 선택→DB 조회→페이지 이동→수집 반영을 검증한다. 로컬 성공과 운영 서버 성공을 구분한다.
+
+공식 참고: [낙찰정보서비스](https://www.data.go.kr/data/15129397/openapi.do), [계약정보서비스](https://www.data.go.kr/data/15129427/openapi.do), [기업별 투찰 및 계약내역 보고서](https://www.data.go.kr/data/15050832/fileData.do). 대량 공식 파일은 기간·누락·식별자를 검증한 뒤 API 백필을 보완할 수 있다. 현재 파일 자동 수집을 구현한 것으로 간주하지 않는다.

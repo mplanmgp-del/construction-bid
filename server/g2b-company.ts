@@ -47,7 +47,7 @@ export function createCompanyNameLoader(request: RelatedRequest, now: () => numb
 }
 
 /** Public registration data only. Member-owned profile fields are never read or modified. */
-export function createCompanyLoader(request: RelatedRequest, now: () => number = Date.now) {
+export function createCompanyLoader(request: RelatedRequest, now: () => number = Date.now, options: { maxPages?: number } = {}) {
   return async (businessNumber: string): Promise<CompanyLookup> => {
     if (!/^\d{10}$/.test(businessNumber)) throw new CompanyLookupError(400, 'INVALID_COMPANY', '사업자등록번호 10자리를 입력해 주세요.');
     const warnings: string[] = [];
@@ -59,7 +59,7 @@ export function createCompanyLoader(request: RelatedRequest, now: () => number =
       let expected: number | undefined;
       let complete = false;
       let mismatched = false;
-      for (let pageNo = 1; pageNo <= PAGE_LIMIT; pageNo++) {
+      for (let pageNo = 1; pageNo <= Math.min(PAGE_LIMIT, options.maxPages ?? PAGE_LIMIT); pageNo++) {
         const remaining = finishBy - now();
         if (remaining <= 0) break;
         let result: Awaited<ReturnType<RelatedRequest>>;

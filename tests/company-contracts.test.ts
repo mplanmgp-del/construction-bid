@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createCompanyContractsLoader, validateCompanyContractQuery } from '../server/company-contracts.ts';
+import { createCompanyContractsLoader, createContractArchivePageLoader, validateCompanyContractQuery } from '../server/company-contracts.ts';
 import type { RelatedRequest } from '../server/g2b-related.ts';
 import type { CompanyContractQuery } from '../src/company-contract-types.ts';
 
@@ -17,6 +17,34 @@ const page = (items: Record<string, unknown>[], totalCount = items.length) => ({
 const now = () => Date.parse('2026-10-14T15:00:00+09:00');
 
 describe('direct company contract page', () => {
+  it('returns all normalized contract parties for the private collector, retaining no-notice contracts', async () => {
+    const result = await createContractArchivePageLoader(async () => page([{ ...sample,
+      corpList: sample.corpList + '[2^구성업체^공동이행^다른 업체^Person^대한민국^30^다른 업체^^1234567890]' }]), now)(query);
+    expect(result.contracts).toHaveLength(1);
+    expect(result.contracts[0]).toMatchObject({ noticeNumber: '', contractAmount: 40640000, parties: [
+      { businessNumber: '8488802470', name: '주식회사 함께하는개발', shareRate: 100 },
+      { businessNumber: '1234567890', name: '다른 업체', shareRate: 30 },
+    ] });
+    expect(JSON.stringify(result)).not.toContain('unneeded');
+    expect(result.contracts[0]).not.toHaveProperty('businessNumber');
+  });
+
+  it('uses the same collector contract identity regardless of which company triggered collection', async () => {
+    const load = createContractArchivePageLoader(async () => page([sample]), now);
+    const left = await load(query), right = await load({ type: query.type, from: query.from, to: query.to, page: 1 });
+    expect(left.contracts[0].id).toBe(right.contracts[0].id);
+    expect(left.contracts[0].id).toMatch(/^contract:[a-f0-9]{64}$/);
+  });
+
+  it('preserves valid collector rows but never claims completion when another contract has unidentifiable parties', async () => {
+    const result = await createContractArchivePageLoader(async () => page([sample,
+      { ...sample, untyCntrctNo: 'UNKNOWN', corpList: '' },
+      { ...sample, untyCntrctNo: 'UNNAMED', corpList: sample.corpList.replaceAll('주식회사 함께하는개발', '') },
+    ]), now)(query);
+    expect(result.contracts).toHaveLength(1);
+    expect(result).toMatchObject({ sourceCount: 3, totalCount: 3, hasMore: false, complete: false });
+    expect(result.warnings.length).toBeGreaterThan(0);
+  });
   it('finds the verified no-notice negotiated contract using the ordinary monthly source scan', async () => {
     const request = vi.fn<RelatedRequest>(async () => page([sample]));
     const result = await createCompanyContractsLoader(request, now)(query);

@@ -5,7 +5,7 @@ import { createRelatedLoader } from './g2b-related.ts';
 import { createCompanyLoader, createCompanyNameLoader } from './g2b-company.ts';
 import { createCompanyAwardsLoader } from './company-awards.ts';
 import { createCompanyParticipationLoader } from './company-participation.ts';
-import { createCompanyContractsLoader } from './company-contracts.ts';
+import { createCompanyContractsLoader, createContractArchivePageLoader } from './company-contracts.ts';
 import { createArchivePageLoader } from './company-archive-page.ts';
 import { createOpeningResultsLoader, createOpeningSummaryLoader } from './g2b-results.ts';
 import { startSearchWindows } from '../src/live/start-range.ts';
@@ -371,5 +371,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
   }
   return { notices, startNotices, detail, results, related, resultSummary, participationRegions, noticeRegions,
     openingResults, company: createCompanyLoader(request, now), companyNames: createCompanyNameLoader(request, now), companyAwards: createCompanyAwardsLoader(request, now),
-    companyParticipation: createCompanyParticipationLoader(request, now), companyContracts: createCompanyContractsLoader(request, now), archivePage: createArchivePageLoader(request, now) };
+    companyParticipation: createCompanyParticipationLoader(request, now), companyContracts: createCompanyContractsLoader(request, now),
+    contractArchivePage: createContractArchivePageLoader(request, now), companyArchive: createCompanyLoader(request, now, { maxPages: 1 }),
+    archivePage: createArchivePageLoader(request, now) };
 }
