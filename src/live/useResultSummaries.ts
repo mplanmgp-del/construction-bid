@@ -7,25 +7,29 @@ export type ResultEntry = { data?: G2bResultSummary; error?: boolean; until: num
 export const resultKey = (bid: BidNotice) => `${bid.type}:${bid.number}:${bid.revision}:${bid.openingAt}`;
 export const needsResult = (bid: BidNotice) => bid.source === 'live' && bid.status !== '취소' && Number.isFinite(Date.parse(bid.openingAt)) && Date.parse(bid.openingAt) <= Date.now();
 
-// This service has a separate quota from notice searches, shared by both business
-// types. Pause it across pagination and hook remounts in this browser tab.
+// Preserve only an explicit Retry-After across pages; quota without one stops
+// the current queue, while a later user request can try the provider again.
 let blockedUntil = 0;
 export async function loadResultSummaryQueue(bids: BidNotice[], signal: AbortSignal, publish: (bid: BidNotice, entry: ResultEntry) => void) {
   const queue = [...bids];
+  let stoppedForQuota = false;
   async function worker() {
     while (queue.length && !signal.aborted) {
       const bid = queue.shift()!;
       let entry: ResultEntry;
-      if (blockedUntil > Date.now()) entry = { error: true, until: blockedUntil };
+      if (stoppedForQuota || blockedUntil > Date.now()) entry = { error: true, until: Math.max(Date.now(), blockedUntil) };
       else {
         try {
           const data = await fetchApi<G2bResultSummary>(`/api/result-summary?${new URLSearchParams({ number: bid.number, revision: bid.revision, type: bid.type, openingAt: bid.openingAt })}`, signal);
           if (data.number !== bid.number || data.revision !== bid.revision || data.type !== bid.type) throw new Error('Identity mismatch');
           entry = { data, until: Date.now() + 300_000 };
         } catch (cause) {
-          const quota = cause instanceof ApiError && cause.code === 'G2B_QUOTA_EXCEEDED';
-          const until = Date.now() + (quota ? Math.max(1800, cause.retryAfterSeconds ?? 0) * 1000 : 30_000);
-          if (quota) blockedUntil = Math.max(blockedUntil, until);
+          const quota = cause instanceof ApiError && (cause.code === 'G2B_QUOTA_EXCEEDED' || cause.status === 429);
+          const until = Date.now() + (quota ? (cause.retryAfterSeconds ?? 0) * 1000 : 30_000);
+          if (quota) {
+            stoppedForQuota = true;
+            if (cause.retryAfterSeconds) blockedUntil = Math.max(blockedUntil, until);
+          }
           entry = { error: true, until };
         }
       }

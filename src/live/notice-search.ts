@@ -21,6 +21,14 @@ export async function fetchStartedNotices(query: NoticeQuery, signal: AbortSigna
         const job = jobs[next++];
         const params = new URLSearchParams({ ...query, type: job.type, window: String(job.window), ...(options.force ? { refresh: '1' } : {}) });
         const result = await fetchApi<G2bNoticePage>(`/api/notices-start?${params}`, controller.signal);
+        if (result.quotaExceeded) {
+          controller.abort();
+          const delay = result.retryAfterSeconds;
+          // A cached window is usable in isolation, but is not the complete search.
+          // Preserve the hook's last complete snapshot instead of scheduling more windows.
+          throw new ApiError('나라장터 호출 한도로 최신 공고 조회를 완료하지 못했습니다. 다시 조회해 주세요.', 'G2B_QUOTA_EXCEEDED', 429,
+            typeof delay === 'number' && Number.isFinite(delay) && delay > 0 ? Math.ceil(delay) : undefined);
+        }
         if (result.hasMore || result.items.length !== result.totalCount) throw new Error('전체 공고 조회가 완료되지 않았습니다. 다시 조회해 주세요.');
         results.push(result); progress(results.length, jobs.length);
       }

@@ -67,56 +67,29 @@ describe('G2B request validation', () => {
 });
 
 describe('G2B integrations and bounded reads', () => {
-  it('bulk-joins only exact number, revision and business type with full pagination metadata', async () => {
-    const fetcher = vi.fn(async (url: URL | string | Request) => String(url).includes('PrtcptPsblRgn')
-      ? response([{ bidNtceNo: 'R26BK01764167', bidNtceOrd: '000', bsnsDivNm: '공사', prtcptPsblRgnNm: '서울특별시' }, { bidNtceNo: 'R26BK01764167', bidNtceOrd: '001', bsnsDivNm: '공사', prtcptPsblRgnNm: '부산광역시' }, { bidNtceNo: 'R26BK01764167', bidNtceOrd: '000', bsnsDivNm: '용역', prtcptPsblRgnNm: '경기도' }])
-      : response([record(), record({ bidNtceNo: 'R26BK01764168' })], 4));
-    const result = await createG2bClient({ serviceKey: 'test', fetcher: fetcher as typeof fetch }).notices(query());
-    expect(result).toMatchObject({ totalCount: 4, page: 1, pageSize: 2, hasMore: true });
-    expect(result.items[0].allowedRegions).toEqual(['서울특별시']);
-    expect(result.items[1].allowedRegions).toBeNull();
-    expect(fetcher).toHaveBeenCalledTimes(2);
+  it('returns list fields and pagination without requesting detail or regional enrichment', async () => {
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (input: URL | string | Request) => {
+      calls.push(new URL(String(input)).pathname.split('/').at(-1)!);
+      return response([record(), record({ bidNtceNo: 'R26BK01764168' })], 4);
+    });
+    const result = await createG2bClient({ serviceKey: 'test', fetcher }).notices(query());
+    expect(result).toMatchObject({ totalCount: 4, page: 1, pageSize: 2, hasMore: true, warnings: [] });
+    expect(result.items.map(item => item.allowedRegions)).toEqual([null, null]);
+    expect(result.items[0]).toMatchObject({ title: '별관 철거공사', estimatedPrice: 1000000 });
+    expect(calls).toEqual(['getBidPblancListInfoCnstwkPPSSrch']);
   });
-  it('deduplicates concurrent requests, reuses bulk region cache, expires after five minutes', async () => {
+  it('deduplicates concurrent list requests and expires successes after five minutes', async () => {
     let now = 100;
-    const fetcher = vi.fn(async (url: URL | string | Request) => String(url).includes('PrtcptPsblRgn') ? response([]) : response([record()]));
-    const client = createG2bClient({ serviceKey: 'test', fetcher: fetcher as typeof fetch, now: () => now });
+    const fetcher = vi.fn(async () => response([record()]));
+    const client = createG2bClient({ serviceKey: 'test', fetcher, now: () => now });
     await Promise.all([client.notices(query()), client.notices(query())]);
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledOnce();
     await client.notices({ ...query(), keyword: '철거' });
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     now += 300001;
     await client.notices(query());
-    expect(fetcher).toHaveBeenCalledTimes(5);
-  });
-  it('does not classify any partially loaded regional membership as excluded', async () => {
-    const fetcher = vi.fn(async (url: URL | string | Request) => String(url).includes('PrtcptPsblRgn')
-      ? response([{ ...record(), prtcptPsblRgnNm: '서울특별시' }], 6000) : response([record()]));
-    const result = await createG2bClient({ serviceKey: 'test', fetcher: fetcher as typeof fetch }).notices(query());
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(result.items[0].allowedRegions).toBeNull();
-    expect(result.warnings?.length).toBe(1);
-  });
-  it('returns notices with review-required warning when regional endpoint fails', async () => {
-    const fetcher = vi.fn(async (url: URL | string | Request) => String(url).includes('PrtcptPsblRgn') ? new Response('invalid', { status: 503 }) : response([record()]));
-    const result = await createG2bClient({ serviceKey: 'test', fetcher: fetcher as typeof fetch }).notices(query());
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0].allowedRegions).toBeNull();
-    expect(result.warnings?.[0]).toContain('확인 필요');
-  });
-  it('bounds the combined region lookup time before the serverless timeout', async () => {
-    let clock = Date.now();
-    const fetcher = vi.fn(async (url: URL | string | Request) => {
-      if (String(url).includes('PrtcptPsblRgn')) {
-        clock += 15_000;
-        return response([{ ...record(), prtcptPsblRgnNm: '서울특별시' }], 4000);
-      }
-      return response([record()]);
-    });
-    const result = await createG2bClient({ serviceKey: 'test', fetcher: fetcher as typeof fetch, now: () => clock }).notices(query());
     expect(fetcher).toHaveBeenCalledTimes(3);
-    expect(result.items[0].allowedRegions).toBeNull();
-    expect(result.warnings).toHaveLength(1);
   });
   it('returns exact detail without pretending empty regions are nationwide', async () => {
     const fetcher = vi.fn(async (url: URL | string | Request) => String(url).includes('PrtcptPsblRgn') ? response([]) : response([{ ...record(), lcnsLmtNm: '구조물해체·비계공사업' }]));

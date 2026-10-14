@@ -155,14 +155,18 @@ export default function App() {
     : availableNotices, [view, mode, member.workspace?.noticeSnapshots, availableNotices, bookmarks]);
   const regionCandidates = useMemo(() => filterNotices(rawSourceNotices,
     { ...filters, siteProvince: '전체', autoRegion: false, regionView: 'all' }, profile, statusNow), [rawSourceNotices, filters, profile, statusNow]);
-  const regionSearch = useNoticeRegions(regionCandidates, mode === 'live' && filters.type !== '공사'
-    && (view === 'notices' || view === 'bookmarks') && filters.siteProvince !== '전체');
+  const companyRegionFilter = !!profile.province && !!profile.district && (filters.autoRegion || filters.regionView !== 'all');
+  const regionFilterEnabled = mode === 'live' && (view === 'notices' || view === 'bookmarks')
+    && (companyRegionFilter || (filters.type !== '공사' && filters.siteProvince !== '전체'));
+  const regionSearch = useNoticeRegions(regionCandidates, regionFilterEnabled, companyRegionFilter);
   const sourceNotices = regionSearch.items;
   const baseResults = useMemo(() => filterNotices(sourceNotices, { ...filters, autoRegion: false, regionView: 'all' }, profile, statusNow), [sourceNotices, filters, profile, statusNow]);
   const counts = useMemo(() => baseResults.reduce((total, bid) => { total[assessRegion(bid, profile).status]++; return total; }, { matched: 0, review: 0, excluded: 0 }), [baseResults, profile]);
   const filtered = useMemo(() => filterNotices(sourceNotices, filters, profile, statusNow), [sourceNotices, filters, profile, statusNow]);
   const unknownServiceRegions = filters.siteProvince === '전체' ? 0
     : filtered.filter(bid => bid.type === '용역' && assessSearchRegion(bid, filters.siteProvince).status === 'review').length;
+  const unknownParticipationRegions = companyRegionFilter
+    ? sourceNotices.filter(bid => bid.source === 'live' && !bid.allowedRegions?.length).length : unknownServiceRegions;
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
   const pagination = pageGroup(safePage, pages);
@@ -213,7 +217,7 @@ export default function App() {
       {view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <PublicResults /> : <>
         <section className="search-intro"><div><div className="eyebrow"><span className="eyebrow-line" />공공입찰을 더 명확하게</div><h1>{view === 'bookmarks' ? '관심공고' : '철거·공사 입찰공고'}</h1><p>{view === 'bookmarks' ? '저장한 공고를 모아보고, 다음 입찰을 준비하세요.' : '우리 업체의 지역조건에 맞는 공고를 한곳에서 확인하세요.'}</p></div><div className="intro-note"><span className="small-dot" />{mode === 'live' ? '나라장터 공공데이터 연동' : '나라장터 공고 · 예시 데이터'}<span className="intro-date">{mode === 'live' ? `한국시간 ${koreanToday().replaceAll('-', '.')}` : `예시 기준일 ${DEMO_TODAY.replaceAll('-', '.')}`}</span></div></section>
 
-        {mode === 'live' && view === 'notices' && <LiveSearch key={`${live.query.type}-${live.query.from}-${live.query.to}-${live.query.keyword}`} query={live.query} loading={live.loading || live.refreshing} refreshBlocked={live.retryAt > Date.now()} onSearch={query => { live.setQuery(query); resetFilters(); setSearchInput(query.keyword); }} onRefresh={live.refresh} />}
+        {mode === 'live' && view === 'notices' && <LiveSearch key={`${live.query.type}-${live.query.from}-${live.query.to}-${live.query.keyword}`} query={live.query} loading={live.loading || live.refreshing} refreshBlocked={live.retryAt > Date.now()} onSearch={query => { live.search(query); resetFilters(); setSearchInput(query.keyword); }} onRefresh={live.refresh} />}
         {!(mode === 'live' && view === 'notices') && <form className="search-bar" onSubmit={event => { event.preventDefault(); searchLocalNotices(searchInput); }}><Search size={23} strokeWidth={1.7} /><label className="sr-only" htmlFor="bid-search">공고 검색</label><input id="bid-search" value={searchInput} onChange={event => setSearchInput(event.target.value)} placeholder="공고명, 공고번호, 발주기관을 검색해 보세요" autoComplete="off" /><span className="search-shortcut">목록 검색</span>{searchInput && <button type="button" className="icon-button" aria-label="검색어 지우기" onClick={() => { setSearchInput(''); searchLocalNotices(''); }}><X size={17} /></button>}<button className="button button-primary search-submit" type="submit">검색<ArrowRight size={18} /></button></form>}
 
         <div className="category-tabs" aria-label="작업 분야">{(['전체', ...CATEGORIES] as const).map(category => <button key={category} className={filters.category === category ? 'active' : ''} onClick={() => updateFilter('category', category)}>{category}</button>)}</div>
@@ -228,13 +232,14 @@ export default function App() {
             <div className="result-filter-line"><div className="result-state-tabs" aria-label="지역 판정 필터"><button className={filters.regionView === 'all' ? 'active' : ''} onClick={() => updateFilter('regionView', 'all')}>전체 <span>{allCount}</span></button><button className={filters.regionView === 'matched' ? 'active' : ''} onClick={() => updateFilter('regionView', 'matched')}><span className="state-dot green" />지역 일치 <span>{counts.matched}</span></button><button className={filters.regionView === 'review' ? 'active' : ''} onClick={() => updateFilter('regionView', 'review')}><span className="state-dot amber" />확인 필요 <span>{counts.review}</span></button></div><button className={`excluded-button ${filters.regionView === 'excluded' ? 'active' : ''}`} onClick={() => updateFilter('regionView', filters.regionView === 'excluded' ? 'all' : 'excluded')}>{filters.regionView === 'excluded' ? '기본 목록으로 돌아가기' : `지역 제외 ${counts.excluded}건 보기`}<ChevronRight size={13} /></button></div>
             <div className="chips-line"><div className="filter-chips">{chips.map(chip => <button key={chip.label} onClick={chip.remove}>{chip.label}<X size={12} /></button>)}{filters.autoRegion && <span className="automatic-chip"><ShieldCheck size={13} />내 지역 자동필터</span>}{chips.length === 0 && !filters.autoRegion && <span className="muted">모든 조건의 공고를 표시합니다.</span>}</div><button className="text-button reset-results" onClick={resetFilters}>조건 초기화</button></div>
             {filters.regionView === 'excluded' && <div className="excluded-notice"><Info size={15} />등록한 업체 소재지와 지역조건이 맞지 않는 공고입니다. 공고 상세에서 제외 사유를 확인할 수 있습니다.</div>}
-            {filters.siteProvince !== '전체' && <div className="region-search-note" role="status">
-              <div><strong>{filters.siteProvince} 지역 검색</strong><span>공사: 현장 위치 · 용역: 참가 가능 지역</span>
-                {regionSearch.loading ? <p>용역 참가 가능 지역을 확인 중입니다. {regionSearch.pending}건 남음</p>
-                  : unknownServiceRegions > 0 ? <p>지역 미확인 용역 {unknownServiceRegions}건을 함께 표시합니다. 참가 가능으로 확정된 공고는 아닙니다.</p> : null}
-                {regionSearch.failed > 0 && <p>일부 지역 정보를 불러오지 못했습니다. 미확인 용역은 원문을 확인해 주세요.</p>}
+            {(filters.siteProvince !== '전체' || companyRegionFilter) && <div className="region-search-note" role="status">
+              <div><strong>{filters.siteProvince !== '전체' ? `${filters.siteProvince} 지역 검색` : '내 업체 참가 가능 지역 확인'}</strong><span>{companyRegionFilter ? '내 업체 소재지와 공고의 참가 가능 지역을 비교합니다.' : '공사: 현장 위치 · 용역: 참가 가능 지역'}</span>
+                {regionSearch.loading ? <p>참가 가능 지역을 확인 중입니다. {regionSearch.pending}건 남음</p>
+                  : companyRegionFilter && unknownParticipationRegions > 0 ? <p>지역 미확인 공고 {unknownParticipationRegions}건은 확인 필요 탭에서 볼 수 있습니다.</p>
+                    : unknownServiceRegions > 0 ? <p>지역 미확인 용역 {unknownServiceRegions}건을 함께 표시합니다. 참가 가능으로 확정된 공고는 아닙니다.</p> : null}
+                {regionSearch.failed > 0 && <p>일부 지역 정보를 불러오지 못했습니다. 미확인 공고는 원문을 확인해 주세요.</p>}
               </div>
-              {(regionSearch.failed > 0 || unknownServiceRegions > 0) && <button className="button button-secondary" onClick={regionSearch.retry} disabled={regionSearch.loading || regionSearch.retryAt > Date.now()}>{regionSearch.retryAt > Date.now() ? '잠시 후 재조회' : '지역 다시 조회'}</button>}
+              {(regionSearch.failed > 0 || unknownParticipationRegions > 0) && <button className="button button-secondary" onClick={regionSearch.retry} disabled={regionSearch.loading || regionSearch.retryAt > Date.now()}>{regionSearch.retryAt > Date.now() ? '잠시 후 재조회' : '지역 다시 조회'}</button>}
             </div>}
 
             {visibleNotices.length > 0 ? <>

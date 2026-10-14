@@ -17,7 +17,6 @@ export function LiveSearch({ query, loading, refreshBlocked = false, onSearch, o
       const nextError = !next.keyword ? '철거·석면 등 검색할 공고명을 입력해 주세요.' : dateRangeError(next.from, next.to, 31); setError(nextError ?? '');
       if (!nextError) {
         setDraft(next); onSearch(next);
-        if (!changed && !refreshBlocked) onRefresh();
       }
     }}>
       <div className="notice-keyword-row">

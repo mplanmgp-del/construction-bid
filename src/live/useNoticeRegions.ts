@@ -12,10 +12,10 @@ interface RegionLoadState {
   retryAt: number;
 }
 
-export function useNoticeRegions(notices: BidNotice[], enabled: boolean) {
+export function useNoticeRegions(notices: BidNotice[], enabled: boolean, companyFilter = false) {
   // Only public identities determine the request lifetime. Rendering a response
   // or changing an unrelated filter must not start the same requests again.
-  const signature = JSON.stringify(notices.filter(needsNoticeRegions).map(({ number, revision, type }) => ({
+  const signature = JSON.stringify(notices.filter(bid => needsNoticeRegions(bid) && (companyFilter || bid.type === '용역')).map(({ number, revision, type }) => ({
     number, revision, type, source: 'live', allowedRegions: null,
   })));
   const targets = useMemo(() => JSON.parse(signature) as NoticeRegionTarget[], [signature]);
@@ -43,7 +43,7 @@ export function useNoticeRegions(notices: BidNotice[], enabled: boolean) {
     return () => abort.abort();
   }, [key, targets, enabled, retryVersion]);
 
-  // Expire visible region data and re-enable the quota retry button locally.
+  // Expire visible region data and any explicit Retry-After locally.
   // A user action is required to request regions again after expiry.
   useEffect(() => {
     const deadlines = [...state.entries.values()].map(entry => entry.until);

@@ -67,8 +67,8 @@ export function useLiveNotices(enabled: boolean) {
     } catch (cause) {
       if (!controller.signal.aborted && token === sequence.current) {
         const message = cause instanceof Error ? cause.message : '조회에 실패했습니다.';
-        const retryAt = cause instanceof ApiError && cause.code === 'G2B_QUOTA_EXCEEDED'
-          ? Date.now() + (cause.retryAfterSeconds ?? 1800) * 1000 : 0;
+        const retryAt = cause instanceof ApiError && cause.status === 429 && cause.retryAfterSeconds
+          ? Date.now() + cause.retryAfterSeconds * 1000 : 0;
         const retained = canRetainNoticePage(visiblePage);
         if (!retained) {
           setResult(value => value?.key === key ? null : value);
@@ -94,7 +94,7 @@ export function useLiveNotices(enabled: boolean) {
   useEffect(() => {
     if (!enabled || !active?.retryAt) return;
     const until = active.retryAt;
-    // Re-enable the manual retry control after cooldown; never retry the API on a timer.
+    // Honor an explicit Retry-After only; never retry the API on a timer.
     const timer = window.setTimeout(() => setState(value => value.key === key && value.retryAt === until ? { ...value, retryAt: 0 } : value), Math.max(0, until - Date.now()));
     return () => window.clearTimeout(timer);
   }, [enabled, key, active?.retryAt]);
@@ -119,6 +119,7 @@ export function useLiveNotices(enabled: boolean) {
   }
   return { query, setQuery, items: visible?.items ?? [], meta: visible?.meta ?? null, loading, refreshing, requiresKeyword, retryAt: active?.retryAt ?? 0,
     progress: active?.progress ?? { done: 0, total: 0 }, error: active?.error ?? '', applyDetail,
+    search: (next: NoticeQuery) => { setQuery(next); setRefreshCount(value => value + 1); },
     refresh: () => { if (!requiresKeyword && Date.now() >= (active?.retryAt ?? 0)) setRefreshCount(value => value + 1); },
   };
 }

@@ -19,9 +19,9 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-it('hydrates only unknown live service regions, including services with a site address', async () => {
+it('hydrates only unknown live regions, including services with a site address', async () => {
   const bids = [service('R1'), service('R2', { province: '경기도' }), service('R3', { allowedRegions: [] }),
-    service('R4', { type: '공사' }), service('R5', { source: 'demo' }), service('R6', { allowedRegions: ['부산광역시'] })];
+    service('R4', { type: '공사', allowedRegions: ['전국'] }), service('R5', { source: 'demo' }), service('R6', { allowedRegions: ['부산광역시'] })];
   const snapshot = JSON.stringify(bids);
   const urls: URL[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string) => {
@@ -34,7 +34,7 @@ it('hydrates only unknown live service regions, including services with a site a
   expect(urls[0].pathname).toBe('/api/notice-regions');
   expect(urls[0].searchParams.get('type')).toBe('용역');
   expect(urls[0].searchParams.get('notices')).toBe('R1:000,R2:000,R3:000');
-  expect(merged.map(bid => bid.allowedRegions)).toEqual([['서울특별시'], ['서울특별시'], ['서울특별시'], null, null, ['부산광역시']]);
+  expect(merged.map(bid => bid.allowedRegions)).toEqual([['서울특별시'], ['서울특별시'], ['서울특별시'], ['전국'], null, ['부산광역시']]);
   expect(merged[1].province).toBe('경기도');
   expect(merged[3]).toBe(bids[3]); expect(merged[5]).toBe(bids[5]);
   expect(JSON.stringify(bids)).toBe(snapshot);
@@ -136,11 +136,11 @@ it('does not automatically retry failed regions on another render but permits a 
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
-it('stops queued work on quota exhaustion and preserves the cooldown across a manual retry', async () => {
+it('stops queued work on quota exhaustion and lets an immediate manual retry recover', async () => {
   const signals: AbortSignal[] = [];
   const fetcher = vi.fn(async (_path: string, options: RequestInit) => {
     signals.push(options.signal!);
-    return Response.json({ error: { code: 'G2B_QUOTA_EXCEEDED', message: '호출 한도', retryAfterSeconds: 1800 } }, { status: 429 });
+    return Response.json({ error: { code: 'G2B_QUOTA_EXCEEDED', message: '호출 한도' } }, { status: 429 });
   });
   vi.stubGlobal('fetch', fetcher);
   const bids = Array.from({ length: 45 }, (_, index) => service(`R${index}`));
@@ -149,21 +149,39 @@ it('stops queued work on quota exhaustion and preserves the cooldown across a ma
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(signals.every(value => value.aborted)).toBe(true);
   expect(result.entries.size).toBe(45);
-  expect(result.retryAt).toBe(Date.now() + 1800_000);
-  await regions.loadNoticeRegions([service('NEW')], signal, undefined, { retryFailed: true });
-  expect(fetcher).toHaveBeenCalledTimes(2);
-  vi.advanceTimersByTime(1800_000);
-  await regions.loadNoticeRegions([service('NEW')], signal, undefined, { retryFailed: true });
+  expect(result.retryAt).toBe(0);
+  expect([...result.entries.values()].every(entry => !entry.complete && !!entry.error)).toBe(true);
+  fetcher.mockImplementation(async () => Response.json({ items: [row('R0')] }));
+  const recovered = await regions.loadNoticeRegions([service('R0')], signal, undefined, { retryFailed: true });
   expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(regions.mergeNoticeRegions([service('R0')], recovered.entries)[0].allowedRegions).toEqual(['서울특별시']);
 });
 
-it('honors a partial batch quota delay while preserving already verified rows', async () => {
-  const fetcher = vi.fn(async () => Response.json({ items: [row('R1'), row('R2', { complete: false, allowedRegions: null })], retryAfterSeconds: 1800 }));
+it('stops a partial quota batch without a retry deadline and preserves successful rows for the next load', async () => {
+  const fetcher = vi.fn(async () => Response.json({ items: [row('R1'), row('R2', { complete: false, allowedRegions: null })], quotaExceeded: true }));
   vi.stubGlobal('fetch', fetcher);
-  const bids = [service('R1'), service('R2')];
+  const bids = Array.from({ length: 25 }, (_, index) => service(`R${index + 1}`));
   const result = await regions.loadNoticeRegions(bids, new AbortController().signal);
-  expect(regions.mergeNoticeRegions(bids, result.entries).map(bid => bid.allowedRegions)).toEqual([['서울특별시'], null]);
-  expect(result.retryAt).toBe(Date.now() + 1800_000);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(regions.mergeNoticeRegions(bids, result.entries).slice(0, 2).map(bid => bid.allowedRegions)).toEqual([['서울특별시'], null]);
+  expect(result.retryAt).toBe(0);
+  fetcher.mockImplementation(async () => Response.json({ items: [row('R2')] }));
+  const recovered = await regions.loadNoticeRegions(bids.slice(0, 2), new AbortController().signal);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(regions.mergeNoticeRegions(bids.slice(0, 2), recovered.entries).map(bid => bid.allowedRegions)).toEqual([['서울특별시'], ['서울특별시']]);
+});
+
+it('honors a real retry deadline from a partial region batch without extending it', async () => {
+  const fetcher = vi.fn(async () => Response.json({ items: [row('R1'), row('R2', { complete: false, allowedRegions: null })], quotaExceeded: true, retryAfterSeconds: 3 }));
+  vi.stubGlobal('fetch', fetcher);
+  const signal = new AbortController().signal;
+  const result = await regions.loadNoticeRegions([service('R1'), service('R2')], signal);
+  expect(result.retryAt).toBe(Date.now() + 3000);
+  await regions.loadNoticeRegions([service('R2')], signal, undefined, { retryFailed: true });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(3000);
+  await regions.loadNoticeRegions([service('R2')], signal, undefined, { retryFailed: true });
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
 it('aborts in-flight work without publishing or caching results after the caller changes the query', async () => {
@@ -192,4 +210,29 @@ it('reports pending service checks immediately while disabled filters leave the 
   renderToStaticMarkup(createElement(Probe, { enabled: false }));
   expect(result).toMatchObject({ loading: false, pending: 0, failed: 0 });
   expect(result?.items).toEqual(bids);
+});
+
+it('loads construction participation regions separately from service regions when company filtering needs both', async () => {
+  const calls: URL[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    const url = new URL(path, 'https://example.test'); calls.push(url);
+    const type = url.searchParams.get('type');
+    return Response.json({ items: [row(type === '공사' ? 'C1' : 'S1', { type })] });
+  }));
+  const bids = [service('C1', { type: '공사', province: '부산광역시' }), service('S1')];
+  const result = await regions.loadNoticeRegions(bids, new AbortController().signal);
+  expect(calls.map(url => [url.searchParams.get('type'), url.searchParams.get('notices')])).toEqual([['공사', 'C1:000'], ['용역', 'S1:000']]);
+  expect(regions.mergeNoticeRegions(bids, result.entries).map(bid => bid.allowedRegions)).toEqual([['서울특별시'], ['서울특별시']]);
+  expect(bids[0].province).toBe('부산광역시');
+});
+
+it('only includes construction lookups in the hook when the company region filter is requested', async () => {
+  const { useNoticeRegions } = await import('../src/live/useNoticeRegions');
+  const bids = [service('C1', { type: '공사' }), service('S1')];
+  let result: ReturnType<typeof useNoticeRegions> | undefined;
+  function Probe({ companyFilter }: { companyFilter: boolean }) { result = useNoticeRegions(bids, true, companyFilter); return null; }
+  renderToStaticMarkup(createElement(Probe, { companyFilter: false }));
+  expect(result).toMatchObject({ pending: 1 });
+  renderToStaticMarkup(createElement(Probe, { companyFilter: true }));
+  expect(result).toMatchObject({ pending: 2 });
 });

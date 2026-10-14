@@ -38,6 +38,43 @@ it('stops scheduling later search windows once a provider quota error occurs', a
   expect(fetcher.mock.calls.every(([, options]: unknown[]) => (options as RequestInit)?.signal?.aborted)).toBe(true);
 });
 
+it('does not schedule more windows or publish partial counts when an HTTP 200 fallback signals quota exhaustion', async () => {
+  const fetcher = vi.fn(async () => Response.json({
+    items: [], totalCount: 0, page: 1, pageSize: 0, hasMore: false,
+    fetchedAt: '2026-10-13T00:00:00Z', source: '나라장터',
+    warnings: ['저장된 공고입니다.'], quotaExceeded: true,
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  const progress = vi.fn();
+  const error = await fetchStartedNotices(query, new AbortController().signal, progress, { force: true }).catch(value => value);
+  expect(error).toBeInstanceOf(ApiError);
+  expect(error).toMatchObject({ code: 'G2B_QUOTA_EXCEEDED', status: 429 });
+  expect(error.retryAfterSeconds).toBeUndefined();
+  expect(fetcher).toHaveBeenCalledTimes(4);
+  expect(progress).not.toHaveBeenCalledWith(8, 8);
+  expect(fetcher.mock.calls.every(([, options]: unknown[]) => (options as RequestInit)?.signal?.aborted)).toBe(true);
+
+  fetcher.mockImplementation(async () => Response.json({
+    items: [], totalCount: 0, page: 1, pageSize: 0, hasMore: false,
+    fetchedAt: '2026-10-13T00:01:00Z', source: '나라장터', warnings: [],
+  }));
+  const recovered = await fetchStartedNotices(query, new AbortController().signal, vi.fn(), { force: true });
+  expect(recovered).toMatchObject({ totalCount: 0, hasMore: false, fetchedAt: '2026-10-13T00:01:00Z' });
+  expect(fetcher).toHaveBeenCalledTimes(12);
+});
+
+it('preserves an explicit Retry-After from a successful cached fallback as a typed search quota error', async () => {
+  const fetcher = vi.fn(async () => Response.json({
+    items: [], totalCount: 0, page: 1, pageSize: 0, hasMore: false,
+    fetchedAt: '2026-10-13T00:00:00Z', source: '나라장터',
+    warnings: ['저장된 공고입니다.'], quotaExceeded: true, retryAfterSeconds: 7,
+  }, { headers: { 'Retry-After': '7' } }));
+  vi.stubGlobal('fetch', fetcher);
+  await expect(fetchStartedNotices(query, new AbortController().signal, vi.fn(), { force: true }))
+    .rejects.toMatchObject({ code: 'G2B_QUOTA_EXCEEDED', status: 429, retryAfterSeconds: 7 });
+  expect(fetcher).toHaveBeenCalledTimes(4);
+});
+
 it('accepts a complete cached snapshot without starting a second forced refresh', async () => {
   const calls: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string) => {
@@ -49,22 +86,37 @@ it('accepts a complete cached snapshot without starting a second forced refresh'
   expect(calls.every(path => !new URL(path, 'https://example.test').searchParams.has('refresh'))).toBe(true);
 });
 
-it('pauses both business types in the result queue and subsequent pages after quota exhaustion, then resumes after cooldown', async () => {
+it('stops the current result queue on quota but retries immediately when the caller starts another load', async () => {
   vi.useFakeTimers(); vi.setSystemTime('2026-10-13T00:00:00Z');
   vi.resetModules();
   const { loadResultSummaryQueue } = await import('../src/live/useResultSummaries');
   const bids = Array.from({ length: 30 }, (_, i) => ({ number: `R${i}`, revision: '000', type: i < 2 ? '공사' : '용역', openingAt: '2026-10-12T10:00:00+09:00' }) as BidNotice);
-  const fetcher = vi.fn(async () => Response.json({ error: { code: 'G2B_QUOTA_EXCEEDED', message: '사용 한도', retryAfterSeconds: 1800 } }, { status: 429 }));
+  const fetcher = vi.fn(async () => Response.json({ error: { code: 'G2B_QUOTA_EXCEEDED', message: '사용 한도' } }, { status: 429 }));
   vi.stubGlobal('fetch', fetcher);
   const publish = vi.fn();
   await loadResultSummaryQueue(bids, new AbortController().signal, publish);
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(fetcher.mock.calls.every(([path]: unknown[]) => new URL(String(path), 'https://example.test').searchParams.get('type') === '공사')).toBe(true);
   expect(publish).toHaveBeenCalledTimes(30);
-  expect(publish.mock.calls.every(([, entry]) => entry.error && !entry.data && entry.until === Date.now() + 1800_000)).toBe(true);
+  expect(publish.mock.calls.every(([, entry]) => entry.error && !entry.data && entry.until <= Date.now())).toBe(true);
+  fetcher.mockImplementation(async () => Response.json({ number: 'R2', revision: '000', type: '용역', result: '개찰 완료', firstCompanies: ['정상 업체'], winnerCompanies: [], complete: true, fetchedAt: '2026-10-13T00:00:00Z' }));
+  const recovered = vi.fn();
+  await loadResultSummaryQueue(bids.slice(2, 3), new AbortController().signal, recovered);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(recovered).toHaveBeenCalledWith(bids[2], expect.objectContaining({ data: expect.objectContaining({ firstCompanies: ['정상 업체'] }) }));
+});
+
+it('honors an explicit provider Retry-After in the result queue without extending it to thirty minutes', async () => {
+  vi.useFakeTimers(); vi.setSystemTime('2026-10-13T00:00:00Z');
+  vi.resetModules();
+  const { loadResultSummaryQueue } = await import('../src/live/useResultSummaries');
+  const bids = [{ number: 'R1', revision: '000', type: '공사', openingAt: '2026-10-12T10:00:00+09:00' } as BidNotice];
+  const fetcher = vi.fn(async () => Response.json({ error: { code: 'G2B_QUOTA_EXCEEDED', message: '사용 한도', retryAfterSeconds: 3 } }, { status: 429 }));
+  vi.stubGlobal('fetch', fetcher);
+  await loadResultSummaryQueue(bids, new AbortController().signal, vi.fn());
+  await loadResultSummaryQueue(bids, new AbortController().signal, vi.fn());
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(3000);
   await loadResultSummaryQueue(bids, new AbortController().signal, vi.fn());
   expect(fetcher).toHaveBeenCalledTimes(2);
-  vi.advanceTimersByTime(1800_000);
-  await loadResultSummaryQueue(bids.slice(0, 1), new AbortController().signal, vi.fn());
-  expect(fetcher).toHaveBeenCalledTimes(3);
 });

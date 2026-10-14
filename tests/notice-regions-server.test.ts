@@ -5,14 +5,18 @@ import { handleG2bRequest, nodeApiHandler } from '../server/http';
 const response = (items: unknown[], totalCount = items.length) => new Response(JSON.stringify({ response: { header: { resultCode: '00' }, body: { items, totalCount } } }));
 const identity = { number: 'R26BK01758083', revision: '001' };
 const region = { bidNtceNo: identity.number, bidNtceOrd: identity.revision, bsnsDivNm: '용역', prtcptPsblRgnNm: '서울특별시' };
-const guard = () => ({ assertAvailable: vi.fn(async () => {}), trip: vi.fn(async () => {}) });
 const params = (notices = `${identity.number}:1`, type = '용역') => new URLSearchParams({ type, notices });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('on-demand participation regions', () => {
+  it('loads exact construction participation regions when a company filter requests them', async () => {
+    const client = createG2bClient({ serviceKey: 'construction-region', fetcher: async () => response([{ ...region, bsnsDivNm: '공사' }]) });
+    const result = await handleG2bRequest('/api/notice-regions', params(`${identity.number}:1`, '공사'), client);
+    expect(result).toMatchObject({ status: 200, body: { items: [{ ...identity, type: '공사', allowedRegions: ['서울특별시'], complete: true }] } });
+  });
   it('hydrates an amended service through one exact regional operation without detail fan-out', async () => {
     const fetcher = vi.fn(async (_input: URL | RequestInfo) => response([region]));
-    const client = createG2bClient({ serviceKey: 'region-test', fetcher, quotaGuard: guard() });
+    const client = createG2bClient({ serviceKey: 'region-test', fetcher });
     const result = await handleG2bRequest('/api/notice-regions', params(), client);
     expect(result).toMatchObject({ status: 200, body: { items: [{ ...identity, type: '용역', allowedRegions: ['서울특별시'], complete: true }] } });
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -23,14 +27,14 @@ describe('on-demand participation regions', () => {
 
   it.each(['', 'NOTICE', 'NOTICE:', 'NOTICE:abc', 'NOTICE:0000', 'NOTICE:000,', 'NOTICE:000,OTHER:bad', Array.from({ length: 11 }, (_, index) => `NOTICE${index}:000`).join(',')])('rejects the entire invalid batch before any provider read: %s', async notices => {
     const fetcher = vi.fn();
-    const result = await handleG2bRequest('/api/notice-regions', params(notices), createG2bClient({ serviceKey: 'test', fetcher, quotaGuard: guard() }));
+    const result = await handleG2bRequest('/api/notice-regions', params(notices), createG2bClient({ serviceKey: 'test', fetcher }));
     expect(result).toMatchObject({ status: 400, body: { error: { code: 'INVALID_QUERY' } } });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('rejects unknown business types and normalized duplicate identities', async () => {
     const fetcher = vi.fn();
-    const client = createG2bClient({ serviceKey: 'test', fetcher, quotaGuard: guard() });
+    const client = createG2bClient({ serviceKey: 'test', fetcher });
     for (const input of [params('NOTICE:000', '물품'), params('NOTICE:0,NOTICE:000')]) {
       expect((await handleG2bRequest('/api/notice-regions', input, client)).status).toBe(400);
     }
@@ -45,25 +49,25 @@ describe('on-demand participation regions', () => {
       { ...region, bidNtceOrd: '', prtcptPsblRgnNm: '전국' },
       region, { ...region, bidNtceOrd: '1' },
     ]));
-    const result = await createG2bClient({ serviceKey: 'test', fetcher, quotaGuard: guard() }).participationRegions(identity.number, identity.revision, '용역');
+    const result = await createG2bClient({ serviceKey: 'test', fetcher }).participationRegions(identity.number, identity.revision, '용역');
     expect(result).toMatchObject({ allowedRegions: ['서울특별시'], complete: true });
   });
 
   it('keeps empty complete membership unknown and accepts only explicit nationwide values', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([{ ...region, bidNtceNo: 'NATIONWIDE', prtcptPsblRgnNm: '전국' }]));
-    const client = createG2bClient({ serviceKey: 'test', fetcher, quotaGuard: guard() });
+    const client = createG2bClient({ serviceKey: 'test', fetcher });
     expect(await client.participationRegions(identity.number, identity.revision, '용역')).toMatchObject({ allowedRegions: null, complete: true });
     expect(await client.participationRegions('NATIONWIDE', identity.revision, '용역')).toMatchObject({ allowedRegions: ['전국'], complete: true });
   });
 
   it('discards incomplete membership instead of excluding against a partial list', async () => {
-    const client = createG2bClient({ serviceKey: 'test', fetcher: vi.fn(async () => response([region], 2)), quotaGuard: guard() });
+    const client = createG2bClient({ serviceKey: 'test', fetcher: vi.fn(async () => response([region], 2)) });
     expect(await client.participationRegions(identity.number, identity.revision, '용역')).toMatchObject({ allowedRegions: null, complete: false, error: 'G2B_INCOMPLETE_RESPONSE' });
   });
 
   it('does not retain an incomplete raw membership response in the success cache', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(response([region], 2)).mockResolvedValueOnce(response([region]));
-    const client = createG2bClient({ serviceKey: 'test', fetcher, quotaGuard: guard() });
+    const client = createG2bClient({ serviceKey: 'test', fetcher });
     expect((await client.participationRegions(identity.number, identity.revision, '용역')).complete).toBe(false);
     expect((await client.participationRegions(identity.number, identity.revision, '용역')).complete).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -72,7 +76,7 @@ describe('on-demand participation regions', () => {
   it('deduplicates concurrent raw requests and expires cached successes after five minutes', async () => {
     let now = 100;
     const fetcher = vi.fn(async () => response([region]));
-    const client = createG2bClient({ serviceKey: 'test', fetcher, quotaGuard: guard(), now: () => now });
+    const client = createG2bClient({ serviceKey: 'test', fetcher, now: () => now });
     await Promise.all([client.participationRegions(identity.number, identity.revision, '용역'), client.participationRegions(identity.number, identity.revision, '용역')]);
     expect(fetcher).toHaveBeenCalledTimes(1);
     now += 300_001;
@@ -86,7 +90,7 @@ describe('on-demand participation regions', () => {
       if (number === 'FAIL') throw new Error('serviceKey=SECRET');
       return response([{ ...region, bidNtceNo: number }]);
     });
-    const result = await createG2bClient({ serviceKey: 'test', fetcher, quotaGuard: guard() }).noticeRegions([identity, { number: 'FAIL', revision: '000' }], '용역');
+    const result = await createG2bClient({ serviceKey: 'test', fetcher }).noticeRegions([identity, { number: 'FAIL', revision: '000' }], '용역');
     expect(result.items).toMatchObject([{ ...identity, allowedRegions: ['서울특별시'], complete: true }, { number: 'FAIL', allowedRegions: null, complete: false, error: 'G2B_UNAVAILABLE' }]);
     expect(JSON.stringify(result)).not.toContain('SECRET');
   });
@@ -94,25 +98,43 @@ describe('on-demand participation regions', () => {
   it('stops unstarted lookups after quota failure while retaining an in-flight success', async () => {
     let finishKnown!: () => void;
     const knownPending = new Promise<void>(resolve => { finishKnown = resolve; });
-    const quotaGuard = guard();
     const fetcher = vi.fn(async (input: URL | RequestInfo) => {
       const number = new URL(String(input)).searchParams.get('bidNtceNo');
       if (number === 'QUOTA') return new Response('', { status: 429 });
       if (number === identity.number) { await knownPending; return response([region]); }
       throw new Error('No more provider work after quota');
     });
-    const client = createG2bClient({ serviceKey: 'test', fetcher, quotaGuard });
+    const client = createG2bClient({ serviceKey: 'test', fetcher });
     const job = client.noticeRegions([{ number: 'QUOTA', revision: '000' }, identity, { number: 'UNSTARTED', revision: '000' }], '용역');
-    await vi.waitFor(() => expect(quotaGuard.trip).toHaveBeenCalledTimes(1));
+    await new Promise(resolve => setTimeout(resolve, 0));
     finishKnown();
     const result = await job;
     expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(result.retryAfterSeconds).toBe(1800);
+    expect(result.quotaExceeded).toBe(true);
+    expect(result.retryAfterSeconds).toBeUndefined();
     expect(result.items).toMatchObject([
       { number: 'QUOTA', complete: false, allowedRegions: null, error: 'G2B_QUOTA_EXCEEDED' },
       { ...identity, complete: true, allowedRegions: ['서울특별시'] },
       { number: 'UNSTARTED', complete: false, allowedRegions: null, error: 'G2B_QUOTA_EXCEEDED' },
     ]);
+  });
+
+  it('immediately retries a failed region batch and preserves successful cached members', async () => {
+    let recovered = false;
+    const calls: string[] = [];
+    const client = createG2bClient({ serviceKey: 'region-batch-recovery', fetcher: async input => {
+      const number = new URL(String(input)).searchParams.get('bidNtceNo')!;
+      calls.push(number);
+      if (number === 'FAILED' && !recovered) return new Response('', { status: 429 });
+      return response([{ ...region, bidNtceNo: number }]);
+    } });
+    const notices = [{ number: 'FAILED', revision: '001' }, identity];
+    expect((await client.noticeRegions(notices, '용역')).quotaExceeded).toBe(true);
+    recovered = true;
+    const retry = await client.noticeRegions(notices, '용역');
+    expect(retry.quotaExceeded).toBeUndefined();
+    expect(retry.items.every(item => item.complete && item.allowedRegions?.[0] === '서울특별시')).toBe(true);
+    expect(calls).toEqual(['FAILED', identity.number, 'FAILED']);
   });
 
   it('caps batch concurrency at two and stops new work when its combined budget expires', async () => {
@@ -124,7 +146,7 @@ describe('on-demand participation regions', () => {
       active--;
       return response([{ ...region, bidNtceNo: new URL(String(input)).searchParams.get('bidNtceNo') }]);
     });
-    const client = createG2bClient({ serviceKey: 'test', fetcher, quotaGuard: guard(), now: () => now });
+    const client = createG2bClient({ serviceKey: 'test', fetcher, now: () => now });
     const job = client.noticeRegions(['A', 'B', 'C', 'D'].map(number => ({ number, revision: '001' })), '용역');
     await vi.waitFor(() => expect(pending).toHaveLength(2));
     now = 40_001; pending.forEach(resolve => resolve());

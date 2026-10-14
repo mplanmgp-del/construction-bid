@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import type { G2bNoticePage } from '../src/g2b-types';
-import { loadPublicSearch, SEARCH_CACHE_FRESH_MS, SEARCH_CACHE_MAX_AGE_MS, SEARCH_CACHE_STALE_WARNING, SEARCH_CACHE_FAILURE_BACKOFF_MS, SEARCH_CACHE_QUOTA_WARNING, SEARCH_CACHE_FAILURE_WARNING, type PublicSearchCache } from '../server/public-search-cache';
+import { loadPublicSearch, SEARCH_CACHE_FRESH_MS, SEARCH_CACHE_MAX_AGE_MS, SEARCH_CACHE_STALE_WARNING, SEARCH_CACHE_QUOTA_WARNING, SEARCH_CACHE_FAILURE_WARNING, type PublicSearchCache } from '../server/public-search-cache';
 import { G2bError } from '../server/g2b';
 import { ProviderQuotaError } from '../server/provider-quota';
 
@@ -61,7 +61,7 @@ it('rejects partial and duplicate result sets and never writes them to the cache
   for (const invalid of [{ ...page(), hasMore: true }, { ...page(), totalCount: 1 }, { ...page(), totalCount: 2, items: [{ id: 'same' }, { id: 'same' }] }]) {
     const f = fixture();
     await expect(loadPublicSearch('partial', async () => invalid as G2bNoticePage, f.options)).rejects.toThrow('전체 공고 조회');
-    expect(vi.mocked(f.cache.set).mock.calls.every(([key]) => key.startsWith('failure:'))).toBe(true);
+    expect(f.cache.set).not.toHaveBeenCalled();
   }
 });
 
@@ -86,24 +86,20 @@ it('returns a complete fresh cache with its original timestamp when a forced quo
   const result = await loadPublicSearch('quota', loader, { ...f.options, force: true });
   expect(result.status).toBe('STALE'); expect(result.body.items).toEqual(original.items);
   expect(result.body.fetchedAt).toBe(original.fetchedAt); expect(result.body.warnings).toContain(SEARCH_CACHE_QUOTA_WARNING);
+  expect(result.body.quotaExceeded).toBe(true);
+  expect(result.body.retryAfterSeconds).toBeUndefined();
   expect(result.body.warnings).not.toContain(SEARCH_CACHE_STALE_WARNING);
   expect((f.stored() as { body: G2bNoticePage }).body).toEqual(original);
 });
 
-it('does not repeatedly refresh failed background queries across cache clients during the five minute backoff', async () => {
-  let time = now;
+it('retries immediately across cache clients after a failed background quota refresh', async () => {
   const f = fixture(page(SEARCH_CACHE_FRESH_MS)), loader = vi.fn(async () => { throw new G2bError(429, 'G2B_QUOTA_EXCEEDED', 'quota'); });
-  const options = { ...f.options, now: () => time };
-  await loadPublicSearch('backoff', loader, options); await Promise.all(f.scheduled);
-  // A new cache wrapper simulates a second process: the failure marker must be shared in Runtime Cache.
+  await loadPublicSearch('backoff', loader, f.options); await Promise.all(f.scheduled);
   const otherProcess = { ...f.cache };
-  const blocked = await loadPublicSearch('backoff', loader, { ...options, cache: otherProcess, force: true });
-  expect(loader).toHaveBeenCalledOnce(); expect(blocked.status).toBe('STALE');
-  expect(blocked.body.warnings).toContain(SEARCH_CACHE_QUOTA_WARNING);
-  expect(blocked.body.warnings).not.toContain(SEARCH_CACHE_STALE_WARNING);
-  time += SEARCH_CACHE_FAILURE_BACKOFF_MS;
-  await loadPublicSearch('backoff', loader, { ...options, cache: otherProcess, force: true });
-  expect(loader).toHaveBeenCalledTimes(2);
+  const recovered = await loadPublicSearch('backoff', async () => page(), { ...f.options, cache: otherProcess, force: true });
+  expect(recovered.status).toBe('MISS');
+  expect(recovered.body.fetchedAt).toBe('2026-10-13T03:00:00.000Z');
+  expect(recovered.body.warnings).toEqual([]);
 });
 
 it('does not substitute expired data or another query when an upstream lookup fails', async () => {
@@ -112,16 +108,17 @@ it('does not substitute expired data or another query when an upstream lookup fa
   const g = fixture(page()); await loadPublicSearch('first', async () => page(), g.options);
   await expect(loadPublicSearch('different', async () => { throw failure; }, g.options)).rejects.toBe(failure);
   const retry = vi.fn(async () => page());
-  await expect(loadPublicSearch('different', retry, g.options)).rejects.toMatchObject({ code: 'G2B_QUOTA_EXCEEDED' });
-  expect(retry).not.toHaveBeenCalled();
+  expect((await loadPublicSearch('different', retry, g.options)).status).toBe('MISS');
+  expect(retry).toHaveBeenCalledOnce();
 });
 
-it('falls back safely on other refresh errors and keeps local backoff if the cache write is unavailable', async () => {
+it('falls back safely on refresh errors and permits an immediate retry when cache writes fail', async () => {
   const f = fixture(page(1234)); vi.mocked(f.cache.set).mockRejectedValue(new Error('cache down'));
   const loader = vi.fn(async () => { throw new Error('network down'); });
   const result = await loadPublicSearch('local-backoff', loader, { ...f.options, force: true });
   expect(result.status).toBe('STALE'); expect(result.body.warnings).toContain(SEARCH_CACHE_FAILURE_WARNING);
-  await loadPublicSearch('local-backoff', loader, { ...f.options, force: true }); expect(loader).toHaveBeenCalledOnce();
+  const recovered = await loadPublicSearch('local-backoff', async () => page(), { ...f.options, force: true });
+  expect(recovered.status).toBe('MISS'); expect(recovered.body.warnings).toEqual([]);
 });
 
 it('rechecks the maximum age after a slow failed forced refresh', async () => {
@@ -130,20 +127,32 @@ it('rechecks the maximum age after a slow failed forced refresh', async () => {
   await expect(loadPublicSearch('expires-during-refresh', async () => { time += 1; throw new Error('unavailable'); }, { ...f.options, now: () => time, force: true })).rejects.toThrow('unavailable');
 });
 
-it('recognizes provider guard quota errors and preserves Retry-After on suppressed retries', async () => {
-  const failure = new ProviderQuotaError(1800), loader = vi.fn(async () => { throw failure; });
+it('returns the current upstream quota error without caching an artificial waiting period', async () => {
+  const failure = new ProviderQuotaError(60), loader = vi.fn(async () => { throw failure; });
   const f = fixture(page(1234));
   const cached = await loadPublicSearch('typed-quota', loader, { ...f.options, force: true });
   expect(cached.status).toBe('STALE'); expect(cached.body.warnings).toContain(SEARCH_CACHE_QUOTA_WARNING);
   expect(cached.body.warnings).not.toContain(SEARCH_CACHE_FAILURE_WARNING);
+  expect(cached.body).toMatchObject({ quotaExceeded: true, retryAfterSeconds: 60 });
+  expect(f.cache.set).not.toHaveBeenCalled();
+  expect((f.stored() as { body: G2bNoticePage }).body).toEqual(page(1234));
+  const fresh = await loadPublicSearch('typed-quota', async () => page(), f.options);
+  expect(fresh.status).toBe('HIT');
+  expect(fresh.body.quotaExceeded).toBeUndefined();
+  expect(fresh.body.retryAfterSeconds).toBeUndefined();
 
-  const g = fixture(); let time = now;
-  const options = { ...g.options, now: () => time };
+  const g = fixture();
+  const options = g.options;
   await expect(loadPublicSearch('typed-no-cache', loader, options)).rejects.toBe(failure);
-  time += 90_000;
-  await expect(loadPublicSearch('typed-no-cache', loader, { ...options, cache: { ...g.cache } }))
-    .rejects.toMatchObject({ name: 'ProviderQuotaError', code: 'G2B_QUOTA_EXCEEDED', retryAfterSeconds: 210 });
-  expect(loader).toHaveBeenCalledTimes(2);
+  const recovered = await loadPublicSearch('typed-no-cache', async () => page(), { ...options, cache: { ...g.cache } });
+  expect(recovered.status).toBe('MISS'); expect(recovered.body.warnings).toEqual([]);
+});
+
+it('ignores persisted failure markers from an older deployment', async () => {
+  const f = fixture();
+  vi.mocked(f.cache.get).mockImplementation(async key => key.startsWith('failure:')
+    ? { schema: 1, retryAt: now + 300_000, quota: true } : undefined);
+  expect((await loadPublicSearch('old-lockout', async () => page(), f.options)).status).toBe('MISS');
 });
 
 it('ignores malformed, future-dated and expired cache entries', async () => {

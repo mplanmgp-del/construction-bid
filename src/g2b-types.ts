@@ -12,7 +12,7 @@ export interface G2bPage<T> {
   source: string;
   warnings?: string[];
 }
-export type G2bNoticePage = G2bPage<BidNotice>;
+export type G2bNoticePage = G2bPage<BidNotice> & { quotaExceeded?: boolean; retryAfterSeconds?: number };
 
 export interface G2bNoticeRegions {
   number: string;
@@ -26,6 +26,7 @@ export interface G2bNoticeRegions {
 
 export interface G2bNoticeRegionsPage {
   items: G2bNoticeRegions[];
+  quotaExceeded?: boolean;
   retryAfterSeconds?: number;
 }
 

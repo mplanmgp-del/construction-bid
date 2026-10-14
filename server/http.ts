@@ -36,7 +36,8 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
       if (!query.keyword) throw new G2bError(400, 'KEYWORD_REQUIRED', '철거·석면 등 검색할 공고명을 입력해 주세요.');
       const key = JSON.stringify([query.type, query.from, query.to, query.keyword, Number(index)]);
       const result = await loadPublicSearch(key, () => api.startNotices(query, Number(index)), { force: params.get('refresh') === '1' });
-      return { status: 200, body: result.body, cacheStatus: result.status };
+      return { status: 200, body: result.body, cacheStatus: result.status,
+        ...(result.body.retryAfterSeconds ? { retryAfterSeconds: result.body.retryAfterSeconds } : {}) };
     }
     if (path === '/api/results') return { status: 200, body: await api.results(parseSearch(params, 7)) };
     if (path === '/api/detail' || path === '/api/related' || path === '/api/result-summary') {
