@@ -1,5 +1,6 @@
 import type { CompanyContract, CompanyContractPage, CompanyContractQuery } from '../company-contract-types';
 import { normalizeAwardDay, splitCompanyAwardRange } from './company-awards';
+import { ApiError } from '../live/client';
 
 export type ContractJobStatus = 'idle' | 'loading' | 'complete' | 'partial' | 'error';
 export interface ContractJob {
@@ -31,10 +32,73 @@ export function contractJobKey(job: Pick<ContractJob, 'query'>): string {
 }
 export function createContractJobs(businessNumber: string, from: string, to: string): ContractJob[] {
   if (!/^\d{10}$/.test(businessNumber)) throw new Error('사업자등록번호 10자리를 확인해 주세요.');
-  return splitCompanyAwardRange(from, to).flatMap(range => (['공사', '용역'] as const).map(type => ({
+  const [recent, ...older] = splitCompanyAwardRange(from, to);
+  const recentWeeks: { from: string; to: string }[] = [];
+  for (let last = recent.to;;) {
+    const weekStart = new Date(`${last}T00:00:00Z`);
+    weekStart.setUTCDate(weekStart.getUTCDate() - 6);
+    const first = weekStart.toISOString().slice(0, 10) < recent.from ? recent.from : weekStart.toISOString().slice(0, 10);
+    recentWeeks.push({ from: first, to: last });
+    if (first === recent.from) break;
+    const previous = new Date(`${first}T00:00:00Z`);
+    previous.setUTCDate(previous.getUTCDate() - 1);
+    last = previous.toISOString().slice(0, 10);
+  }
+  // The newest month is read in smaller windows for earlier first results.
+  // Every date still belongs to exactly one source traversal per business type.
+  return [...recentWeeks, ...older].flatMap(range => (['공사', '용역'] as const).map(type => ({
     query: { businessNumber, type, ...range, page: 1 }, status: 'idle' as const,
     items: [], previousItems: [], sourceCount: 0, fingerprints: [], warnings: [], restartRequired: false,
   })));
+}
+
+/** Read two national source streams at a time; publish each validated page
+ * before other pages or periods finish. Cancellation never publishes a late
+ * response, even when the underlying transport ignores its AbortSignal. */
+export async function runContractJobs(initial: ContractJob[], options: {
+  signal: AbortSignal;
+  load: (query: CompanyContractQuery, signal: AbortSignal) => Promise<CompanyContractPage>;
+  onUpdate: (jobs: ContractJob[]) => void;
+}): Promise<{ jobs: ContractJob[]; quotaMessage: string }> {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  if (options.signal.aborted) cancel();
+  else options.signal.addEventListener('abort', cancel, { once: true });
+  const work = initial.map(job => ({ ...job }));
+  const pending = work.map((job, index) => job.status === 'complete' ? -1 : index).filter(index => index >= 0);
+  let cursor = 0, quotaMessage = '';
+  const publish = () => { if (!controller.signal.aborted) options.onUpdate(work.map(job => ({ ...job }))); };
+  publish();
+  async function worker() {
+    while (!controller.signal.aborted) {
+      const index = pending[cursor++];
+      if (index === undefined) break;
+      if (work[index].restartRequired) work[index] = restartContractJob(work[index]);
+      while (!controller.signal.aborted) {
+        work[index] = { ...work[index], status: 'loading', error: undefined }; publish();
+        try {
+          const result = await options.load(work[index].query, controller.signal);
+          if (controller.signal.aborted) break;
+          work[index] = appendContractPage(work[index], result); publish();
+          if (!result.hasMore) break;
+        } catch (cause) {
+          if (controller.signal.aborted) break;
+          const error = cause instanceof Error && /[가-힣]/.test(cause.message) ? cause.message
+            : '계약 자료를 조회하지 못했습니다. 연결 상태를 확인한 뒤 이어서 조회해 주세요.';
+          work[index] = { ...work[index], status: 'error', error,
+            restartRequired: cause instanceof ContractPageError || (cause instanceof ApiError && /COMPANY_CONTRACTS_(CHANGED|INCOMPLETE)/.test(cause.code)) };
+          publish();
+          if (cause instanceof ApiError && (cause.status === 429 || /QUOTA|RATE_LIMIT|LIMIT_EXCEEDED/.test(cause.code))) {
+            quotaMessage = error; controller.abort();
+          }
+          break;
+        }
+      }
+    }
+  }
+  try { await Promise.all([worker(), worker()]); }
+  finally { options.signal.removeEventListener('abort', cancel); }
+  return { jobs: work.map(job => job.status === 'loading' ? { ...job, status: 'idle' } : job), quotaMessage };
 }
 
 /** Validate the page before it can change a cursor or the displayed company. */

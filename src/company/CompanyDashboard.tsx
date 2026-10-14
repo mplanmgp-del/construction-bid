@@ -3,8 +3,8 @@ import { ArrowRight, BarChart3, Building2, CalendarDays, ChevronLeft, ChevronRig
 import type { CompanyProfile } from '../types';
 import type { CompanyGroupSummary, CompanyParticipation, PublicCompany } from '../company-types';
 import { OpeningResultsPanel } from '../live/OpeningResultsPanel';
-import { CompanyIndexedRecords } from './CompanyIndexedRecords';
 import { CompanyAwardsPanel } from './CompanyAwardsPanel';
+import { CompanyContractsPanel } from './CompanyContractsPanel';
 import { normalizeAwardDay } from './company-awards';
 import { useCompanyHistory } from './useCompanyHistory';
 import { collectedCount, collectedWinningAmount, mergeCompanyProfile, type CompanyIndexFilter } from './company-index';
@@ -56,6 +56,9 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
   const searchPanel = useRef<HTMLDivElement | null>(null);
   const officialYearInput = useRef<HTMLInputElement | null>(null);
   const openingTrigger = useRef<HTMLButtonElement | null>(null);
+  const contractSection = useRef<HTMLDivElement | null>(null);
+  const awardSection = useRef<HTMLDivElement | null>(null);
+  const participationSection = useRef<HTMLDivElement | null>(null);
   const indexed = useCompanyHistory(selected, filter, refresh);
   const history = indexed.history;
   const loading = indexed.loading;
@@ -204,7 +207,7 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
       {matches.length > 0 && <div className="company-search-matches" aria-label="조회할 업체 후보">{matches.map(match => <button key={match.businessNumber} onClick={() => void findCompanies(match.businessNumber)}><span className="company-match-icon"><Building2 size={20} /></span><span><strong>{match.name || businessNumber(match.businessNumber)}</strong><small>{businessNumber(match.businessNumber)}{match.representative && ` · 대표 ${match.representative}`}{match.address && ` · ${match.address}`}</small></span><ArrowRight size={18} /></button>)}</div>}
     </div>
 
-    {!company && !searching && matches.length === 0 && <div className="company-start panel"><span className="company-start-icon"><BarChart3 size={35} /></span><h2>업체의 입찰 흐름을 살펴보세요</h2><p>확정 낙찰은 사업자등록번호로 직접 조회하며 확인되는 즉시 표시합니다. 참여 이력과 계약은 수집된 자료에서 확인합니다.<br />기간을 지정하지 않으면 업체 등록일부터 현재까지 조회하며, 등록일이 확인되지 않은 업체는 낙찰 조회 시작일을 직접 선택할 수 있습니다.</p><div className="company-start-features"><span><Users size={17} />공개 업체 조회</span><span><Trophy size={17} />낙찰·계약 구분</span><span><CalendarDays size={17} />조회 일수 제한 없음</span></div></div>}
+    {!company && !searching && matches.length === 0 && <div className="company-start panel"><span className="company-start-icon"><BarChart3 size={35} /></span><h2>업체의 입찰 흐름을 살펴보세요</h2><p>수의계약을 포함한 계약 이력과 확정 낙찰은 공식 API에서 조회하며 확인되는 즉시 표시합니다. 입찰 참여 이력은 수집된 자료에서 확인합니다.<br />기간을 지정하지 않으면 업체 등록일부터 현재까지 조회하며, 등록일이 확인되지 않은 업체는 조회 시작일을 직접 선택할 수 있습니다.</p><div className="company-start-features"><span><Users size={17} />공개 업체 조회</span><span><Trophy size={17} />낙찰·계약 구분</span><span><CalendarDays size={17} />조회 일수 제한 없음</span></div></div>}
     {searching && !suggesting && <div className="company-loading panel" role="status"><LoaderCircle className="company-spin" size={25} /><span>공개 업체 정보를 조회하고 있습니다.</span></div>}
 
     {company && <>
@@ -221,7 +224,18 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
       }}><div className="company-period-label"><CalendarDays size={19} /><div><strong>조회 기간</strong><span>참여·낙찰은 개찰일 · 계약은 계약일 기준</span></div></div><label>시작일<input type="date" value={dates.from} onChange={event => setDates({ ...dates, from: event.target.value })} /></label><span className="company-date-separator">~</span><label>종료일<input type="date" value={dates.to} onChange={event => setDates({ ...dates, to: event.target.value })} /></label><button className="button button-primary">적용</button><button type="button" className={`button button-secondary${!filter.from && !filter.to ? ' is-selected' : ''}`} onClick={() => { setDates({ from: '', to: '' }); setDateError(''); setFilter({ ...filter, from: '', to: '', page: 1, awardsPage: 1, contractsPage: 1 }); }}>전체 기간</button><button type="button" className="company-refresh" disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={16} />새로고침</button>{dateError && <p className="company-error" role="alert">{dateError}</p>}</form>
 
       {!companyRegistrationDate && registrationLookup?.businessNumber === company.businessNumber && registrationLookup.error && <p className="company-error" role="alert">{registrationLookup.error}</p>}
-      <CompanyAwardsPanel key={company.businessNumber} company={company} from={filter.from} to={filter.to} registrationPending={registrationPending} />
+      <nav className="company-record-navigation" aria-label="업체 이력 바로가기">
+        <button type="button" onClick={() => contractSection.current?.scrollIntoView({ block: 'start' })}><FileCheck2 size={17} /><span>수주·계약 이력</span><small>수의계약 포함</small></button>
+        <button type="button" onClick={() => awardSection.current?.scrollIntoView({ block: 'start' })}><Trophy size={17} /><span>확정 낙찰 이력</span></button>
+        <button type="button" onClick={() => participationSection.current?.scrollIntoView({ block: 'start' })}><Users size={17} /><span>입찰 참여 이력</span></button>
+      </nav>
+      <div className="company-record-section" ref={contractSection}>
+        <CompanyContractsPanel key={company.businessNumber} company={company} from={filter.from} to={filter.to} registrationPending={registrationPending} refreshKey={refresh} />
+      </div>
+      <div className="company-record-section" ref={awardSection}>
+        <CompanyAwardsPanel key={company.businessNumber} company={company} from={filter.from} to={filter.to} registrationPending={registrationPending} />
+      </div>
+      <div className="company-record-section" ref={participationSection}>
 
       <div className={`company-coverage${historyError || !complete ? ' is-warning' : ''}`} role="status"><Info size={17} /><div><strong>{history?.coverage.status === 'unavailable' ? '수집된 이력 연결을 확인하고 있습니다.' : complete ? '수집이 완료된 범위의 참여 이력' : '현재 수집된 참여 이력 기준'}</strong><p>{history?.coverage.message || (historyError ? '저장된 공개 이력을 확인하지 못했습니다.' : '저장된 공개 이력을 불러오고 있습니다.')}</p>{historyError && <p className="company-index-error">{historyError}{history && ' 기존 조회 결과를 유지하고 있습니다.'}</p>}<small>수집 범위 {date(history?.coverage.from)} ~ {date(history?.coverage.to)} · 개찰일 기준{history?.coverage.updatedAt && ` · 자료 갱신 ${date(history.coverage.updatedAt)}`}</small><small>수집되지 않은 기간의 이력은 추가될 수 있습니다. 입찰 참여 통계와 계약 이력은 각각 구분해 집계합니다.</small></div><span className="company-index-refresh">{indexed.refreshing ? <><LoaderCircle size={14} className="company-spin" />갱신 중</> : <><RefreshCw size={14} />자동 갱신</>}</span></div>
 
@@ -259,7 +273,7 @@ export function CompanyDashboard({ profile, onProfile }: { profile: CompanyProfi
           <footer className="company-history-footer"><p>{history.totalCount ? `${number((history.page - 1) * history.pageSize + 1)}–${number(Math.min(history.page * history.pageSize, history.totalCount))} / ` : ''}{collectedCount(history.totalCount, history.coverage) == null ? '-' : `${number(history.totalCount)}건`}</p><nav aria-label="업체 입찰 이력 페이지" className="company-pagination"><button disabled={pageGroup === 0} aria-label="이전 10개 페이지" onClick={() => setFilter({ ...filter, page: pageGroup })}><ChevronLeft size={17} /></button>{pages.map(page => <button key={page} className={page === history.page ? 'active' : ''} aria-current={page === history.page ? 'page' : undefined} onClick={() => setFilter({ ...filter, page })}>{page}</button>)}<button disabled={pageGroup + 10 >= pageCount} aria-label="다음 10개 페이지" onClick={() => setFilter({ ...filter, page: pageGroup + 11 })}><ChevronRight size={17} /></button></nav></footer>
         </section>
       </>}
-      {history && <CompanyIndexedRecords history={history} showAwards={false} onAwardPage={page => setFilter({ ...filter, awardsPage: page })} onContractPage={page => setFilter({ ...filter, contractsPage: page })} onOpening={openResults} />}
+      </div>
     </>}
   </section>;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CompanyContract, CompanyContractPage } from '../src/company-contract-types';
-import { appendContractPage, contractJobKey, createContractJobs, mergeCompanyContracts, restartContractJob, type ContractJob } from '../src/company/company-contracts';
+import { ApiError } from '../src/live/client';
+import { appendContractPage, contractJobKey, createContractJobs, mergeCompanyContracts, restartContractJob, runContractJobs, type ContractJob } from '../src/company/company-contracts';
 
 const biz = '8488802470';
 const item = (changes: Partial<CompanyContract> = {}): CompanyContract => ({
@@ -11,7 +12,7 @@ const item = (changes: Partial<CompanyContract> = {}): CompanyContract => ({
   sourceUrl: 'https://www.g2b.go.kr/link/FIUA027_01/single/?ctrtNo=R26TA02295712',
   registeredAt: '2026-10-12T09:58:56+09:00', changedAt: '', ...changes,
 });
-const job = (): ContractJob => createContractJobs(biz, '2026-10-01', '2026-10-14')[0];
+const job = (): ContractJob => createContractJobs(biz, '2026-10-01', '2026-10-07')[0];
 const response = (target: ContractJob, changes: Partial<CompanyContractPage> = {}): CompanyContractPage => ({
   ...target.query, items: [item()], pageSize: 999, sourceCount: 1, totalCount: 1, hasMore: false,
   complete: true, sourceFingerprint: '1'.repeat(64), warnings: [], fetchedAt: '2026-10-15T00:00:00Z',
@@ -24,16 +25,120 @@ const first = (target: ContractJob, changes: Partial<CompanyContractPage> = {}) 
 describe('direct company contract continuation', () => {
   it('covers all calendar months newest first without an overall date limit', () => {
     const jobs = createContractJobs(biz, '2001-08-26', '2026-10-14');
-    expect(jobs).toHaveLength(303 * 2);
+    expect(jobs).toHaveLength(304 * 2);
     expect(jobs.slice(0, 2).map(value => value.query)).toEqual([
-      { businessNumber: biz, type: '공사', from: '2026-10-01', to: '2026-10-14', page: 1 },
-      { businessNumber: biz, type: '용역', from: '2026-10-01', to: '2026-10-14', page: 1 },
+      { businessNumber: biz, type: '공사', from: '2026-10-08', to: '2026-10-14', page: 1 },
+      { businessNumber: biz, type: '용역', from: '2026-10-08', to: '2026-10-14', page: 1 },
     ]);
     expect(jobs.at(-1)?.query.from).toBe('2001-08-26');
     expect(jobs.at(-1)?.query.to).toBe('2001-08-31');
     expect(createContractJobs(biz, '2024-02-29', '2024-03-01').map(value => value.query.from))
       .toEqual(['2024-03-01', '2024-03-01', '2024-02-29', '2024-02-29']);
     expect(() => createContractJobs('848880247', '2026-01-01', '2026-02-01')).toThrow();
+  });
+
+  it('prioritizes recent weeks while covering every selected day once per business type', () => {
+    const ranges = createContractJobs(biz, '2026-09-28', '2026-10-14').filter(value => value.query.type === '공사');
+    expect(ranges.map(value => [value.query.from, value.query.to])).toEqual([
+      ['2026-10-08', '2026-10-14'], ['2026-10-01', '2026-10-07'], ['2026-09-28', '2026-09-30'],
+    ]);
+    const days: string[] = [];
+    for (const { query } of ranges) for (let date = Date.parse(query.from); date <= Date.parse(query.to); date += 86400_000) days.push(new Date(date).toISOString().slice(0, 10));
+    expect(days).toHaveLength(17);
+    expect(new Set(days).size).toBe(17);
+    expect([...days].sort()).toEqual(Array.from({ length: 17 }, (_, index) => new Date(Date.UTC(2026, 8, 28 + index)).toISOString().slice(0, 10)));
+  });
+
+  it('publishes a received contract before unrelated periods or later pages finish', async () => {
+    const jobs = createContractJobs(biz, '2026-10-01', '2026-10-07');
+    let releaseService!: (value: CompanyContractPage) => void;
+    const service = new Promise<CompanyContractPage>(resolve => { releaseService = resolve; });
+    const snapshots: ContractJob[][] = [];
+    const running = runContractJobs(jobs, {
+      signal: new AbortController().signal,
+      load: async query => query.type === '공사' ? response(jobs[0]) : service,
+      onUpdate: next => snapshots.push(next),
+    });
+    await Promise.resolve(); await Promise.resolve();
+    const received = snapshots.find(next => next[0].items.length === 1);
+    expect(received?.[0].items[0].title).toBe('송파문화예술회관 여가교실 철거공사');
+    expect(received?.[1].status).toBe('loading');
+    releaseService(response(jobs[1], { items: [], totalCount: 0, sourceCount: 0 }));
+    expect((await running).jobs.every(next => next.status === 'complete')).toBe(true);
+  });
+
+  it('ignores a late response after company-switch cancellation and starts no older requests', async () => {
+    const jobs = createContractJobs(biz, '2026-09-01', '2026-10-07');
+    const controller = new AbortController();
+    const replies: ((value: CompanyContractPage) => void)[] = [];
+    const requested: string[] = [], snapshots: ContractJob[][] = [];
+    const running = runContractJobs(jobs, {
+      signal: controller.signal,
+      load: query => { requested.push(query.businessNumber); return new Promise(resolve => { replies.push(resolve); }); },
+      onUpdate: next => snapshots.push(next),
+    });
+    controller.abort();
+    const published = snapshots.length;
+    replies[0](response(jobs[0]));
+    replies[1](response(jobs[1], { items: [], totalCount: 0, sourceCount: 0 }));
+    const result = await running;
+    expect(snapshots).toHaveLength(published);
+    expect(requested).toEqual([biz, biz]);
+    expect(result.jobs.flatMap(next => next.items)).toEqual([]);
+  });
+
+  it('does not publish a response for another company as the selected company contract', async () => {
+    const jobs = createContractJobs(biz, '2026-10-01', '2026-10-07');
+    const result = await runContractJobs(jobs, {
+      signal: new AbortController().signal,
+      load: async query => response(jobs.find(value => value.query.type === query.type)!, { items: [item({ businessNumber: '3028128785', type: query.type })] }),
+      onUpdate: () => {},
+    });
+    expect(result.jobs.flatMap(next => next.items)).toEqual([]);
+    expect(result.jobs.every(next => next.status === 'error' && next.restartRequired)).toBe(true);
+  });
+
+  it('continues source pagination after an empty matching page until the company contract is found', async () => {
+    const initial = job();
+    const pages: number[] = [], updates: ContractJob[][] = [];
+    const result = await runContractJobs([initial], {
+      signal: new AbortController().signal,
+      load: async query => {
+        pages.push(query.page);
+        return query.page === 1 ? first(initial, { items: [] })
+          : response({ ...initial, query }, { totalCount: 1000, sourceFingerprint: '2'.repeat(64) });
+      },
+      onUpdate: next => updates.push(next),
+    });
+    expect(pages).toEqual([1, 2]);
+    expect(updates.some(next => next[0].sourceCount === 999 && next[0].items.length === 0)).toBe(true);
+    expect(result.jobs[0].items[0].businessNumber).toBe(biz);
+    expect(result.jobs[0].status).toBe('complete');
+  });
+
+  it('stops older API work on quota errors while preserving contracts already received', async () => {
+    const initial = job();
+    const completed = appendContractPage(initial, response(initial));
+    const jobs = [completed, ...createContractJobs(biz, '2026-09-01', '2026-09-30')];
+    let releaseService!: (value: CompanyContractPage) => void;
+    const queries: string[] = [];
+    const resultPromise = runContractJobs(jobs, {
+      signal: new AbortController().signal,
+      load: query => {
+        queries.push(query.type);
+        if (query.type === '공사') return Promise.reject(new ApiError('나라장터 호출 한도에 도달했습니다.', 'PROVIDER_QUOTA', 429));
+        return new Promise(resolve => { releaseService = resolve; });
+      },
+      onUpdate: () => {},
+    });
+    await Promise.resolve(); await Promise.resolve();
+    releaseService(response(jobs[2], { items: [], totalCount: 0, sourceCount: 0 }));
+    const result = await resultPromise;
+    expect(queries).toEqual(['공사', '용역']);
+    expect(result.quotaMessage).toContain('호출 한도');
+    expect(result.jobs[0].items).toEqual([item()]);
+    expect(result.jobs[1].status).toBe('error');
+    expect(result.jobs[2].status).toBe('idle');
   });
 
   it('continues a full nationwide page even when it contains zero company matches', () => {
