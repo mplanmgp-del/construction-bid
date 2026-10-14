@@ -2,42 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CirclePause, ExternalLink, Info, ListOrdered, LoaderCircle, Play, RefreshCw, Trophy } from 'lucide-react';
 import type { PublicCompany } from '../company-types';
 import type { CompanyAward, CompanyAwardPage, CompanyAwardQuery } from '../company-award-types';
-import { ApiError, fetchApi, koreanToday } from '../live/client';
+import { ApiError, koreanToday } from '../live/client';
+import { fetchCompanyApi } from './company-request';
 import { OpeningResultsPanel } from '../live/OpeningResultsPanel';
 import { companyAwardKey, companyAwardTaskKey, companyAwardTasks, mergeCompanyAwards, normalizeAwardDay, type AwardDateRange } from './company-awards';
 import './company-awards.css';
 
 type AwardJob = { query: CompanyAwardQuery; status: 'idle' | 'loading' | 'complete' | 'partial' | 'error'; result?: CompanyAwardPage; error?: string; force?: boolean };
-const sliceCache = new Map<string, { result: CompanyAwardPage; expires: number }>();
-const MAX_CACHE_SLICES = 128;
-const MAX_CACHE_ROWS = 10_000;
 const number = (value: number) => value.toLocaleString('ko-KR');
 const money = (value: number | null) => value == null ? '-' : `${number(value)}원`;
 const day = (value: string) => normalizeAwardDay(value)?.replaceAll('-', '.') || '-';
-
-function readSlice(query: CompanyAwardQuery): CompanyAwardPage | undefined {
-  const key = companyAwardTaskKey(query), entry = sliceCache.get(key);
-  if (!entry) return undefined;
-  sliceCache.delete(key);
-  if (entry.expires <= Date.now()) return undefined;
-  sliceCache.set(key, entry);
-  return entry.result;
-}
-function saveSlice(query: CompanyAwardQuery, result: CompanyAwardPage) {
-  if (!result.complete || result.warnings.length > 0 || result.items.length > MAX_CACHE_ROWS) return;
-  const key = companyAwardTaskKey(query);
-  const recentStart = koreanToday(new Date(Date.now() - 7 * 86_400_000));
-  const ttl = query.to >= recentStart ? 180_000 : 86_400_000;
-  const expires = Date.parse(result.fetchedAt) + ttl;
-  if (!Number.isFinite(expires) || expires <= Date.now()) return;
-  sliceCache.delete(key); sliceCache.set(key, { result, expires });
-  let rows = [...sliceCache.values()].reduce((sum, entry) => sum + entry.result.items.length, 0);
-  while (sliceCache.size > MAX_CACHE_SLICES || rows > MAX_CACHE_ROWS) {
-    const first = sliceCache.keys().next().value;
-    if (!first) break;
-    rows -= sliceCache.get(first)!.result.items.length; sliceCache.delete(first);
-  }
-}
 
 export function CompanyAwardsPanel({ company, from, to }: { company: PublicCompany; from?: string; to?: string }) {
   const [jobs, setJobs] = useState<AwardJob[]>([]);
@@ -84,14 +58,13 @@ export function CompanyAwardsPanel({ company, from, to }: { company: PublicCompa
         try {
           const params = new URLSearchParams({ ...job.query });
           if (job.force) params.set('refresh', '1');
-          const result = await fetchApi<CompanyAwardPage>(`/api/company-awards?${params}`, controller.signal);
+          const result = await fetchCompanyApi<CompanyAwardPage>(`/api/company-awards?${params}`, controller.signal);
           if (!current()) return;
           if (result.businessNumber !== job.query.businessNumber || result.type !== job.query.type || result.from !== job.query.from || result.to !== job.query.to
             || result.items.some(item => item.businessNumber !== job.query.businessNumber || item.awarded !== true)) {
             throw new Error('요청한 업체·기간의 확정 낙찰 자료인지 확인하지 못했습니다. 해당 구간을 다시 조회해 주세요.');
           }
           job.result = result; job.status = result.complete && result.warnings.length === 0 ? 'complete' : 'partial'; job.force = false;
-          saveSlice(job.query, result);
         } catch (cause) {
           if (!current()) return;
           if (controller.signal.aborted) { job.status = 'idle'; break; }
@@ -113,7 +86,7 @@ export function CompanyAwardsPanel({ company, from, to }: { company: PublicCompa
   function begin(next: AwardDateRange) {
     try {
       const queries = companyAwardTasks(company.businessNumber, next.from, next.to);
-      const initial = queries.map(query => { const result = readSlice(query); return { query, result, status: result ? 'complete' : 'idle' } as AwardJob; });
+      const initial = queries.map(query => ({ query, status: 'idle' } as AwardJob));
       setRange(next); setNeedsStart(false); setPage(1); setOpening(null);
       void execute(initial);
     } catch (cause) { setRunning(false); setNeedsStart(true); setIssue(cause instanceof Error ? cause.message : '조회 기간을 확인해 주세요.'); }

@@ -73,7 +73,7 @@ export function createArchivePageLoader(request: RelatedRequest, now: () => numb
     for (const row of items) {
       if (text(row.bsnsDivNm) && text(row.bsnsDivNm) !== query.type) fail('다른 업무의 개찰 자료가 포함되어 수집을 중단했습니다.');
       const number = text(row.bidNtceNo);
-      if (!number) continue;
+      if (!/^[A-Za-z0-9_-]{1,40}$/.test(number)) fail('공고번호가 누락되었거나 형식이 올바르지 않아 이 페이지의 참여 자료를 모두 확인하지 못했습니다.');
       const revisionRaw = text(row.bidNtceOrd);
       if (!/^\d{1,3}$/.test(revisionRaw)) fail('공고 차수를 확인할 수 없어 수집을 중단했습니다.');
       const revision = revisionRaw.padStart(3, '0');

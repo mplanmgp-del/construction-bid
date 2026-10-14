@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createCompanyAwardsLoader, validateCompanyAwardQuery } from '../server/company-awards.ts';
 import type { RelatedRequest } from '../server/g2b-related.ts';
+import { ProviderQuotaError } from '../server/provider-quota.ts';
 
 const query = { businessNumber: '3028128785', type: '공사' as const, from: '2026-10-01', to: '2026-10-31' };
 const sample = {
@@ -96,6 +97,25 @@ describe('direct company final-award history', () => {
     expect(partial.complete).toBe(false);
     expect(partial.items).toHaveLength(999);
     expect(JSON.stringify(partial)).not.toContain('secret');
+  });
+
+  it('propagates a later-page quota failure and restarts that month cleanly on explicit retry', async () => {
+    const rows = Array.from({ length: 1000 }, (_, index) => ({ ...sample, bidNtceNo: `R26BK${String(index).padStart(8, '0')}` }));
+    const quota = new ProviderQuotaError(60);
+    let failSecondPage = true;
+    const request = vi.fn<RelatedRequest>(async (_base, _op, params) => {
+      if (params.pageNo === '1') return page(rows.slice(0, 999), 1000);
+      if (failSecondPage) { failSecondPage = false; throw quota; }
+      return page(rows.slice(999), 1000);
+    });
+    const load = createCompanyAwardsLoader(request, now);
+    await expect(load(query)).rejects.toBe(quota);
+    expect(request.mock.calls.map(call => call[2].pageNo)).toEqual(['1', '2']);
+    expect(quota).toMatchObject({ status: 429, code: 'G2B_QUOTA_EXCEEDED', retryAfterSeconds: 60 });
+    const retried = await load(query);
+    expect(retried).toMatchObject({ complete: true, totalCount: 1000, warnings: [] });
+    expect(retried.items).toHaveLength(1000);
+    expect(request.mock.calls.map(call => call[2].pageNo)).toEqual(['1', '2', '1', '2']);
   });
 
   it('preserves zero amounts, validates dates, and keeps malformed values unknown', async () => {

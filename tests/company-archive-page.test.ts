@@ -42,6 +42,12 @@ describe('company participation archive source pages', () => {
   it('rejects silent page-size fallback instead of claiming ingestion success', async () => {
     await expect(createArchivePageLoader(request([base], 999))(query)).rejects.toMatchObject({ status: 502 });
   });
+  it('does not silently discard a malformed notice among otherwise valid rows', async () => {
+    for (const bidNtceNo of [undefined, '', 'R26 BK01757822', 'R26/BK01757822', 'A'.repeat(41)]) {
+      await expect(createArchivePageLoader(request([base, { ...base, bidNtceNo, bidprcCorpBizrno: '9999999999' }]))(query))
+        .rejects.toMatchObject({ status: 502, code: 'G2B_ARCHIVE_INCOMPLETE' });
+    }
+  });
   it('rejects duplicate participation rows that cannot be distinguished by the source', async () => {
     await expect(createArchivePageLoader(request([base, base]))(query)).rejects.toMatchObject({ status: 502 });
   });

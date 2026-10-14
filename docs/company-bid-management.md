@@ -1,57 +1,80 @@
 # MY입찰관리
 
-The top-level 개찰결과 menu is replaced by MY입찰관리. Per-notice public results remain available in notice details.
+The top-level 개찰결과 menu is replaced by MY입찰관리. Public opening results remain available in each notice's details.
 
-## Queries and ownership
+## Current architecture: direct official queries
 
-- Public company registration lookup uses `UsrInfoService02`, matching an exact ten-digit business number. Name search uses the archive directory and explicitly identifies that scope. Missing/failed registration can fall back to an archived company name.
-- Member profiles may store an optional business number. Existing owner-only workspace RLS and old profiles remain compatible. Public company lookup never reads another member's profile or notes.
-- `/api/company-history` reads the shared Supabase index. Blank dates mean all stored history; there is no maximum query duration. Results paginate 30 records, with all matching rows used for statistics. Opening-day boundaries are inclusive in Asia/Seoul.
-- The selected public company profile is loaded once; changing dates/pages does not call G2B again.
-- Amounts not published by the provider remain null (`-`). Rank 1 alone is not a final award. Partial collections never claim complete lifetime history.
+MY입찰관리 does **not** precollect company history or read saved history from the database. Opening the menu alone does not start history requests. The user searches for a company and selects a candidate, submits an exact business number, or clicks 내 업체 조회. Only then does the app load that company's official registration profile and start participation, final-award and contract queries.
 
-## Collection
+- Blank dates mean the official procurement-company registration date through today in Asia/Seoul. There is no overall history-day limit. If the registration date is missing, the user must supply a start date; the app does not invent one.
+- Date changes begin a new direct traversal. Table pagination and outcome filters operate on rows already received, rather than querying the database or rereading the registration profile.
+- MY routes use a fresh provider client per request and return `Cache-Control: no-store`. The dashboard and source panels retain received rows/cursors only in the mounted browser view. Reloading, leaving the view or selecting another company starts a new lookup; stop/resume is not durable background work or a server archive.
+- Member profiles can still store an optional business number. Existing owner-only workspace access and older profiles remain compatible. Public lookup does not read another member's profile, bookmarks or notes.
+- `/api/company-history` is retired and returns **410 `LIVE_HISTORY_REQUIRED`**. It must not fall back to the preserved Supabase archive.
 
-Apply `supabase/company-history.sql` followed by `supabase/company-collector.sql` in the construction-bid project. These scripts are additive to the member schema. Public tables expose SELECT only, and the collector schema, tables and functions are inaccessible to anonymous/authenticated API roles. Run both files in `supabase/tests/` to validate inside rollback-only transactions.
+The ordinary notice-search cache and per-notice result functionality are separate from these MY direct-history routes.
 
-The SQL collector uses pg_net to read the fixed public application endpoint `/api/archive-page`, so neither G2B keys nor Supabase privileged keys are copied into SQL or frontend code. The proxy retrieves a single source day in pages of **999**, which was verified against the real provider. A request for 1000 silently returns only ten rows and must not be used.
+## Company candidates and exact selection
 
-The private queue persists day/type/page and cross-page fingerprints. It checks page completeness, restarts on changed provider counts/order, and preserves failed positions. Two complete traversals must produce the same full identity set before coverage is marked complete or missing rows are soft archived. A malformed historical day remains retryable while its predecessor can continue after repeated failures. Parsed HTTP response bodies are removed from pg_net after consumption. The current day stays incomplete because new events can arrive. Company/notices/participations are stored separately; large repeated raw provider JSON is not retained.
+`/api/companies` uses official `UsrInfoService02` data, not the former archive directory or a search-engine result page.
 
-After production proxy verification, activate from an authorized SQL session:
+- Name-keyword lookup requests basic company candidates by registration year and page. The UI works backwards from the current year, shows candidates as they arrive, and supports 업체 검색 중지 / 업체 더 찾기. Keyword search does not start the histories of every matching company.
+- Selecting a candidate submits its exact ten-digit business number. Direct business-number search performs the same exact lookup and checks returned identities before selecting a company.
+- Registration details, registered industries and supplied products are loaded for the selected company. Incomplete optional details produce an explicit warning; a failed registration request is not replaced with an archived name.
+- Business numbers are normalized for lookup, while company-name similarity alone never establishes participation, an award or a contract.
 
-```sql
-update bid_archive_private.settings set enabled=true where singleton;
-select cron.schedule('company-history-collector', '* * * * *', 'select bid_archive_private.tick();');
-select bid_archive_private.tick();
-```
+## Source routes and date boundaries
 
-The scheduler launches at most two provider pages per minute, advances historical days backwards, and revisits recent/older days for changes. It initially enqueues both today and yesterday to avoid current-day changes blocking backfill. A 600-call/day collection budget reserves upstream quota for interactive searches. This is a collector budget, not a user date restriction. The budget and a 400 MiB database guard are private operational settings. The free database cannot store unlimited national history; provision appropriate capacity before increasing these settings. Pausing collection never deletes archived history or limits its searchable dates. `bid_archive_health` exposes a non-sensitive reason when collection waits for quota/storage.
+| App route | Official source / operation | Date and continuation | Company matching |
+| --- | --- | --- | --- |
+| `/api/company-participation` | `PubDataOpnStdService/getDataSetOpnStdScsbidInfo` | One opening day, one source page per app request; 공사/용역, newest day first | The source has no usable business-number filter. Read the national page and return only the exact company's rows. |
+| `/api/company-awards` | `ScsbidInfoService/getScsbidListSttusCnstwkPPSSrch` / `getScsbidListSttusServcPPSSrch` | Calendar-month slices of at most 31 inclusive opening days; server checks all pages within a bounded request | Official `bizno` filter, followed by another exact business-number check. |
+| `/api/company-contracts` | `CntrctInfoService/getCntrctInfoListCnstwkPPSSrch` / `getCntrctInfoListServcPPSSrch` | Calendar-month slices of at most 31 inclusive **contract-conclusion days**; one source page per app request | No official business-number filter. Read the national page and match the published `corpList` business number exactly. |
 
-## Source limits
+Participation and contract pages request **999** source rows. National source `totalCount` and `sourceCount` describe traversal work, not this company's result count. A page with zero company matches does not finish a range while `hasMore` is true. The client continues through every page and date/type slice unless stopped or blocked.
 
-The currently approved standard dataset provides construction/service public opening participation. It does not provide an authoritative lot/rebid identifier or contracts made without bidding. Record fingerprints use notice, company, opening/submission times and amount; ambiguous identical source rows cause a visible collection retry rather than a false complete flag.
+The standard participation service accepts only one opening day at a time. This per-request source restriction is handled by daily continuation; it is not an app history-range cap. Contract filtering uses the contract conclusion date, which can differ from the date the contract was registered in the API.
 
-[나라장터 낙찰정보서비스](https://www.data.go.kr/data/15129397/openapi.do) was approved on 2026-10-14 and verified with the existing server key (HTTP 200 / resultCode 00). Its development account currently allows 1,000 daily requests per operation. Company history continues to use the shared bulk archive; precise notice results use the dedicated service only when opened. The dedicated response separates bid classifications and rebid rounds. List summaries query opening/winner summaries without loading every participant. Complete public responses have short CDN caching, and explicit refreshes bypass it.
+Sources: [나라장터 낙찰정보서비스](https://www.data.go.kr/data/15129397/openapi.do), [나라장터 계약정보서비스](https://www.data.go.kr/data/15129427/openapi.do). Search-engine results cannot establish complete, authoritative participation or contract history.
 
-[Official company participation report](https://www.data.go.kr/data/15050832/fileData.do) can support a separately verified bulk backfill; its current report UI limits individual exports to 12 months, not the app's search range. Search-engine results cannot substitute for complete authoritative bid history.
+## Progress, limits and stop/resume
 
-## Verification
+The company panels and candidate lookup share `fetchCompanyApi` in `src/company/company-request.ts`, limiting concurrent browser-to-app company requests to **two**. This is a per-browser concurrency gate, not a global provider-quota guarantee; individual app requests can make multiple official calls. The server's existing burst guard and provider limits still apply.
 
-Unit coverage includes unlimited multi-decade query spans, real date validation, exact company identity, profile backward compatibility, provider errors, complete page counts, repeated pages, immutable record identity, and missing amounts. SQL checks include KST boundaries, multi-year aggregation, unknown outcomes, other-company isolation, co-bidders, pagination, soft archives and SELECT-only public permissions. Production must additionally prove the actual collector writes source data and the corresponding company displays it.
+The user can stop a source panel and resume remaining work in the same view. Previously received results remain visible during normal stop/error handling. Quota errors stop that source's remaining requests instead of treating the error as an empty result. Missing, malformed or inconsistent responses stay incomplete. Changed totals or repeated pages require the affected interval to be checked again; contract retries retain the previous visible rows until a complete replacement traversal succeeds.
 
-On 2026-10-14 the production collector was enabled after both SQL rollback suites passed. A production snapshot contained 4,877 participation rows, 4,493 companies and 144 notices (17 MB total database). `/api/company-history?businessNumber=3028128785` and the deployed UI returned the real 황간고 본관 석면철거공사 award (55,968,000 KRW). These are initial collection counts, not a completed national or lifetime backfill.
+Daily participation traversal and national contract traversal can require many calls, particularly for a company registered years ago. **Unlimited selectable dates do not mean unlimited traffic, instant results or guaranteed full-period completion.** Provider daily quotas, unavailable historical records, inconsistent pages, network failures and bounded server execution can interrupt a lookup. A partial response never means the company's lifetime history has been completely checked. An operational API quota increase may improve throughput, but cannot change these source guarantees by itself.
 
-## Precise opening archive and direct awards
+The UI reports received results and completed/remaining slices separately. Before all slices finish, zero means “currently confirmed zero / still checking,” not “no history.” Results are displayed 30 at a time, with page-number groups of ten. Unknown public values remain `-`.
 
-Apply `supabase/company-notice-archive.sql` **after** both older scripts, including on reapply. Its rollback test is `supabase/tests/company_notice_archive.sql`. Successful opening detail reads enqueue only a validated public notice identity. The private worker fetches official results itself; public clients cannot inject bidder payloads. After deploying the bounded archive endpoint, schedule `bid-company-opening-archive` with `select bid_archive_private.tick_openings()` once a minute.
+## Participation, awards and contracts are separate
 
-The worker shares the existing daily budget and storage ceiling, reserves at most 15 provider calls per job, and permits one in-flight notice. Archive requests allow three pages per operation. Larger notices remain available through interactive detail pagination; background work defers them for a day instead of repeatedly consuming the same first pages. This is an explicit background archive limitation, not a complete-history guarantee.
+- Participation contains submitted bids, including unsuccessful and unknown-outcome records. The standard service does not publish authoritative lot/rebid identifiers for these rows. Rank 1 alone is not promoted to a final award.
+- Final-award queries return official successful-award records with bid classification and rebid round. They do not return unsuccessful bidders or direct contracts made without a bidding notice. The dashboard's participation statistics are calculated from the participation rows received so far; they are not silently combined with separate award totals.
+- Contract history includes negotiated/direct contracts (`수의계약`) even when there is no notice number. It presents contract title, institution, conclusion date, method, published current contract total and the company's published share.
+- A joint contract's total amount is not the selected company's individual revenue. Unknown/ambiguous shares remain `-`. Full confirmed contract numbers retain amendment suffixes; original and amended records are not silently merged or added into an asserted lifetime award total.
+- Company-specific endpoints filter exact business identities on the server before returning rows. Received data and any visible totals remain scoped to the selected company.
 
-Precise rows identify the notice, revision, bid classification, rebid round, company and bidding time. A read view suppresses duplicate standard rows only while the precise snapshot covers every advertised participant group. Older rebid groups sometimes advertise participants but omit their list; available rows are stored, and existing standard records are preserved. Missing precise rows are soft archived only after two newer identical complete identity sets. Original standard rows are not deleted.
+## Verification and observed limits
 
-The optional **확정 낙찰 직접 조회** tab uses company-filtered `getScsbidListSttusCnstwkPPSSrch` / `ServcPPSSrch` (`bizno`, opening-date query). It retrieves calendar-month slices with all provider pages, starting at registration date unless the user supplies dates. There is no overall date-span cap. These operations provide final awards only, not unsuccessful participation or direct contracts. Opening-summary operations do not honor `bizno` and must never be used as a company participation filter.
+Tests cover exact business identity, old profiles, multi-year/date-boundary traversal, page counts, repeated/changed pages, continuation after a zero-match page, unknown money, safe official links, amendment identities, quota/error propagation and preserving contract rows during restart. Client tests also cover the shared two-request gate and aborting queued requests. Run the relevant `tests/company-*.test.ts` suites and `npm run typecheck` after modifying these paths; successful tests alone are not live-provider acceptance.
 
-Two client workers expose progress and preserve results on stop/error. Quota responses stop remaining work. Complete public award slices share a cache for three minutes near the present and one day for older dates, measured from the original response timestamp. Incomplete/warning responses never renew cache life or count as completed periods.
+Live official-source verification for **2026-10-01 through 2026-10-14** read all **19 construction-contract pages** in that interval and found the following exact match:
 
-Recovery on 2026-10-14 identified 17 public notice references for 함께하는개발 and independently retrieved their official G2B opening responses: 3,193 public participant rows, including 17 non-winning records for business number 8488802470. Sixteen notices had complete groups; one omitted an older rebid's 220-person list while providing the later 117-person group. The separate 40,640,000 KRW direct contract shown by the reference service is not a competitive award and is not included in these participation statistics.
+| Field | Verified official value |
+| --- | --- |
+| Company | 주식회사 함께하는개발 (`8488802470`) |
+| Contract | 송파문화예술회관 여가교실 철거공사 |
+| Institution | 서울특별시 송파구 |
+| Contract conclusion date | 2026-10-07 |
+| Method / published amount | 수의계약 / 40,640,000원 |
+| Confirmed / unified contract number | `R26TA0229571200` / `R26TE18812747` |
+| Notice number | Not published |
+
+This proves ordinary monthly pagination can find the direct contract without a hard-coded company or title filter. It is **not** verification of the company's entire lifetime, all service contracts, or all unsuccessful participation. An award-only lookup would not find this contract because it has no competitive-award notice in the verified response.
+
+## Historical archive: preserved, disabled
+
+The previous Supabase implementation (`supabase/company-history.sql`, `company-collector.sql`, `company-notice-archive.sql` and their rollback tests) remains preserved for historical reference and data retention. Its settings were verified as **`enabled=false`** during this transition. The daily and precise-opening workers share this disabled setting; the current MY flow neither enqueues archive work nor queries it. Do not reactivate collectors as part of this direct-query workflow.
+
+Earlier collection and recovery verified public participation records, including 17 non-winning records for 함께하는개발. Those saved snapshots are historical evidence, not the current MY data source or proof of complete coverage. Existing public archive data and member-owned workspace data are retained; this change does not delete them. A future return to precollection would require a separate architecture decision, quota/capacity review and end-to-end verification.

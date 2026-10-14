@@ -2,12 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createG2bClient } from '../server/g2b';
 import { handleG2bRequest, nodeApiHandler, type NodeResponse } from '../server/http';
 
-const cacheEntries = vi.hoisted(() => new Map<string, unknown>());
+const cacheAccess = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn() }));
 vi.mock('@vercel/functions', () => ({
-  getCache: () => ({
-    get: async (key: string) => cacheEntries.get(key),
-    set: async (key: string, value: unknown) => { cacheEntries.set(key, value); },
-  }),
+  getCache: () => cacheAccess,
   waitUntil: vi.fn(),
 }));
 const started = Date.parse('2026-10-14T05:00:00Z');
@@ -17,7 +14,7 @@ const winner = { bidNtceNo: 'R26BK01731386', bidNtceOrd: '000', bidClsfcNo: '0',
 const provider = (items: object[]) => Response.json({ response: { header: { resultCode: '00' }, body: { totalCount: items.length, items } } });
 let sequence = 0;
 beforeEach(() => {
-  cacheEntries.clear();
+  cacheAccess.get.mockReset(); cacheAccess.set.mockReset();
   vi.spyOn(Date, 'now').mockReturnValue(started);
   vi.stubEnv('G2B_SERVICE_KEY', `award-http-test-${++sequence}`);
 });
@@ -30,33 +27,41 @@ async function request(params = query()) {
   return { status: res.statusCode, headers, body: JSON.parse(body) };
 }
 
-it('reads the provider after a current-month snapshot expires instead of stamping old raw data as fresh', async () => {
+it('reads current provider data on every request without serving a saved or raw cached snapshot', async () => {
   let published = false;
   const fetcher = vi.fn(async () => provider(published ? [winner] : []));
   vi.stubGlobal('fetch', fetcher);
   expect((await request()).body.totalCount).toBe(0);
-  vi.mocked(Date.now).mockReturnValue(started + 120_000);
+  vi.mocked(Date.now).mockReturnValue(started + 1000);
   expect((await request()).body.totalCount).toBe(0);
-  expect(fetcher).toHaveBeenCalledOnce();
+  expect(fetcher).toHaveBeenCalledTimes(2);
   published = true;
-  vi.mocked(Date.now).mockReturnValue(started + 181_000);
+  vi.mocked(Date.now).mockReturnValue(started + 2000);
   const refreshed = await request();
   expect(refreshed.body.totalCount).toBe(1);
   expect(refreshed.body.items[0].businessNumber).toBe('8488802470');
-  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(cacheAccess.get).not.toHaveBeenCalled();
+  expect(cacheAccess.set).not.toHaveBeenCalled();
 });
 
 it.each([
-  ['2026-10-01', '2026-10-14', 180],
-  ['2026-09-01', '2026-09-30', 86400],
-])('does not extend the original freshness deadline for a cached %s..%s result', async (from, to, ttl) => {
+  ['2026-10-01', '2026-10-14'],
+  ['2026-09-01', '2026-09-30'],
+])('does not cache direct responses for either current or historical periods: %s..%s', async (from, to) => {
   vi.stubGlobal('fetch', async () => provider([]));
   const params = query(); params.set('from', from); params.set('to', to);
-  expect((await request(params)).headers['Vercel-CDN-Cache-Control']).toBe(`public, max-age=${ttl}`);
+  const first = await request(params);
+  expect(first.headers['Cache-Control']).toBe('no-store');
+  expect(first.headers['Vercel-CDN-Cache-Control']).toBeUndefined();
+  expect(first.headers['X-Search-Cache']).toBeUndefined();
   vi.mocked(Date.now).mockReturnValue(started + 120_500);
-  const cached = await request(params);
-  expect(cached.headers['X-Search-Cache']).toBe('HIT');
-  expect(cached.headers['Vercel-CDN-Cache-Control']).toBe(`public, max-age=${ttl - 121}`);
+  const next = await request(params);
+  expect(next.headers['Cache-Control']).toBe('no-store');
+  expect(next.headers['X-Search-Cache']).toBeUndefined();
+  expect(next.headers['Vercel-CDN-Cache-Control']).toBeUndefined();
+  expect(cacheAccess.get).not.toHaveBeenCalled();
+  expect(cacheAccess.set).not.toHaveBeenCalled();
 });
 
 it('preserves injected clients and validates date ranges before provider work', async () => {

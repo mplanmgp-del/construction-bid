@@ -4,11 +4,7 @@ import { ProviderQuotaError } from './provider-quota.ts';
 import { CompanyLookupError } from './g2b-company.ts';
 import { OpeningResultsError } from './g2b-results.ts';
 import { validateCompanyAwardQuery } from './company-awards.ts';
-import { loadCompanyAwards } from './company-award-cache.ts';
 import type { CompanyAwardQuery } from '../src/company-award-types.ts';
-import { queueOpeningArchive } from './opening-archive-queue.ts';
-import { waitUntil } from '@vercel/functions';
-import { createCompanyArchiveReader, parseCompanyHistoryQuery } from './company-history.ts';
 import type { G2bApiError, G2bNoticeRegionsPage } from '../src/g2b-types.ts';
 
 type Client = ReturnType<typeof createG2bClient>;
@@ -21,41 +17,36 @@ function serverClient(force = false) {
   return client;
 }
 
-// Award snapshots have their own shared freshness clock. On a cache miss, use a
-// fresh provider client so its five-minute raw cache cannot renew old data.
-export async function handleG2bRequest(path: string, params: URLSearchParams, api: Client = serverClient(path === '/api/company-awards' || params.get('refresh') === '1')): Promise<{ status: number; body: unknown; cacheStatus?: string; retryAfterSeconds?: number }> {
+// MY history is read from the provider on demand, without an archive or a persistent result cache.
+export async function handleG2bRequest(path: string, params: URLSearchParams, api: Client = serverClient(path.startsWith('/api/company-') || path === '/api/companies' || params.get('refresh') === '1')): Promise<{ status: number; body: unknown; cacheStatus?: string; retryAfterSeconds?: number }> {
   try {
+    if (path === '/api/company-participation') {
+      return { status: 200, body: await api.companyParticipation({ businessNumber: (params.get('businessNumber') || '').replace(/[\s-]/g, ''),
+        type: params.get('type') as '공사' | '용역', day: params.get('day') || '', page: Number(params.get('page') || '1') }) };
+    }
+    if (path === '/api/company-contracts') {
+      return { status: 200, body: await api.companyContracts({ businessNumber: (params.get('businessNumber') || '').replace(/[\s-]/g, ''),
+        type: params.get('type') as '공사' | '용역', from: params.get('from') || '', to: params.get('to') || '', page: Number(params.get('page') || '1') }) };
+    }
     if (path === '/api/company-awards') {
       const query: CompanyAwardQuery = { businessNumber: (params.get('businessNumber') || '').replace(/[\s-]/g, ''),
         type: params.get('type') as CompanyAwardQuery['type'], from: params.get('from') || '', to: params.get('to') || '' };
       validateCompanyAwardQuery(query);
-      const result = await loadCompanyAwards(query, () => api.companyAwards(query), { force: params.get('refresh') === '1' });
-      return { status: 200, body: result.body, cacheStatus: result.status };
+      return { status: 200, body: await api.companyAwards(query) };
     }
     if (path === '/api/companies' || path === '/api/company-history') {
-      const archive = createCompanyArchiveReader({ url: process.env.VITE_SUPABASE_URL, key: process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY });
       if (path === '/api/company-history') {
-        const query = parseCompanyHistoryQuery(params);
-        const body = await archive.history(query);
-        return { status: 200, body };
+        throw new CompanyLookupError(410, 'LIVE_HISTORY_REQUIRED', 'MY입찰관리가 실시간 조회 방식으로 변경되었습니다. 페이지를 새로고침해 주세요.');
       }
       const q = params.get('q')?.trim() || '';
       const bizno = q.replace(/[\s-]/g, '');
       if (/^\d{10}$/.test(bizno)) {
-        try {
-          const result = await api.company(bizno);
-          if (result.company) return { status: 200, body: { items: [result.company], message: result.warnings.join(' ') } };
-          const stored = await archive.company(bizno);
-          return { status: 200, body: { items: stored ? [stored] : [], message: stored ? '현재 등록정보가 없어 공개 이력에 기록된 업체명을 표시합니다.' : '' } };
-        } catch (error) {
-          let stored = null;
-          try { stored = await archive.company(bizno); } catch { /* Preserve the original provider error. */ }
-          if (!stored) throw error;
-          return { status: 200, body: { items: [stored], message: '최신 업체 등록정보를 확인하지 못해 저장된 공개 업체 정보를 표시합니다.' } };
-        }
+        const result = await api.company(bizno);
+        return { status: 200, body: { items: result.company ? [result.company] : [], message: result.warnings.join(' ') } };
       }
-      const items = await archive.search(q);
-      return { status: 200, body: { items, message: '수집된 공개 업체명에서 검색합니다. 목록에 없는 업체는 사업자등록번호 10자리로 직접 조회해 주세요.' } };
+      const year = Number(params.get('year') || new Date(Date.now() + 9 * 3600_000).getUTCFullYear());
+      const page = Number(params.get('page') || '1');
+      return { status: 200, body: await api.companyNames(q, year, page) };
     }
     if (path === '/api/archive-page') {
       const day = params.get('day') || '';
@@ -129,7 +120,7 @@ export async function nodeApiHandler(req: NodeRequest, res: NodeResponse) {
   const url = new URL(req.url || '/', 'http://localhost');
   // Region hydration uses bounded batches and must not consume the search/result allowance.
   const regionBatch = url.pathname === '/api/notice-regions';
-  const awardBatch = url.pathname === '/api/company-awards';
+  const awardBatch = ['/api/company-awards', '/api/company-participation', '/api/company-contracts', '/api/companies'].includes(url.pathname);
   const buckets = regionBatch ? regionClients : awardBatch ? awardClients : clients;
   const forwarded = req.headers['x-forwarded-for'];
   const address = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0]?.trim() || 'local';
@@ -142,13 +133,6 @@ export async function nodeApiHandler(req: NodeRequest, res: NodeResponse) {
     res.end(JSON.stringify({ error: { code: 'TOO_MANY_REQUESTS', message: '조회 요청이 많습니다. 잠시 후 다시 시도해 주세요.' } })); return;
   }
   const result = await handleG2bRequest(url.pathname, url.searchParams);
-  if (url.pathname === '/api/opening-results' && url.searchParams.get('archive') !== '1' && result.status === 200) {
-    const body = result.body as { complete: boolean; warnings: string[] };
-    if (body.complete && !body.warnings.length) {
-      const job = queueOpeningArchive({ number: url.searchParams.get('number') || '', revision: (url.searchParams.get('revision') || '').padStart(3, '0'), type: url.searchParams.get('type') as '공사' | '용역' });
-      try { waitUntil(job); } catch { await job; }
-    }
-  }
   res.statusCode = result.status;
   if (result.retryAfterSeconds) res.setHeader('Retry-After', String(result.retryAfterSeconds));
   if (result.cacheStatus) res.setHeader('X-Search-Cache', result.cacheStatus);
@@ -167,15 +151,6 @@ export async function nodeApiHandler(req: NodeRequest, res: NodeResponse) {
   if (['/api/opening-results', '/api/result-summary'].includes(url.pathname) && result.status === 200 && url.searchParams.get('refresh') !== '1') {
     const body = result.body as { complete?: boolean; warnings?: string[] };
     if (body.complete && !body.warnings?.length) res.setHeader('Vercel-CDN-Cache-Control', 'public, max-age=120');
-  }
-  if (url.pathname === '/api/company-awards' && result.status === 200 && url.searchParams.get('refresh') !== '1' && result.cacheStatus !== 'STALE') {
-    const body = result.body as { complete: boolean; warnings: string[]; to: string; fetchedAt: string };
-    if (body.complete && !body.warnings.length) {
-      const recent = body.to >= new Date(Date.now() + 9 * 3600_000 - 7 * 86400_000).toISOString().slice(0, 10);
-      const age = Date.now() - Date.parse(body.fetchedAt);
-      const remaining = Math.floor(((recent ? 180_000 : 86400_000) - age) / 1000);
-      if (age >= 0 && remaining > 0) res.setHeader('Vercel-CDN-Cache-Control', `public, max-age=${remaining}`);
-    }
   }
   res.end(JSON.stringify(result.body));
 }

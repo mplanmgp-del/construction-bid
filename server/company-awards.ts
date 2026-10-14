@@ -1,5 +1,6 @@
 import type { CompanyAward, CompanyAwardPage, CompanyAwardQuery } from '../src/company-award-types.ts';
 import { CompanyLookupError } from './g2b-company.ts';
+import { ProviderQuotaError } from './provider-quota.ts';
 import type { RelatedRequest } from './g2b-related.ts';
 
 const BASE = 'https://apis.data.go.kr/1230000/as/ScsbidInfoService/';
@@ -83,8 +84,9 @@ export function createCompanyAwardsLoader(request: RelatedRequest, now = Date.no
       }
       if (!complete) warnings.push('이 구간의 낙찰 내역을 모두 확인하지 못했습니다. 다시 조회해 주세요.');
     } catch (error) {
-      // Preserve provider errors on a wholly failed request; never disguise failure as a zero result.
-      if (!received) throw error;
+      // A quota failure must stop the client's remaining months even after an earlier page succeeded.
+      // Other later-page failures may still return the confirmed rows as an explicitly partial result.
+      if (error instanceof ProviderQuotaError || !received) throw error;
       warnings.push('이 구간의 낙찰 내역을 모두 확인하지 못했습니다. 확인된 내역만 표시합니다. 다시 조회해 주세요.');
     }
     items.sort((a, b) => b.openingAt.localeCompare(a.openingAt) || a.id.localeCompare(b.id));

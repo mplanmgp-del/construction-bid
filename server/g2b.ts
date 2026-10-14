@@ -2,8 +2,10 @@ import type { BidNotice, Category } from '../src/types.ts';
 import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage, G2bNoticeRegions, G2bNoticeRegionsPage, G2bOpeningResult, G2bResultPage, G2bResultSummary } from '../src/g2b-types.ts';
 import { mapDetailSections } from './g2b-detail.ts';
 import { createRelatedLoader } from './g2b-related.ts';
-import { createCompanyLoader } from './g2b-company.ts';
+import { createCompanyLoader, createCompanyNameLoader } from './g2b-company.ts';
 import { createCompanyAwardsLoader } from './company-awards.ts';
+import { createCompanyParticipationLoader } from './company-participation.ts';
+import { createCompanyContractsLoader } from './company-contracts.ts';
 import { createArchivePageLoader } from './company-archive-page.ts';
 import { createOpeningResultsLoader, createOpeningSummaryLoader } from './g2b-results.ts';
 import { startSearchWindows } from '../src/live/start-range.ts';
@@ -368,5 +370,6 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     });
   }
   return { notices, startNotices, detail, results, related, resultSummary, participationRegions, noticeRegions,
-    openingResults, company: createCompanyLoader(request, now), companyAwards: createCompanyAwardsLoader(request, now), archivePage: createArchivePageLoader(request, now) };
+    openingResults, company: createCompanyLoader(request, now), companyNames: createCompanyNameLoader(request, now), companyAwards: createCompanyAwardsLoader(request, now),
+    companyParticipation: createCompanyParticipationLoader(request, now), companyContracts: createCompanyContractsLoader(request, now), archivePage: createArchivePageLoader(request, now) };
 }

@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
           const pathname = req.url?.split('?')[0];
-          if (!['/api/notices', '/api/notices-start', '/api/detail', '/api/results', '/api/related', '/api/result-summary', '/api/notice-regions', '/api/companies', '/api/company-history', '/api/company-awards', '/api/archive-page', '/api/opening-results'].includes(pathname ?? '')) return next();
+          if (!['/api/notices', '/api/notices-start', '/api/detail', '/api/results', '/api/related', '/api/result-summary', '/api/notice-regions', '/api/companies', '/api/company-history', '/api/company-awards', '/api/company-participation', '/api/company-contracts', '/api/archive-page', '/api/opening-results'].includes(pathname ?? '')) return next();
           void nodeApiHandler(req, res);
         });
       },

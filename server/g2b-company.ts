@@ -14,6 +14,38 @@ export class CompanyLookupError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
 
+/** Official name candidates. The provider accepts at most one year of registration dates. */
+export function createCompanyNameLoader(request: RelatedRequest, now: () => number = Date.now) {
+  return async (keyword: string, year: number, page = 1) => {
+    const query = keyword.trim();
+    const currentYear = new Date(now() + 9 * 3600_000).getUTCFullYear();
+    if (query.length < 2 || query.length > 100 || /[\u0000-\u001f]/.test(query)
+      || !Number.isInteger(year) || year < 1900 || year > currentYear
+      || !Number.isInteger(page) || page < 1 || page > 100000) {
+      throw new CompanyLookupError(400, 'INVALID_QUERY', '업체명은 2자 이상 입력하고 조회 연도를 확인해 주세요.');
+    }
+    const result = await request(USER_BASE, 'getPrcrmntCorpBasicInfo02', {
+      inqryDiv: '1', corpNm: query, inqryBgnDt: `${year}01010000`, inqryEndDt: `${year}12312359`,
+      pageNo: String(page), numOfRows: '100',
+    }, 25_000);
+    if (!Number.isSafeInteger(result.totalCount) || result.totalCount < 0
+      || result.items.length !== Math.min(100, Math.max(0, result.totalCount - (page - 1) * 100))) {
+      throw new CompanyLookupError(502, 'G2B_COMPANY_INCOMPLETE', '업체 후보를 모두 확인하지 못했습니다. 다시 조회해 주세요.');
+    }
+    const candidates = new Map<string, PublicCompany>();
+    const normalizedQuery = query.replace(/\s/g, '').toLocaleLowerCase();
+    for (const row of result.items) {
+      const biz = text(row.bizno), name = text(row.corpNm);
+      if (!/^\d{10}$/.test(biz) || !name.replace(/\s/g, '').toLocaleLowerCase().includes(normalizedQuery)) continue;
+      candidates.set(biz, { businessNumber: biz, name, representative: text(row.ceoNm),
+        address: [text(row.adrs), text(row.dtlAdrs)].filter(Boolean).join(' ') || text(row.rgnNm),
+        phone: text(row.telNo), registrationDate: text(row.rgstDt), companyType: text(row.corpBsnsDivNm),
+        licenses: [], products: [], updatedAt: text(row.chgDt) || new Date(now()).toISOString() });
+    }
+    return { items: [...candidates.values()], year, page, hasMore: page * 100 < result.totalCount, totalCount: result.totalCount };
+  };
+}
+
 /** Public registration data only. Member-owned profile fields are never read or modified. */
 export function createCompanyLoader(request: RelatedRequest, now: () => number = Date.now) {
   return async (businessNumber: string): Promise<CompanyLookup> => {
