@@ -30,9 +30,6 @@ export function assessRegion(bid: BidNotice, profile: CompanyProfile): RegionAss
   if (!province || !district || !DISTRICTS[province]?.includes(district)) {
     return { status: 'review', reason: '업체의 본점 시·도와 시·군·구 정보가 누락되었거나 올바르지 않습니다. 업체정보를 확인해 주세요.' };
   }
-  if (bid.specialRegionCondition) {
-    return { status: 'review', reason: '공동수급 또는 별도 지역조건이 포함되어 있습니다. 원문 참가조건을 확인해 주세요.' };
-  }
   if (!bid.allowedRegions?.length) {
     return { status: 'review', reason: '참가 가능 지역이 미제공되어 공고 원문 확인이 필요합니다.' };
   }
@@ -40,14 +37,21 @@ export function assessRegion(bid: BidNotice, profile: CompanyProfile): RegionAss
   if (regions.some(region => region === null)) {
     return { status: 'review', reason: '지역조건에 불명확한 내용이 포함되어 공고 원문 확인이 필요합니다.' };
   }
+  // The badge compares geography only. Additional terms do not cancel an explicit regional match.
+  const participationNote = bid.specialRegionCondition
+    ? ' 공동수급·지사 등 별도 참가조건은 원문에서 확인해 주세요.'
+    : ' 다른 참가자격은 별도로 확인해 주세요.';
   for (const region of regions) {
     if (!region) continue;
     if ('nationwide' in region) {
-      return { status: 'matched', reason: '참가 가능 지역이 전국으로 명시되어 있습니다. 다른 참가자격은 별도로 확인해 주세요.' };
+      return { status: 'matched', reason: `참가 가능 지역이 전국으로 명시되어 있습니다.${participationNote}` };
     }
     if (region.province === province && (region.district === null || region.district === district)) {
-      return { status: 'matched', reason: `본점 ${province} ${district}가 참가 가능 지역에 해당합니다. 다른 참가자격은 별도로 확인해 주세요.` };
+      return { status: 'matched', reason: `본점 ${province} ${district}가 참가 가능 지역에 해당합니다.${participationNote}` };
     }
+  }
+  if (bid.specialRegionCondition) {
+    return { status: 'review', reason: '공동수급 또는 별도 지역조건이 포함되어 있습니다. 원문 참가조건을 확인해 주세요.' };
   }
   return { status: 'excluded', reason: `본점 ${province} ${district}가 명시된 참가 가능 지역과 일치하지 않습니다.` };
 }

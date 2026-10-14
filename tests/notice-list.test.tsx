@@ -3,6 +3,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { HighlightTitle, NoticeList, noticeState } from '../src/components/NoticeList';
 import { NOTICES, DEMO_PROFILES } from '../src/data';
 describe('notice list presentation', () => {
+  it('shows a region match for an explicit Seoul entry in a multi-region notice with additional conditions', () => {
+    const bid = { ...NOTICES[0], allowedRegions: ['서울특별시', '인천광역시', '경기도'], specialRegionCondition: true };
+    const profile = { ...DEMO_PROFILES[0], province: '서울특별시', district: '강남구' };
+    const html = renderToStaticMarkup(<NoticeList bids={[bid]} keyword="" profile={profile} bookmarks={[]} selected={[]} onSelect={() => {}} onOpen={() => {}} onBookmark={() => {}} />);
+    expect(html).toMatch(/class="nl-region is-matched"[^>]*>지역 일치<\/span>/);
+    expect(html).toContain('별도 참가조건');
+  });
   it('highlights literal queries safely without treating input as markup or regex', () => {
     expect(renderToStaticMarkup(<HighlightTitle title="[철거] 철거공사" keyword="[철거]" />)).toBe('<mark>[철거]</mark> 철거공사');
     expect(renderToStaticMarkup(<HighlightTitle title="<script>철거</script>" keyword="철거" />)).toBe('&lt;script&gt;<mark>철거</mark>&lt;/script&gt;');

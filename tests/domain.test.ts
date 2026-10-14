@@ -63,7 +63,29 @@ describe('참가 가능 지역 판정', () => {
 
   it('명시적 전국 조건은 일치하지만 공동수급 등 별도조건은 원문 확인을 요구한다', () => {
     expect(assessRegion(notice({ allowedRegions: ['전국'] }), company).status).toBe('matched');
-    expect(assessRegion(notice({ allowedRegions: ['전국'], specialRegionCondition: true }), company).status).toBe('review');
+    const assessment = assessRegion(notice({ allowedRegions: ['전국'], specialRegionCondition: true }), company);
+    expect(assessment.status).toBe('matched');
+    expect(assessment.reason).toContain('별도 참가조건');
+  });
+
+  it.each([
+    ['서울특별시', '인천광역시', '경기도'],
+    ['인천광역시', '서울특별시', '경기도'],
+    ['인천광역시', '경기도', '서울특별시'],
+  ])('복수 지역 %j 중 서울이 명시되면 별도 참가조건이 있어도 지역은 일치한다', (...allowedRegions) => {
+    const bid = notice({ allowedRegions, specialRegionCondition: true });
+    const assessment = assessRegion(bid, company);
+    expect(assessment.status).toBe('matched');
+    expect(assessment.reason).toContain('본점 서울특별시 마포구');
+    expect(assessment.reason).toContain('별도 참가조건');
+    expect(ids(filterNotices([bid], filters({ autoRegion: true }), company))).toEqual(['base']);
+  });
+
+  it('명시된 지역이 일치하지 않으면 별도 참가조건은 확인 필요로 남긴다', () => {
+    const bid = notice({ allowedRegions: ['인천광역시', '경기도'], specialRegionCondition: true });
+    expect(assessRegion(bid, company).status).toBe('review');
+    expect(filterNotices([bid], filters({ autoRegion: true }), company)).toHaveLength(0);
+    expect(assessRegion({ ...bid, specialRegionCondition: false }, company).status).toBe('excluded');
   });
 
   it('모호한 조건에 시도 이름이 포함돼도 부분문자열로 일치시키지 않는다', () => {
