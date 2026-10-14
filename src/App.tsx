@@ -1,10 +1,11 @@
 import { NoticeList } from './components/NoticeList';
 import { pageGroup } from './pagination';
+import { selectedRegions, selectedStatuses, regionKey, regionLabel } from './search-filters';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Bookmark, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, ExternalLink, FileSearch, Info, MapPin, PanelLeftOpen, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Star, UserRound, X } from 'lucide-react';
 import { CATEGORIES, type BidNotice, type CompanyProfile, type SearchFilters } from './types';
 import { DEFAULT_FILTERS, DEMO_PROFILES, DEMO_TODAY, NOTICES } from './data';
-import { assessRegion, assessSearchRegion, buildBidCsv, daysUntil, filterNotices, formatAmountInput, formatDateTime, formatPrice } from './domain';
+import { assessRegion, assessSearchRegions, buildBidCsv, daysUntil, filterNotices, formatAmountInput, formatDateTime, formatPrice } from './domain';
 import { loadPrototypeState, savePrototypeState, type PrototypeState } from './storage';
 import { FilterPanel } from './components/FilterPanel';
 import { ProfileView } from './components/ProfileView';
@@ -153,20 +154,22 @@ export default function App() {
   const rawSourceNotices = useMemo(() => view === 'bookmarks'
     ? mergeById(mode === 'live' ? Object.values(member.workspace?.noticeSnapshots ?? {}).map(bid => currentNotice(bid)) : [], availableNotices).filter(bid => bookmarks.includes(bid.id))
     : availableNotices, [view, mode, member.workspace?.noticeSnapshots, availableNotices, bookmarks]);
+  const activeRegions = selectedRegions(filters);
+  const activeStatuses = selectedStatuses(filters);
   const regionCandidates = useMemo(() => filterNotices(rawSourceNotices,
-    { ...filters, siteProvince: '전체', autoRegion: false, regionView: 'all' }, profile, statusNow), [rawSourceNotices, filters, profile, statusNow]);
+    { ...filters, siteProvince: '전체', regions: [], autoRegion: false, regionView: 'all' }, profile, statusNow), [rawSourceNotices, filters, profile, statusNow]);
   const companyRegionFilter = !!profile.province && !!profile.district && (filters.autoRegion || filters.regionView !== 'all');
   const regionFilterEnabled = mode === 'live' && (view === 'notices' || view === 'bookmarks')
-    && (companyRegionFilter || (filters.type !== '공사' && filters.siteProvince !== '전체'));
+    && (companyRegionFilter || (filters.type !== '공사' && activeRegions.length > 0));
   const regionSearch = useNoticeRegions(regionCandidates, regionFilterEnabled, companyRegionFilter);
   const sourceNotices = regionSearch.items;
   const baseResults = useMemo(() => filterNotices(sourceNotices, { ...filters, autoRegion: false, regionView: 'all' }, profile, statusNow), [sourceNotices, filters, profile, statusNow]);
   const counts = useMemo(() => baseResults.reduce((total, bid) => { total[assessRegion(bid, profile).status]++; return total; }, { matched: 0, review: 0, excluded: 0 }), [baseResults, profile]);
   const filtered = useMemo(() => filterNotices(sourceNotices, filters, profile, statusNow), [sourceNotices, filters, profile, statusNow]);
-  const unknownServiceRegions = filters.siteProvince === '전체' ? 0
-    : filtered.filter(bid => bid.type === '용역' && assessSearchRegion(bid, filters.siteProvince).status === 'review').length;
+  const unknownSearchRegions = !activeRegions.length ? 0
+    : sourceNotices.filter(bid => assessSearchRegions(bid, activeRegions).status === 'review').length;
   const unknownParticipationRegions = companyRegionFilter
-    ? sourceNotices.filter(bid => bid.source === 'live' && !bid.allowedRegions?.length).length : unknownServiceRegions;
+    ? sourceNotices.filter(bid => bid.source === 'live' && !bid.allowedRegions?.length).length : unknownSearchRegions;
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
   const pagination = pageGroup(safePage, pages);
@@ -196,8 +199,8 @@ export default function App() {
   if (filters.category !== '전체') chips.push({ label: filters.category, remove: () => updateFilter('category', '전체') });
   if (filters.keyword) chips.push({ label: `검색: ${filters.keyword}`, remove: () => { updateFilter('keyword', ''); setSearchInput(''); } });
   if (filters.type !== '전체') chips.push({ label: filters.type, remove: () => updateFilter('type', '전체') });
-  if (filters.siteProvince !== '전체') chips.push({ label: `지역: ${filters.siteProvince}`, remove: () => updateFilter('siteProvince', '전체') });
-  if (filters.status !== '전체') chips.push({ label: filters.status, remove: () => updateFilter('status', '전체') });
+  for (const region of activeRegions) chips.push({ label: `지역: ${regionLabel(region)}`, remove: () => updateFilter('regions', activeRegions.filter(item => regionKey(item) !== regionKey(region))) });
+  for (const status of activeStatuses) chips.push({ label: status, remove: () => updateFilter('statuses', activeStatuses.filter(item => item !== status)) });
   if (filters.license !== '전체') chips.push({ label: filters.license, remove: () => updateFilter('license', '전체') });
   if (filters.contractMethod !== '전체') chips.push({ label: filters.contractMethod, remove: () => updateFilter('contractMethod', '전체') });
   if (filters.minAmount || filters.maxAmount) chips.push({ label: `추정가격 ${filters.minAmount ? formatAmountInput(filters.minAmount) : '0'} ~ ${filters.maxAmount ? formatAmountInput(filters.maxAmount) + '원' : '전체'}`, remove: () => { updateFilter('minAmount', ''); updateFilter('maxAmount', ''); } });
@@ -234,19 +237,19 @@ export default function App() {
             <div className="result-filter-line"><div className="result-state-tabs" aria-label="지역 판정 필터"><button className={filters.regionView === 'all' ? 'active' : ''} onClick={() => updateFilter('regionView', 'all')}>전체 <span>{allCount}</span></button></div><button className={`excluded-button ${filters.regionView === 'excluded' ? 'active' : ''}`} onClick={() => updateFilter('regionView', filters.regionView === 'excluded' ? 'all' : 'excluded')}>{filters.regionView === 'excluded' ? '기본 목록으로 돌아가기' : `지역 제외 ${counts.excluded}건 보기`}<ChevronRight size={13} /></button></div>
             <div className="chips-line"><div className="filter-chips">{chips.map(chip => <button key={chip.label} onClick={chip.remove}>{chip.label}<X size={12} /></button>)}{filters.autoRegion && <span className="automatic-chip"><ShieldCheck size={13} />내 지역 자동필터</span>}{chips.length === 0 && !filters.autoRegion && <span className="muted">모든 조건의 공고를 표시합니다.</span>}</div><button className="text-button reset-results" onClick={resetFilters}>조건 초기화</button></div>
             {filters.regionView === 'excluded' && <div className="excluded-notice"><Info size={15} />등록한 업체 소재지와 지역조건이 맞지 않는 공고입니다. 공고 상세에서 제외 사유를 확인할 수 있습니다.</div>}
-            {(filters.siteProvince !== '전체' || companyRegionFilter) && <div className="region-search-note" role="status">
-              <div><strong>{filters.siteProvince !== '전체' ? `${filters.siteProvince} 지역 검색` : '내 업체 참가 가능 지역 확인'}</strong><span>{companyRegionFilter ? '내 업체 소재지와 공고의 참가 가능 지역을 비교합니다.' : '공사: 현장 위치 · 용역: 참가 가능 지역'}</span>
+            {(activeRegions.length > 0 || companyRegionFilter) && <div className="region-search-note" role="status">
+              <div><strong>{activeRegions.length ? `${activeRegions.map(regionLabel).join(' · ')} 지역 검색` : '내 업체 참가 가능 지역 확인'}</strong><span>{companyRegionFilter ? '내 업체 소재지와 공고의 참가 가능 지역을 비교합니다.' : '공사: 현장 위치 · 용역: 참가 가능 지역'}</span>
                 {regionSearch.loading ? <p>참가 가능 지역을 확인 중입니다. {regionSearch.pending}건 남음</p>
                   : companyRegionFilter && unknownParticipationRegions > 0 ? <p>지역 미확인 공고 {unknownParticipationRegions}건은 자동필터를 끄고 확인할 수 있습니다.</p>
-                    : unknownServiceRegions > 0 ? <p>지역 미확인 용역 {unknownServiceRegions}건을 함께 표시합니다. 참가 가능으로 확정된 공고는 아닙니다.</p> : null}
+                    : unknownSearchRegions > 0 ? <p>세부 지역이 확인되지 않은 공고 {unknownSearchRegions}건은 {filters.includeUnknownRegions ? '함께 표시합니다. 정확한 지역은 원문에서 확인해 주세요.' : '제외했습니다. 상세 검색의 ‘지역 미확인 공고 포함’으로 볼 수 있습니다.'}</p> : null}
                 {regionSearch.failed > 0 && <p>일부 지역 정보를 불러오지 못했습니다. 미확인 공고는 원문을 확인해 주세요.</p>}
               </div>
-              {(regionSearch.failed > 0 || unknownParticipationRegions > 0) && <button className="button button-secondary" onClick={regionSearch.retry} disabled={regionSearch.loading || regionSearch.retryAt > Date.now()}>{regionSearch.retryAt > Date.now() ? '잠시 후 재조회' : '지역 다시 조회'}</button>}
+              {regionFilterEnabled && (regionSearch.failed > 0 || sourceNotices.some(bid => !bid.allowedRegions?.length && (companyRegionFilter || bid.type === '용역'))) && <button className="button button-secondary" onClick={regionSearch.retry} disabled={regionSearch.loading || regionSearch.retryAt > Date.now()}>{regionSearch.retryAt > Date.now() ? '잠시 후 재조회' : '지역 다시 조회'}</button>}
             </div>}
 
-            {(visibleNotices.length > 0 || filters.status !== '전체') && <>
+            {(visibleNotices.length > 0 || activeStatuses.length > 0 || activeRegions.length > 0) && <>
               {selectedNotices.length > 0 && <div className="selection-summary"><span>{selectedNotices.length}건 선택 · 다운로드 시 선택한 공고를 내보냅니다.</span><button onClick={() => setSelectedNoticeIds([])}>선택 해제</button></div>}
-              <NoticeList bids={visibleNotices} now={statusNow} status={filters.status} onStatusChange={value => updateFilter('status', value)} searchProvince={filters.siteProvince} resultsPaused={regionSearch.loading} keyword={[filters.keyword, mode === 'live' && view === 'notices' ? live.query.keyword : ''].filter(Boolean).join(' ')} profile={profile} bookmarks={bookmarks} selected={selectedNoticeIds} onSelect={setSelectedNoticeIds} onOpen={setSelectedBid} onBookmark={toggleBookmark} />
+              <NoticeList bids={visibleNotices} now={statusNow} statuses={activeStatuses} onStatusesChange={value => updateFilter('statuses', value)} searchRegions={activeRegions} resultsPaused={regionSearch.loading} keyword={[filters.keyword, mode === 'live' && view === 'notices' ? live.query.keyword : ''].filter(Boolean).join(' ')} profile={profile} bookmarks={bookmarks} selected={selectedNoticeIds} onSelect={setSelectedNoticeIds} onOpen={setSelectedBid} onBookmark={toggleBookmark} />
             </>}
             {visibleNotices.length === 0 && <div className="empty-state"><div className="empty-icon">{view === 'bookmarks' && bookmarks.length === 0 ? <Bookmark size={30} /> : <FileSearch size={32} />}</div><h3>{mode === 'live' && view === 'notices' && live.requiresKeyword ? '검색할 공고명을 입력해 주세요' : mode === 'live' && live.loading ? '공고를 불러오는 중입니다' : mode === 'live' && live.error && view === 'notices' ? '현재 조건의 공고를 조회하지 못했습니다' : view === 'bookmarks' && bookmarks.length === 0 ? '아직 저장한 관심공고가 없습니다' : '조건에 맞는 공고가 없습니다'}</h3><p>{mode === 'live' && view === 'notices' && live.requiresKeyword ? '위 검색창에 철거·석면 등 공고명을 입력해 주세요.' : mode === 'live' && view === 'notices' && live.error ? '조회 상태는 위 안내에서 확인할 수 있습니다.' : view === 'bookmarks' && bookmarks.length === 0 ? '공고 옆 별표를 누르면 이 업체의 관심공고에 저장됩니다.' : '검색어를 바꾸거나 선택한 조건을 조금 넓혀보세요.'}</p><button className="button button-primary" onClick={view === 'bookmarks' && bookmarks.length === 0 ? () => navigate('notices') : resetFilters}>{view === 'bookmarks' && bookmarks.length === 0 ? '입찰공고 둘러보기' : '검색 조건 초기화'}<ArrowRight size={16} /></button></div>}
 

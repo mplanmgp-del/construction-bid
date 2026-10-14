@@ -5,6 +5,7 @@ export const NOTICE_STATUSES = ['개찰 완료', '진행중', '마감 임박', '
 export type NoticeStatus = typeof NOTICE_STATUSES[number];
 export type RegionStatus = 'matched' | 'excluded' | 'review';
 export interface RegionAssessment { status: RegionStatus; reason: string; }
+export interface SearchRegion { province: string; district?: string; locality?: string; }
 export interface CompanyProfile {
   id: string; companyName: string; province: string; district: string;
   address: string; licenses: string[]; contactName: string; email: string;
@@ -29,6 +30,7 @@ export interface SearchFilters {
   keyword: string; excludeKeyword: string; category: Category | '전체';
   type: '전체' | '공사' | '용역'; siteProvince: string; license: string;
   minAmount: string; maxAmount: string; status: NoticeStatus | '전체';
+  statuses?: NoticeStatus[]; regions?: SearchRegion[]; includeUnknownRegions?: boolean;
   contractMethod: string; deadlineFrom: string; deadlineTo: string;
   regionView: 'all' | RegionStatus; autoRegion: boolean;
   sort: 'deadline' | 'newest' | 'amountAsc' | 'amountDesc';

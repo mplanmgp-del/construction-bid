@@ -1,0 +1,24 @@
+.status-filter{position:relative;min-width:0;text-align:left;font-weight:400}
+.status-filter-trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;width:100%;padding:9px 11px;border:1px solid #dee5f0;border-radius:7px;background:#fff;color:#415477;font:inherit;font-size:12px;cursor:pointer}
+.status-filter-trigger>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status-filter-trigger>svg{flex-shrink:0;transition:transform .15s}
+.status-filter-trigger[aria-expanded=true]>svg{transform:rotate(180deg)}
+.status-filter-trigger:hover,.status-filter-trigger.is-active{border-color:#bcd0f5;background:#edf4ff;color:#1855bf}
+.status-filter-trigger:focus-visible{outline:2px solid #5486ed;outline-offset:2px}
+.status-filter.is-compact{display:inline-block;max-width:100%;vertical-align:middle}
+.status-filter.is-compact .status-filter-trigger{justify-content:center;width:auto;min-height:36px;padding:6px 8px;border-color:transparent;background:transparent;font-weight:650;color:#263446;font-size:13px}
+.status-filter.is-compact .status-filter-trigger:hover,.status-filter.is-compact .status-filter-trigger.is-active{background:#eaf1ff;color:#1855bf}
+.status-filter-popup{margin-top:7px;padding:10px;border:1px solid #dce5f3;border-radius:10px;background:#fff;box-shadow:0 7px 22px #1e416010;color:#334766;font:400 12px/1.5 'Pretendard',sans-serif;text-align:left;box-sizing:border-box;max-height:calc(100dvh - 24px);overflow-y:auto}
+.status-filter-popup.is-floating{position:fixed;z-index:90;width:248px;max-width:calc(100vw - 24px);margin:0;box-shadow:0 9px 30px #1e416025}
+.status-filter-popup-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 3px 5px}
+.status-filter-popup-heading strong{font-size:12px;font-weight:700}
+.status-filter-popup-heading button{display:grid;place-items:center;width:28px;height:28px;border:0;border-radius:5px;background:transparent;color:#7b8da6;cursor:pointer}
+.status-filter-popup-heading button:hover{background:#f0f4fa}
+.status-filter-popup>p{margin:0 3px 8px;color:#8594a9;font-size:10px;line-height:1.7}
+.status-filter-option{display:flex;align-items:center;gap:10px;min-height:39px;padding:8px;border-radius:6px;cursor:pointer;box-sizing:border-box}
+.status-filter-option:hover{background:#f4f7fc}
+.status-filter-option.is-selected{background:#edf4ff;color:#1855bf;font-weight:600}
+.status-filter-option+ .status-filter-option{margin-top:2px}
+.status-filter-option input{width:17px;height:17px;margin:0;accent-color:#235fdd;cursor:pointer;flex-shrink:0}
+.status-filter-option:has(input:focus-visible){outline:2px solid #5486ed;outline-offset:0}
+@media(max-width:760px){.status-filter-option{min-height:44px}.status-filter.is-compact .status-filter-trigger{min-height:40px;padding:8px 12px}}
