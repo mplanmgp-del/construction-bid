@@ -79,6 +79,33 @@ describe('direct MY HTTP routes', () => {
     expectNoStore(result.headers);
   });
 
+  it('dispatches the rewritten participation entry with its exact public query and no caching', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ response: { header: { resultCode: '00' }, body: { totalCount: 0, items: [] } } }));
+    vi.stubGlobal('fetch', fetcher);
+    const result = await request('/api/company-data', { _companyAction: 'participation', businessNumber: '848-88-02470',
+      type: '용역', day: '2026-10-13', page: '1' });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ businessNumber: biz, type: '용역', day: '2026-10-13', page: 1,
+      items: [], sourceCount: 0, totalCount: 0, complete: true });
+    expect(fetcher).toHaveBeenCalledOnce();
+    const upstream = new URL(String(fetcher.mock.calls[0][0]));
+    expect(upstream.hostname).toBe('apis.data.go.kr');
+    expect(upstream.pathname).toBe('/1230000/ao/PubDataOpnStdService/getDataSetOpnStdScsbidInfo');
+    expect(Object.fromEntries(upstream.searchParams)).toMatchObject({ bsnsDivCd: '5', opengBgnDt: '202610130000',
+      opengEndDt: '202610132359', pageNo: '1', numOfRows: '999' });
+    expectNoStore(result.headers);
+  });
+
+  it('keeps rewritten legacy history retired without contacting a database or provider', async () => {
+    const fetcher = vi.fn(async () => { throw new Error('No network for retired rewritten history'); });
+    vi.stubGlobal('fetch', fetcher);
+    const result = await request('/api/company-data', { _companyAction: 'history', businessNumber: biz });
+    expect(result.status).toBe(410);
+    expect(result.body.error.code).toBe('LIVE_HISTORY_REQUIRED');
+    expect(fetcher).not.toHaveBeenCalled();
+    expectNoStore(result.headers);
+  });
+
   it('propagates a company-awards loader quota error through HTTP instead of returning a partial success', async () => {
     const params = { businessNumber: biz, type: '공사', from: '2026-10-01', to: '2026-10-14' };
     const api = createG2bClient({ serviceKey: 'injected-test-key' });

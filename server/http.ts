@@ -118,6 +118,12 @@ export async function nodeApiHandler(req: NodeRequest, res: NodeResponse) {
     res.end(JSON.stringify({ error: { code: 'METHOD_NOT_ALLOWED', message: '조회 요청만 지원합니다.' } })); return;
   }
   const url = new URL(req.url || '/', 'http://localhost');
+  if (url.pathname === '/api/company-data') {
+    const companyRoutes: Record<string, string> = { awards: '/api/company-awards', contracts: '/api/company-contracts',
+      participation: '/api/company-participation', history: '/api/company-history' };
+    url.pathname = companyRoutes[url.searchParams.get('_companyAction') || ''] || url.pathname;
+    url.searchParams.delete('_companyAction');
+  }
   // Region hydration uses bounded batches and must not consume the search/result allowance.
   const regionBatch = url.pathname === '/api/notice-regions';
   const awardBatch = ['/api/company-awards', '/api/company-participation', '/api/company-contracts', '/api/companies'].includes(url.pathname);

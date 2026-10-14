@@ -4,6 +4,12 @@
   "framework": "vite",
   "regions": ["icn1"],
   "functions": { "api/*.ts": { "maxDuration": 60 } },
+  "rewrites": [
+    { "source": "/api/company-awards", "destination": "/api/company-data?_companyAction=awards" },
+    { "source": "/api/company-contracts", "destination": "/api/company-data?_companyAction=contracts" },
+    { "source": "/api/company-participation", "destination": "/api/company-data?_companyAction=participation" },
+    { "source": "/api/company-history", "destination": "/api/company-data?_companyAction=history" }
+  ],
   "headers": [
     { "source": "/(.*)", "headers": [
       { "key": "X-Content-Type-Options", "value": "nosniff" },

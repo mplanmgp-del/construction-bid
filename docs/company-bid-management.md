@@ -14,6 +14,8 @@ MY입찰관리 does **not** precollect company history or read saved history fro
 
 The ordinary notice-search cache and per-notice result functionality are separate from these MY direct-history routes.
 
+Vercel rewrites the four `/api/company-*` history routes to the single `api/company-data.ts` function. The fixed action map preserves public URLs and query parameters while keeping the deployment within the Hobby function-count limit.
+
 ## Company candidates and exact selection
 
 `/api/companies` uses official `UsrInfoService02` data, not the former archive directory or a search-engine result page.
