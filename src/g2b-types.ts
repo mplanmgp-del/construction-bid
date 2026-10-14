@@ -14,6 +14,21 @@ export interface G2bPage<T> {
 }
 export type G2bNoticePage = G2bPage<BidNotice>;
 
+export interface G2bNoticeRegions {
+  number: string;
+  revision: string;
+  type: G2bBusinessType;
+  allowedRegions: string[] | null;
+  complete: boolean;
+  fetchedAt: string;
+  error?: string;
+}
+
+export interface G2bNoticeRegionsPage {
+  items: G2bNoticeRegions[];
+  retryAfterSeconds?: number;
+}
+
 export interface G2bDetailField {
   key: string;
   label: string;

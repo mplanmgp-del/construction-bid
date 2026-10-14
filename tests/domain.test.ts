@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessRegion, buildBidCsv, daysUntil, filterNotices, formatAmountInput, getPriceRangeError } from '../src/domain';
+import { assessRegion, assessSearchRegion, buildBidCsv, daysUntil, filterNotices, formatAmountInput, getPriceRangeError } from '../src/domain';
 import type { BidNotice, CompanyProfile, SearchFilters } from '../src/types';
 
 const company: CompanyProfile = {
@@ -104,6 +104,36 @@ describe('지역 검색과 검색조건', () => {
   it('현장 위치는 참가 가능 지역과 별도 조건으로 검색한다', () => {
     expect(ids(filterNotices(regions, filters({ siteProvince: '경기', autoRegion: true }), company))).toEqual(['match', 'national']);
     expect(filterNotices(regions, filters({ siteProvince: '서울특별시' }), company)).toHaveLength(0);
+  });
+
+  it('현장 위치가 없는 서울 참가 대상 용역과 취소 차수도 지역 검색에 포함한다', () => {
+    const bids = [
+      notice({ id: 'service', type: '용역', province: '', allowedRegions: ['서울특별시'] }),
+      notice({ id: 'cancelled', type: '용역', province: '', revision: '001', status: '취소', allowedRegions: ['서울특별시'] }),
+      notice({ id: 'busan', type: '용역', province: '', allowedRegions: ['부산광역시'] }),
+    ];
+    expect(ids(filterNotices(bids, filters({ siteProvince: '서울특별시' }), company))).toEqual(['service', 'cancelled']);
+  });
+
+  it('용역의 지역은 기관명이나 현장 위치 대신 참가 가능 지역을 기준으로 한다', () => {
+    const bid = notice({ type: '용역', agency: '서울시청', province: '서울특별시', allowedRegions: ['경기도'] });
+    expect(filterNotices([bid], filters({ siteProvince: '서울특별시' }), company)).toHaveLength(0);
+    expect(filterNotices([bid], filters({ siteProvince: '경기도' }), company)).toHaveLength(1);
+  });
+
+  it('명시적인 전국 및 선택 시도 산하 지역의 용역을 포함한다', () => {
+    const bids = [
+      notice({ id: 'national', type: '용역', province: '', allowedRegions: ['전국'] }),
+      notice({ id: 'district', type: '용역', province: '', allowedRegions: ['서울 강서구'] }),
+    ];
+    expect(ids(filterNotices(bids, filters({ siteProvince: '서울' }), company))).toEqual(['national', 'district']);
+  });
+
+  it.each([{ allowedRegions: null }, { allowedRegions: [] }, { allowedRegions: ['서울특별시 외 지역'] }])('미확인 용역 지역 %j는 숨기거나 일치로 단정하지 않는다', ({ allowedRegions }) => {
+    const bid = notice({ type: '용역', province: '', allowedRegions });
+    expect(filterNotices([bid], filters({ siteProvince: '서울특별시' }), company)).toHaveLength(1);
+    expect(assessSearchRegion(bid, '서울특별시').status).toBe('review');
+    expect(filterNotices([bid], filters({ siteProvince: '서울특별시', autoRegion: true }), company)).toHaveLength(0);
   });
 
   it('검색어는 공고명·번호·기관을 검색하며 제외어를 우선 적용한다', () => {

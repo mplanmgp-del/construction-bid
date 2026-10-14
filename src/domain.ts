@@ -73,6 +73,24 @@ function amountBound(value: string): number | null {
   return Number.isSafeInteger(number) && number >= 0 ? number : Number.NaN;
 }
 
+/** Search scope only: service participation regions are not construction site locations. */
+export function assessSearchRegion(bid: BidNotice, selectedProvince: string): RegionAssessment {
+  const province = canonicalProvince(selectedProvince);
+  if (!province) return { status: 'excluded', reason: '검색할 시·도를 확인해 주세요.' };
+  if (bid.type === '공사') {
+    return canonicalProvince(bid.province) === province
+      ? { status: 'matched', reason: '공사 현장 위치가 선택한 시·도와 일치합니다.' }
+      : { status: 'excluded', reason: '공사 현장 위치가 선택한 시·도와 일치하지 않거나 확인되지 않았습니다.' };
+  }
+  const regions = bid.allowedRegions?.map(parseRegion);
+  if (!regions?.length || regions.some(region => region === null)) {
+    return { status: 'review', reason: '용역의 참가 가능 지역을 확인하지 못했습니다. 지역 검색 결과에 함께 표시하며 참가 가능 여부는 원문에서 확인해 주세요.' };
+  }
+  return regions.some(region => region && ('nationwide' in region || region.province === province))
+    ? { status: 'matched', reason: '용역의 참가 가능 지역에 선택한 시·도 또는 전국이 포함됩니다. 세부 시·군·구와 참가조건은 별도로 확인해 주세요.' }
+    : { status: 'excluded', reason: '용역의 참가 가능 지역에 선택한 시·도가 없습니다.' };
+}
+
 export function getPriceRangeError(minimum: string, maximum: string): string | null {
   const lowerBound = amountBound(minimum);
   const upperBound = amountBound(maximum);
@@ -109,7 +127,6 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
   const keyword = cleanText(filters.keyword).toLocaleLowerCase('ko-KR');
   const excludeKeywords = cleanText(filters.excludeKeyword).toLocaleLowerCase('ko-KR')
     .split(',').map(keyword => keyword.trim()).filter(Boolean);
-  const siteProvince = filters.siteProvince === '전체' ? null : canonicalProvince(filters.siteProvince);
 
   return notices.filter(bid => {
     const searchText = cleanText(`${bid.title} ${bid.number} ${bid.agency}`).toLocaleLowerCase('ko-KR');
@@ -117,7 +134,7 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
     if (excludeKeywords.some(keyword => searchText.includes(keyword))) return false;
     if (filters.category !== '전체' && bid.category !== filters.category) return false;
     if (filters.type !== '전체' && bid.type !== filters.type) return false;
-    if (filters.siteProvince !== '전체' && (!siteProvince || canonicalProvince(bid.province) !== siteProvince)) return false;
+    if (filters.siteProvince !== '전체' && assessSearchRegion(bid, filters.siteProvince).status === 'excluded') return false;
     if (filters.license !== '전체' && !bid.licenses.some(license => canonicalLicense(license) === canonicalLicense(filters.license))) return false;
     if (filters.status !== '전체' && noticeState(bid, now).label !== filters.status) return false;
     if (filters.contractMethod !== '전체' && bid.contractMethod !== filters.contractMethod) return false;

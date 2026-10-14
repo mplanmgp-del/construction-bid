@@ -36,7 +36,7 @@ export async function loadResultSummaryQueue(bids: BidNotice[], signal: AbortSig
   await Promise.all([worker(), worker()]);
 }
 
-export function useResultSummaries(bids: BidNotice[]) {
+export function useResultSummaries(bids: BidNotice[], enabled = true) {
   const cache = useRef(new Map<string, ResultEntry>());
   const [entries, setEntries] = useState<Record<string, ResultEntry>>({});
   const [retry, setRetry] = useState(0);
@@ -49,12 +49,13 @@ export function useResultSummaries(bids: BidNotice[]) {
       const hit = cache.current.get(resultKey(bid));
       return hit && hit.until > Date.now() ? [[resultKey(bid), hit]] : [];
     })));
+    if (!enabled) return () => abort.abort();
     void loadResultSummaryQueue(queue, abort.signal, (bid, entry) => {
       cache.current.set(resultKey(bid), entry);
       while (cache.current.size > 160) cache.current.delete(cache.current.keys().next().value!);
       setEntries(previous => ({ ...previous, [resultKey(bid)]: entry }));
     });
     return () => abort.abort();
-  }, [signature, retry]);
+  }, [signature, retry, enabled]);
   return { entries, refresh: () => { cache.current.clear(); setRetry(value => value + 1); } };
 }

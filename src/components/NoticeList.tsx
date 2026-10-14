@@ -1,5 +1,5 @@
 import { Star } from 'lucide-react';
-import { assessRegion, formatPrice } from '../domain';
+import { assessRegion, assessSearchRegion, formatPrice } from '../domain';
 import type { BidNotice, CompanyProfile } from '../types';
 import { noticeState } from '../notice-status';
 export { noticeState } from '../notice-status';
@@ -13,12 +13,14 @@ export function HighlightTitle({ title, keyword }: { title: string; keyword: str
   return <>{title.split(pattern).map((part, index) => index % 2 ? <mark key={index}>{part}</mark> : part)}</>;
 }
 
-export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSelect, onOpen, onBookmark, now = Date.now() }: {
+export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSelect, onOpen, onBookmark, now = Date.now(), searchProvince = '전체', resultsPaused = false }: {
   bids: BidNotice[]; keyword: string; profile: CompanyProfile; bookmarks: string[];
   selected: string[]; onSelect: (ids: string[]) => void; onOpen: (bid: BidNotice) => void; onBookmark: (id: string) => void;
   now?: number;
+  searchProvince?: string;
+  resultsPaused?: boolean;
 }) {
-  const { entries, refresh } = useResultSummaries(bids);
+  const { entries, refresh } = useResultSummaries(bids, !resultsPaused);
   const checked = bids.length > 0 && bids.every(bid => selected.includes(bid.id));
   const loading = bids.some(bid => needsResult(bid) && !entries[resultKey(bid)]);
   const incomplete = bids.some(bid => needsResult(bid) && (entries[resultKey(bid)]?.error || entries[resultKey(bid)]?.data?.complete === false));
@@ -31,11 +33,12 @@ export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSele
         const result = entry?.data;
         const state = noticeState(bid, now);
         const region = assessRegion(bid, profile);
+        const serviceRegion = bid.type === '용역' && searchProvince !== '전체' ? assessSearchRegion(bid, searchProvince) : null;
         const saved = bookmarks.includes(bid.id);
         const resultHint = entry?.error ? '공개 결과 조회 실패 — 아래 결과 다시 조회 버튼을 이용하세요.' : needsResult(bid) && !entry ? '공개 결과 조회 중' : result?.complete === false ? '일부 공개 결과만 조회됨' : '현재 조회된 공개 자료 기준';
         return <tr key={bid.id} className={selected.includes(bid.id) ? 'is-selected' : ''}>
           <td className="nl-select"><input type="checkbox" aria-label={`${bid.title} 선택`} checked={selected.includes(bid.id)} onChange={() => select(bid.id)} /></td>
-          <td className="nl-title"><div className="nl-meta"><span>{bid.type} · {bid.noticeKind || (bid.revised ? '정정공고' : '-')} · {bid.number}-{bid.revision}</span><button className={`nl-bookmark${saved ? ' is-saved' : ''}`} aria-label={`${bid.title} ${saved ? '관심공고 해제' : '관심공고 저장'}`} aria-pressed={saved} onClick={() => onBookmark(bid.id)}><Star size={17} fill={saved ? 'currentColor' : 'none'} /></button></div><button className="nl-title-button" onClick={() => onOpen(bid)}><HighlightTitle title={bid.title} keyword={keyword} /></button><span className={`nl-region is-${region.status}`} title={region.reason}>{region.status === 'matched' ? '지역 일치' : region.status === 'excluded' ? '지역 제외' : '지역 확인 필요'}</span></td>
+          <td className="nl-title"><div className="nl-meta"><span>{bid.type} · {bid.noticeKind || (bid.revised ? '정정공고' : '-')} · {bid.number}-{bid.revision}</span><button className={`nl-bookmark${saved ? ' is-saved' : ''}`} aria-label={`${bid.title} ${saved ? '관심공고 해제' : '관심공고 저장'}`} aria-pressed={saved} onClick={() => onBookmark(bid.id)}><Star size={17} fill={saved ? 'currentColor' : 'none'} /></button></div><button className="nl-title-button" onClick={() => onOpen(bid)}><HighlightTitle title={bid.title} keyword={keyword} /></button><span className={`nl-region is-${region.status}`} title={region.reason}>{region.status === 'matched' ? '지역 일치' : region.status === 'excluded' ? '지역 제외' : '지역 확인 필요'}</span>{serviceRegion && <span className={`nl-service-region is-${serviceRegion.status}`} title={serviceRegion.reason}>{serviceRegion.status === 'review' ? '참가 가능 지역 확인 필요' : `참가 가능 지역 · ${bid.allowedRegions?.join(' · ')}`}</span>}</td>
           <td className="nl-status" data-label="상태"><span className={`nl-state is-${state.tone}`} title={state.description}>{state.label}</span></td>
           <td className="nl-agency" data-label="수요기관">{bid.demandAgency || '-'}</td>
           <td className="nl-company" data-label="1순위 업체" title={resultHint}>{result?.firstCompanies.join(' · ') || '-'}</td>
@@ -44,6 +47,6 @@ export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSele
         </tr>;
       })}</tbody>
     </table>
-    {bids.some(needsResult) && <div className="nl-results-note"><span role="status">{loading ? '공개 개찰·낙찰 결과를 확인하고 있습니다.' : incomplete ? '일부 공개 결과를 확인하지 못했습니다. 다시 조회하거나 공고 상세에서 확인해 주세요.' : '1순위 업체와 최종 낙찰업체는 다를 수 있습니다. 공개 결과가 없는 항목은 -로 표시합니다.'}</span><button type="button" onClick={refresh} disabled={loading}>결과 다시 조회</button></div>}
+    {bids.some(needsResult) && <div className="nl-results-note"><span role="status">{resultsPaused ? '지역 조건 확인 후 공개 개찰·낙찰 결과를 조회합니다.' : loading ? '공개 개찰·낙찰 결과를 확인하고 있습니다.' : incomplete ? '일부 공개 결과를 확인하지 못했습니다. 다시 조회하거나 공고 상세에서 확인해 주세요.' : '1순위 업체와 최종 낙찰업체는 다를 수 있습니다. 공개 결과가 없는 항목은 -로 표시합니다.'}</span><button type="button" onClick={refresh} disabled={loading || resultsPaused}>결과 다시 조회</button></div>}
   </div>;
 }

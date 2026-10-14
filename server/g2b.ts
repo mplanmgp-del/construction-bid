@@ -1,5 +1,5 @@
 import type { BidNotice, Category } from '../src/types.ts';
-import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage, G2bOpeningResult, G2bResultPage, G2bResultSummary } from '../src/g2b-types.ts';
+import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage, G2bNoticeRegions, G2bNoticeRegionsPage, G2bOpeningResult, G2bResultPage, G2bResultSummary } from '../src/g2b-types.ts';
 import { mapDetailSections } from './g2b-detail.ts';
 import { createRelatedLoader } from './g2b-related.ts';
 import { startSearchWindows } from '../src/live/start-range.ts';
@@ -179,9 +179,10 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now, q
     pending.set(key, job);
     return job;
   }
-  async function request(base: string, operation: string, params: Record<string, string>, timeoutMs = 15_000) {
+  async function request(base: string, operation: string, params: Record<string, string>, timeoutMs = 15_000, requireComplete = false) {
     if (!serviceKey?.trim()) throw new G2bError(503, 'G2B_NOT_CONFIGURED', '실제 공고 연동을 위한 나라장터 API 인증키가 아직 서버에 설정되지 않았습니다.');
-    return cached(`provider:${base}:${operation}:${new URLSearchParams(params)}`, async () => {
+    const cacheKey = `provider:${base}:${operation}:${new URLSearchParams(params)}`;
+    const result = await cached(cacheKey, async () => {
       const url = new URL(operation, base);
       let key = serviceKey.trim();
       try { if (key.includes('%')) key = decodeURIComponent(key); } catch { throw providerError('30'); }
@@ -208,6 +209,52 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now, q
         throw error;
       }
     });
+    // Exact membership must be complete, including when a detail request populated the raw cache.
+    if (requireComplete && result.items.length !== result.totalCount) {
+      cache.delete(cacheKey);
+      throw new G2bError(502, 'G2B_INCOMPLETE_RESPONSE', '참가 가능 지역을 모두 확인하지 못했습니다.');
+    }
+    return result;
+  }
+  async function participationRegions(number: string, revision: string, type: G2bBusinessType, deadline = Infinity): Promise<G2bNoticeRegions> {
+    const base = { number, revision, type, allowedRegions: null, complete: false, fetchedAt: new Date(now()).toISOString() };
+    const remaining = deadline - now();
+    if (remaining <= 0) throw new G2bError(504, 'G2B_UNAVAILABLE', '지역조건 조회 시간이 초과되었습니다.');
+    try {
+      const result = await request(BID_BASE, 'getBidPblancListInfoPrtcptPsblRgn', {
+        inqryDiv: '2', bidNtceNo: number, bidNtceOrd: revision, pageNo: '1', numOfRows: '999',
+      }, Math.min(15_000, remaining), true);
+      const rows = result.items.filter(row => text(row.bidNtceNo) === number && /^\d{1,3}$/.test(text(row.bidNtceOrd))
+        && text(row.bidNtceOrd).padStart(3, '0') === revision && text(row.bsnsDivNm) === type);
+      const names = unique(rows.map(row => text(row.prtcptPsblRgnNm)));
+      // An empty successful response is unknown, not evidence of nationwide participation.
+      return { ...base, allowedRegions: names.length ? names : null, complete: true, fetchedAt: new Date(now()).toISOString() };
+    } catch (error) {
+      if (error instanceof G2bError && error.code === 'G2B_INCOMPLETE_RESPONSE') return { ...base, error: error.code };
+      throw error;
+    }
+  }
+  async function noticeRegions(notices: Array<{ number: string; revision: string }>, type: G2bBusinessType): Promise<G2bNoticeRegionsPage> {
+    const items: G2bNoticeRegions[] = new Array(notices.length);
+    const finishBy = now() + 40_000;
+    let next = 0, retryAfterSeconds = 0;
+    const failed = (index: number, error: string): G2bNoticeRegions => ({ ...notices[index], type, allowedRegions: null,
+      complete: false, fetchedAt: new Date(now()).toISOString(), error });
+    async function worker() {
+      while (next < notices.length) {
+        const index = next++;
+        if (retryAfterSeconds) { items[index] = failed(index, 'G2B_QUOTA_EXCEEDED'); continue; }
+        if (now() >= finishBy) { items[index] = failed(index, 'G2B_UNAVAILABLE'); continue; }
+        const { number, revision } = notices[index];
+        try { items[index] = await participationRegions(number, revision, type, finishBy); }
+        catch (error) {
+          if (error instanceof ProviderQuotaError) retryAfterSeconds = Math.max(retryAfterSeconds, error.retryAfterSeconds);
+          items[index] = failed(index, error instanceof G2bError || error instanceof ProviderQuotaError ? error.code : 'INTERNAL_ERROR');
+        }
+      }
+    }
+    await Promise.all([worker(), worker()]);
+    return { items, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) };
   }
   async function allRegions(query: SearchQuery, deadline = Infinity) {
     return cached(`regions:${query.from}:${query.to}`, async () => {
@@ -394,5 +441,5 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now, q
       return { items, totalCount: items.length, page: 1, pageSize: items.length, hasMore: false, fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings };
     });
   }
-  return { notices, startNotices, detail, results, related, resultSummary };
+  return { notices, startNotices, detail, results, related, resultSummary, participationRegions, noticeRegions };
 }
