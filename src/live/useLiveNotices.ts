@@ -117,7 +117,7 @@ export function useLiveNotices(enabled: boolean) {
       licenses: detail.licenseComplete ? detail.licenses : bid.licenses,
     } : bid) } : previous);
   }
-  return { query, setQuery, items: visible?.items ?? [], meta: visible?.meta ?? null, loading, refreshing, requiresKeyword, retryAt: active?.retryAt ?? 0,
+  return { query, setQuery, queryVersion: `${key}:${refreshCount}`, items: visible?.items ?? [], meta: visible?.meta ?? null, loading, refreshing, requiresKeyword, retryAt: active?.retryAt ?? 0,
     progress: active?.progress ?? { done: 0, total: 0 }, error: active?.error ?? '', applyDetail,
     search: (next: NoticeQuery) => { setQuery(next); setRefreshCount(value => value + 1); },
     refresh: () => { if (!requiresKeyword && Date.now() >= (active?.retryAt ?? 0)) setRefreshCount(value => value + 1); },

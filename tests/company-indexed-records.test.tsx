@@ -36,6 +36,16 @@ describe('indexed award and contract presentation', () => {
     expect(markup).toContain('100원'); expect(markup).toContain('200원'); expect(markup).not.toContain('300원');
     expect(markup).not.toContain('/api/company-awards'); expect(markup).not.toContain('/api/company-contracts');
   });
+  it('keeps contract collection separate when the dashboard uses direct confirmed awards', () => {
+    const value = { ...history, awards: { ...page, items: [award], totalCount: 1 }, contracts: { ...page, items: [contract], totalCount: 1 } };
+    const markup = renderToStaticMarkup(<CompanyIndexedRecords history={value} showAwards={false} onAwardPage={() => {}} onContractPage={() => {}} onOpening={() => {}} />);
+    expect(markup).not.toContain('수집된 참여 중 낙찰');
+    expect(markup).not.toContain('공식 낙찰 공고');
+    expect(markup).not.toContain('개찰일 기준');
+    expect(markup).toContain('공고 없는 계약');
+    expect(markup).toContain('계약일 기준');
+    expect(markup).toContain('200원');
+  });
   it('offers recovery when indexed totals shrink below the selected page', () => {
     const markup = render({ ...history, contracts: { ...page, page: 11, totalCount: 1 } });
     expect(markup).toContain('첫 페이지 보기');

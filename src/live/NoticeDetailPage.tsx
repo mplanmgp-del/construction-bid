@@ -7,6 +7,8 @@ import { currentNotice, fetchApi, safeG2bUrl } from './client';
 import { CompleteNoticeDetails, type CompleteNoticeDetailsHandle } from './CompleteNoticeDetails';
 import { noticeState } from '../notice-status';
 import { OpeningResultsPanel } from './OpeningResultsPanel';
+import { useMemberWorkspace } from '../member/useMemberWorkspace';
+import { FloatingQuickLinks } from '../components/FloatingQuickLinks';
 
 function queryNotice() {
   const params = new URLSearchParams(window.location.search);
@@ -21,6 +23,7 @@ function emptyNotice(detail: G2bNoticeDetail, type: string): BidNotice {
 }
 
 export function NoticeDetailPage() {
+  const member = useMemberWorkspace();
   const [query] = useState(queryNotice);
   const [detail, setDetail] = useState<G2bNoticeDetail | null>(null);
   const [loading, setLoading] = useState(query.valid);
@@ -83,5 +86,6 @@ export function NoticeDetailPage() {
     </main>
     {sourceUrl && <div className="fnd-mobile-bottom"><a href="/" className="fnd-mobile-back" aria-label="공고 목록으로"><ArrowLeft size={21} /></a><a className="fnd-primary-button" href={sourceUrl} target="_blank" rel="noopener noreferrer">나라장터 원문 보기 <ArrowUpRight size={19} /></a></div>}
     {toast && <div className="fnd-toast" role="status">{toast}</div>}
+    {member.ready && member.workspace && <FloatingQuickLinks key={member.workspace.profile.id} profile={member.workspace.profile} />}
   </div>;
 }

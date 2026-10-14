@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { BidNotice } from '../types';
 import {
   getCachedNoticeRegions, getNoticeRegionsRetryAt, loadNoticeRegions, mergeNoticeRegions,
   needsNoticeRegions, noticeRegionKey, type NoticeRegionEntry, type NoticeRegionTarget,
+  subscribeNoticeRegions, getNoticeRegionsVersion, pinNoticeRegions,
 } from './notice-regions';
+
+export function useCachedNoticeRegions(notices: BidNotice[]) {
+  useEffect(() => pinNoticeRegions(notices), [notices]);
+  const version = useSyncExternalStore(subscribeNoticeRegions, getNoticeRegionsVersion, getNoticeRegionsVersion);
+  // Keep confirmed labels on screen; freshness controls the next request, not visibility.
+  return useMemo(() => mergeNoticeRegions(notices, getCachedNoticeRegions(notices, true), true), [notices, version]);
+}
 
 interface RegionLoadState {
   key: string;
@@ -12,7 +20,7 @@ interface RegionLoadState {
   retryAt: number;
 }
 
-export function useNoticeRegions(notices: BidNotice[], enabled: boolean, companyFilter = false) {
+export function useNoticeRegions(notices: BidNotice[], enabled: boolean, companyFilter = false, requestKey = '') {
   // Only public identities determine the request lifetime. Rendering a response
   // or changing an unrelated filter must not start the same requests again.
   const signature = JSON.stringify(notices.filter(bid => needsNoticeRegions(bid) && (companyFilter || bid.type === '용역')).map(({ number, revision, type }) => ({
@@ -21,15 +29,17 @@ export function useNoticeRegions(notices: BidNotice[], enabled: boolean, company
   const targets = useMemo(() => JSON.parse(signature) as NoticeRegionTarget[], [signature]);
   const [retryVersion, setRetryVersion] = useState(0);
   const previousRetry = useRef(0);
-  const key = `${enabled}:${retryVersion}:${signature}`;
+  const previousRequest = useRef(requestKey);
+  const key = `${enabled}:${requestKey}:${retryVersion}:${signature}`;
   const [state, setState] = useState<RegionLoadState>(() => ({
     key, entries: getCachedNoticeRegions(targets), running: enabled, retryAt: getNoticeRegionsRetryAt(),
   }));
 
   useEffect(() => {
     const abort = new AbortController();
-    const retryFailed = previousRetry.current !== retryVersion;
+    const retryFailed = previousRetry.current !== retryVersion || previousRequest.current !== requestKey;
     previousRetry.current = retryVersion;
+    previousRequest.current = requestKey;
     const entries = getCachedNoticeRegions(targets);
     if (retryFailed) for (const [entryKey, entry] of entries) if (!entry.complete || !entry.allowedRegions?.length) entries.delete(entryKey);
     setState({ key, entries, running: enabled, retryAt: getNoticeRegionsRetryAt() });
@@ -41,21 +51,17 @@ export function useNoticeRegions(notices: BidNotice[], enabled: boolean, company
       if (!abort.signal.aborted) setState({ key, entries: result.entries, running: false, retryAt: result.retryAt });
     });
     return () => abort.abort();
-  }, [key, targets, enabled, retryVersion]);
+  }, [key, targets, enabled, retryVersion, requestKey]);
 
-  // Expire visible region data and any explicit Retry-After locally.
-  // A user action is required to request regions again after expiry.
+  // Release explicit Retry-After without deleting confirmed screen data or polling.
   useEffect(() => {
-    const deadlines = [...state.entries.values()].map(entry => entry.until);
-    if (state.retryAt > 0) deadlines.push(state.retryAt);
-    if (!deadlines.length) return;
+    if (!state.retryAt) return;
     const timer = setTimeout(() => setState(previous => ({
       ...previous,
-      entries: new Map([...previous.entries].filter(([, entry]) => entry.until > Date.now())),
       retryAt: getNoticeRegionsRetryAt(),
-    })), Math.max(0, Math.min(...deadlines) - Date.now()));
+    })), Math.max(0, state.retryAt - Date.now()));
     return () => clearTimeout(timer);
-  }, [state.entries, state.retryAt]);
+  }, [state.retryAt]);
 
   const view = state.key === key ? state : {
     entries: getCachedNoticeRegions(targets), running: enabled, retryAt: getNoticeRegionsRetryAt(),
@@ -66,5 +72,7 @@ export function useNoticeRegions(notices: BidNotice[], enabled: boolean, company
   const retry = useCallback(() => {
     if (enabled && !getNoticeRegionsRetryAt()) setRetryVersion(value => value + 1);
   }, [enabled]);
-  return { items, loading: enabled && view.running && pending > 0, pending, failed, retry, retryAt: view.retryAt };
+  const pendingKeys = new Set(enabled && view.running ? targets.filter(bid => !view.entries.has(noticeRegionKey(bid))).map(noticeRegionKey) : []);
+  const failedKeys = new Set(enabled ? targets.filter(bid => view.entries.get(noticeRegionKey(bid))?.complete === false).map(noticeRegionKey) : []);
+  return { items, loading: enabled && view.running && pending > 0, pending, pendingKeys, failedKeys, failed, retry, retryAt: view.retryAt };
 }

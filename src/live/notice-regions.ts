@@ -1,4 +1,5 @@
 import type { BidNotice } from '../types';
+import type { G2bNoticeDetail } from '../g2b-types';
 import { ApiError, fetchApi } from './client';
 
 export type NoticeRegionTarget = Pick<BidNotice, 'number' | 'revision' | 'type' | 'source' | 'allowedRegions'>;
@@ -11,6 +12,71 @@ export interface NoticeRegionEntry {
 }
 const CACHE_MS = 300_000;
 const cache = new Map<string, NoticeRegionEntry>();
+const listeners = new Set<() => void>();
+const pins = new Map<string, number>();
+let cacheVersion = 0;
+export const getNoticeRegionsVersion = () => cacheVersion;
+export function subscribeNoticeRegions(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
+function trimNoticeRegionCache() {
+  let removed = false;
+  for (const key of cache.keys()) {
+    if (cache.size <= 1000) break;
+    if (!pins.has(key)) { cache.delete(key); removed = true; }
+  }
+  return removed;
+}
+
+/** Keep active result snapshots intact even when they exceed the idle cache cap. */
+export function pinNoticeRegions(notices: NoticeRegionTarget[]): () => void {
+  const keys = new Set(notices.filter(bid => bid.source === 'live').map(noticeRegionKey));
+  for (const key of keys) pins.set(key, (pins.get(key) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    for (const key of keys) {
+      const remaining = (pins.get(key) ?? 1) - 1;
+      if (remaining) pins.set(key, remaining); else pins.delete(key);
+    }
+    // Effect cleanup precedes replacement registration. Wait until both have
+    // run so an unchanged search does not lose its first cached rows.
+    queueMicrotask(() => {
+      if (trimNoticeRegionCache()) { cacheVersion++; listeners.forEach(listener => listener()); }
+    });
+  };
+}
+function storeRegion(key: string, entry: NoticeRegionEntry, cacheable = true) {
+  const previous = cache.get(key);
+  // A late failed/empty request must not erase a region just confirmed by detail.
+  if (previous?.complete && previous.allowedRegions?.length
+    && (!entry.complete || (!entry.allowedRegions?.length && Date.parse(previous.fetchedAt) >= Date.parse(entry.fetchedAt))
+      || Date.parse(previous.fetchedAt) > Date.parse(entry.fetchedAt))) return previous;
+  if (previous === entry) return entry;
+  cache.delete(key);
+  if (cacheable) cache.set(key, entry);
+  trimNoticeRegionCache();
+  cacheVersion++; listeners.forEach(listener => listener());
+  return entry;
+}
+
+/** One request plan: visible rows by default; all filter candidates only when needed. */
+export function selectNoticeRegionTargets(candidates: BidNotice[], visible: BidNotice[], filterEnabled: boolean, companyFilter: boolean) {
+  const unknown = candidates.filter(needsNoticeRegions);
+  const filterTargets = filterEnabled ? unknown.filter(bid => companyFilter || bid.type === '용역') : [];
+  const settled = getCachedNoticeRegions(filterTargets);
+  // Resolve filter membership first. Visible construction rows can move as
+  // service matches arrive; mixing them in now would restart active batches.
+  if (filterTargets.some(bid => !settled.has(noticeRegionKey(bid)))) return filterTargets;
+  const visibleKeys = new Set(visible.map(noticeRegionKey));
+  return unknown.filter(bid => visibleKeys.has(noticeRegionKey(bid)) || (filterEnabled && (companyFilter || bid.type === '용역')));
+}
+
+export function seedNoticeDetailRegions(bid: NoticeRegionTarget, detail: G2bNoticeDetail) {
+  if (bid.source !== 'live' || bid.number !== detail.number || bid.revision !== detail.revision || !detail.regionComplete
+    || (detail.notice && (detail.notice.type !== bid.type || detail.notice.number !== bid.number || detail.notice.revision !== bid.revision))) return;
+  const entry = verifiedEntry({ complete: detail.regionComplete, fetchedAt: detail.fetchedAt, allowedRegions: detail.allowedRegions });
+  if (entry.complete) storeRegion(noticeRegionKey(bid), entry);
+}
 // Only an explicit server/provider Retry-After may hold a later user request.
 let blockedUntil = 0;
 const unknownMessage = '참가 가능 지역을 확인하지 못했습니다. 공고 원문을 확인해 주세요.';
@@ -20,17 +86,17 @@ export function noticeRegionKey(bid: Pick<BidNotice, 'number' | 'revision' | 'ty
 export function needsNoticeRegions(bid: NoticeRegionTarget) {
   return bid.source === 'live' && !bid.allowedRegions?.some(region => region.trim());
 }
-export function getCachedNoticeRegions(bids: NoticeRegionTarget[]): Map<string, NoticeRegionEntry> {
+export function getCachedNoticeRegions(bids: NoticeRegionTarget[], includeConfirmedExpired = false): Map<string, NoticeRegionEntry> {
   return new Map(bids.filter(needsNoticeRegions).flatMap(bid => {
     const key = noticeRegionKey(bid); const entry = cache.get(key);
-    return entry && entry.until > Date.now() ? [[key, entry] as const] : [];
+    return entry && (entry.until > Date.now() || (includeConfirmedExpired && entry.complete && !!entry.allowedRegions?.length)) ? [[key, entry] as const] : [];
   }));
 }
-export function mergeNoticeRegions(bids: BidNotice[], entries: ReadonlyMap<string, NoticeRegionEntry>): BidNotice[] {
+export function mergeNoticeRegions(bids: BidNotice[], entries: ReadonlyMap<string, NoticeRegionEntry>, includeConfirmedExpired = false): BidNotice[] {
   return bids.map(bid => {
     if (!needsNoticeRegions(bid)) return bid;
     const entry = entries.get(noticeRegionKey(bid));
-    return entry?.complete && entry.allowedRegions?.length && entry.until > Date.now()
+    return entry?.complete && entry.allowedRegions?.length && (includeConfirmedExpired || entry.until > Date.now())
       ? { ...bid, allowedRegions: [...entry.allowedRegions] } : bid;
   });
 }
@@ -76,10 +142,8 @@ export async function loadNoticeRegions(
   const emit = (bid: NoticeRegionTarget, entry: NoticeRegionEntry, cacheable = true) => {
     if (signal.aborted) return;
     const key = noticeRegionKey(bid);
-    cache.delete(key);
-    if (cacheable) cache.set(key, entry);
-    while (cache.size > 1000) cache.delete(cache.keys().next().value!);
-    entries.set(key, entry); publish?.(key, entry);
+    const confirmed = storeRegion(key, entry, cacheable);
+    entries.set(key, confirmed); publish?.(key, confirmed);
   };
   const queue: NoticeRegionTarget[][] = [];
   const missing = targets.filter(bid => {
@@ -97,6 +161,7 @@ export async function loadNoticeRegions(
       try {
         const payload = await fetchApi<unknown>(`/api/notice-regions?${new URLSearchParams({
           type: batch[0].type, notices: batch.map(bid => `${bid.number}:${bid.revision}`).join(','),
+          ...(options.retryFailed ? { refresh: '1' } : {}),
         })}`, requestAbort.signal);
         if (signal.aborted) return;
         const page = record(payload);

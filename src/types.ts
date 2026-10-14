@@ -6,10 +6,12 @@ export type NoticeStatus = typeof NOTICE_STATUSES[number];
 export type RegionStatus = 'matched' | 'excluded' | 'review';
 export interface RegionAssessment { status: RegionStatus; reason: string; }
 export interface SearchRegion { province: string; district?: string; locality?: string; }
+export interface QuickLink { label: string; url: string; }
 export interface CompanyProfile {
   id: string; companyName: string; province: string; district: string;
   address: string; licenses: string[]; contactName: string; email: string;
   businessNumber?: string;
+  quickLinks?: QuickLink[];
 }
 export interface BidNotice {
   id: string; number: string; revision: string; title: string; agency: string;

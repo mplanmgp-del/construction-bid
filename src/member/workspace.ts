@@ -1,6 +1,7 @@
 import type { BidNotice, CompanyProfile } from '../types';
 import type { G2bNoticeDetail } from '../g2b-types';
 import { isOptionalBusinessNumber, normalizeBusinessNumber } from '../company-profile';
+import { readQuickLinks } from '../quick-links';
 
 export const PREPARATION_STAGES = ['검토중', '준비중', '제출완료(직접확인)', '보류'] as const;
 export interface BidPreparationRecord {
@@ -74,6 +75,7 @@ export function validateWorkspace(value: unknown, userId: string): MemberWorkspa
   return structuredClone({ ...data, profile: {
     ...profile,
     ...(profile.businessNumber === undefined ? {} : { businessNumber: normalizeBusinessNumber(profile.businessNumber)! }),
+    ...(profile.quickLinks === undefined ? {} : { quickLinks: readQuickLinks(profile.quickLinks) }),
   }, noticeSnapshots });
 }
 

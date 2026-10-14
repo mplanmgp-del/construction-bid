@@ -3,6 +3,20 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { HighlightTitle, NoticeList, noticeState } from '../src/components/NoticeList';
 import { NOTICES, DEMO_PROFILES } from '../src/data';
 describe('notice list presentation', () => {
+  it('distinguishes an in-flight participation-region lookup from a genuinely unconfirmed region', () => {
+    const bid = { ...NOTICES[0], source: 'live' as const, allowedRegions: null };
+    const props = { bids: [bid], keyword: '', profile: DEMO_PROFILES[0], bookmarks: [], selected: [], onSelect: () => {}, onOpen: () => {}, onBookmark: () => {} };
+    const key = `${bid.type}:${bid.number}:${bid.revision}`;
+    const html = renderToStaticMarkup(<NoticeList {...props} regionLookup={{ pendingKeys: new Set([key]), failedKeys: new Set(), loading: true, retry: () => {}, retryAt: 0 }} />);
+    expect(html).toContain('>지역 조회 중</span>');
+    expect(html).not.toContain('>지역 확인 필요</span>');
+    const failed = renderToStaticMarkup(<NoticeList {...props} regionLookup={{ pendingKeys: new Set(), failedKeys: new Set([key]), loading: false, retry: () => {}, retryAt: 0 }} />);
+    expect(failed).toContain('>지역 조회 실패</span>');
+    expect(failed).not.toContain('참가 지역 다시 조회');
+    const expired = renderToStaticMarkup(<NoticeList {...props} regionLookup={{ pendingKeys: new Set(), failedKeys: new Set(), loading: false, retry: () => {}, retryAt: 0 }} />);
+    expect(expired).not.toContain('참가 지역 다시 조회');
+    expect(expired).not.toContain('>지역 조회 실패</span>');
+  });
   it('shows a region match for an explicit Seoul entry in a multi-region notice with additional conditions', () => {
     const bid = { ...NOTICES[0], allowedRegions: ['서울특별시', '인천광역시', '경기도'], specialRegionCondition: true };
     const profile = { ...DEMO_PROFILES[0], province: '서울특별시', district: '강남구' };

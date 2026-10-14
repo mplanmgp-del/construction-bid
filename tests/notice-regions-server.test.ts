@@ -25,6 +25,24 @@ describe('on-demand participation regions', () => {
     expect(Object.fromEntries(url.searchParams)).toMatchObject({ inqryDiv: '2', bidNtceNo: identity.number, bidNtceOrd: '001', numOfRows: '999', pageNo: '1' });
   });
 
+  it.each(['공사', '용역'] as const)('accepts omitted business labels for exact %s regions without fetching detail APIs', async type => {
+    const fetcher = vi.fn(async (_input: URL | RequestInfo) => response([
+      { ...region, bsnsDivNm: undefined, prtcptPsblRgnNm: '서울특별시' },
+      { ...region, bsnsDivNm: '', prtcptPsblRgnNm: '인천광역시' },
+      { ...region, bsnsDivNm: type, prtcptPsblRgnNm: '경기도' },
+      { ...region, bsnsDivNm: type === '공사' ? '용역' : '공사', prtcptPsblRgnNm: '부산광역시' },
+      { ...region, bsnsDivNm: undefined, bidNtceOrd: '000', prtcptPsblRgnNm: '대구광역시' },
+      { ...region, bsnsDivNm: undefined, bidNtceNo: 'OTHER', prtcptPsblRgnNm: '광주광역시' },
+      { ...region, bsnsDivNm: undefined, bidNtceOrd: '', prtcptPsblRgnNm: '전국' },
+    ]));
+    const client = createG2bClient({ serviceKey: 'region-test', fetcher });
+    const result = await handleG2bRequest('/api/notice-regions', params(`${identity.number}:1`, type), client);
+    expect(result).toMatchObject({ status: 200, body: { items: [{ ...identity, type,
+      allowedRegions: ['서울특별시', '인천광역시', '경기도'], complete: true }] } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetcher.mock.calls[0][0])).pathname.split('/').at(-1)).toBe('getBidPblancListInfoPrtcptPsblRgn');
+  });
+
   it.each(['', 'NOTICE', 'NOTICE:', 'NOTICE:abc', 'NOTICE:0000', 'NOTICE:000,', 'NOTICE:000,OTHER:bad', Array.from({ length: 11 }, (_, index) => `NOTICE${index}:000`).join(',')])('rejects the entire invalid batch before any provider read: %s', async notices => {
     const fetcher = vi.fn();
     const result = await handleG2bRequest('/api/notice-regions', params(notices), createG2bClient({ serviceKey: 'test', fetcher }));

@@ -23,6 +23,12 @@ export class G2bError extends Error {
 const object = (value: unknown): Row => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Row : {};
 const text = (value: unknown): string => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 const unique = (values: string[]) => [...new Set(values.filter(Boolean))];
+function matchesNoticeRow(row: Row, number: string, revision: string, type: G2bBusinessType): boolean {
+  // The regional endpoint can omit its business label. An explicit different
+  // label is still excluded, and number/revision must always match exactly.
+  return text(row.bidNtceNo) === number && /^\d{1,3}$/.test(text(row.bidNtceOrd))
+    && text(row.bidNtceOrd).padStart(3, '0') === revision && (!text(row.bsnsDivNm) || text(row.bsnsDivNm) === type);
+}
 export function money(value: unknown): number | null {
   const cleaned = text(value).replaceAll(',', '');
   if (!/^\d+(?:\.0+)?$/.test(cleaned)) return null;
@@ -226,8 +232,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       const result = await request(BID_BASE, 'getBidPblancListInfoPrtcptPsblRgn', {
         inqryDiv: '2', bidNtceNo: number, bidNtceOrd: revision, pageNo: '1', numOfRows: '999',
       }, Math.min(15_000, remaining), true);
-      const rows = result.items.filter(row => text(row.bidNtceNo) === number && /^\d{1,3}$/.test(text(row.bidNtceOrd))
-        && text(row.bidNtceOrd).padStart(3, '0') === revision && text(row.bsnsDivNm) === type);
+      const rows = result.items.filter(row => matchesNoticeRow(row, number, revision, type));
       const names = unique(rows.map(row => text(row.prtcptPsblRgnNm)));
       // An empty successful response is unknown, not evidence of nationwide participation.
       return { ...base, allowedRegions: names.length ? names : null, complete: true, fetchedAt: new Date(now()).toISOString() };
@@ -280,8 +285,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       request(BID_BASE, 'getBidPblancListInfoLicenseLimit', params),
     ]);
     const quotaFailure = [general, baseAmounts, regions, licenses].find(result => result.status === 'rejected' && result.reason instanceof ProviderQuotaError);
-    const matches = (row: Row) => text(row.bidNtceNo) === number && /^\d{1,3}$/.test(text(row.bidNtceOrd))
-      && text(row.bidNtceOrd).padStart(3, '0') === revision && (!text(row.bsnsDivNm) || text(row.bsnsDivNm) === type);
+    const matches = (row: Row) => matchesNoticeRow(row, number, revision, type);
     const regionComplete = regions.status === 'fulfilled' && regions.value.items.length >= regions.value.totalCount;
     const licenseComplete = licenses.status === 'fulfilled' && licenses.value.items.length >= licenses.value.totalCount;
     if ([general, baseAmounts, regions, licenses].every(result => result.status === 'rejected')) {

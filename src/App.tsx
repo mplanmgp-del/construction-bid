@@ -17,9 +17,11 @@ import { MemberAccess, BidPreparation } from './member/MemberAccess';
 import { mergeNoticeDetail } from './member/workspace';
 import type { G2bNoticeDetail } from './g2b-types';
 import { useLiveNotices } from './live/useLiveNotices';
-import { useNoticeRegions } from './live/useNoticeRegions';
+import { useCachedNoticeRegions, useNoticeRegions } from './live/useNoticeRegions';
+import { seedNoticeDetailRegions, selectNoticeRegionTargets } from './live/notice-regions';
 import { LiveSearch } from './live/LiveSearch';
 import { CompanyDashboard } from './company/CompanyDashboard';
+import { FloatingQuickLinks } from './components/FloatingQuickLinks';
 import { currentNotice, koreanToday, mergeById } from './live/client';
 
 type View = 'notices' | 'bookmarks' | 'profile' | 'results';
@@ -140,6 +142,8 @@ export default function App() {
   }
 
   function applyNoticeDetail(id: string, detail: G2bNoticeDetail) {
+    const original = rawSourceNotices.find(bid => bid.id === id) ?? (selectedBid?.id === id ? selectedBid : undefined);
+    if (original) seedNoticeDetailRegions(original, detail);
     live.applyDetail(id, detail);
     setSelectedBid(current => current?.id === id ? mergeNoticeDetail(current, detail) : current);
     const saved = member.workspace?.noticeSnapshots[id];
@@ -161,8 +165,7 @@ export default function App() {
   const companyRegionFilter = !!profile.province && !!profile.district && (filters.autoRegion || filters.regionView !== 'all');
   const regionFilterEnabled = mode === 'live' && (view === 'notices' || view === 'bookmarks')
     && (companyRegionFilter || (filters.type !== '공사' && activeRegions.length > 0));
-  const regionSearch = useNoticeRegions(regionCandidates, regionFilterEnabled, companyRegionFilter);
-  const sourceNotices = regionSearch.items;
+  const sourceNotices = useCachedNoticeRegions(regionCandidates);
   const baseResults = useMemo(() => filterNotices(sourceNotices, { ...filters, autoRegion: false, regionView: 'all' }, profile, statusNow), [sourceNotices, filters, profile, statusNow]);
   const counts = useMemo(() => baseResults.reduce((total, bid) => { total[assessRegion(bid, profile).status]++; return total; }, { matched: 0, review: 0, excluded: 0 }), [baseResults, profile]);
   const filtered = useMemo(() => filterNotices(sourceNotices, filters, profile, statusNow), [sourceNotices, filters, profile, statusNow]);
@@ -174,6 +177,8 @@ export default function App() {
   const safePage = Math.min(page, pages);
   const pagination = pageGroup(safePage, pages);
   const visibleNotices = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const regionTargets = selectNoticeRegionTargets(regionCandidates, visibleNotices, regionFilterEnabled, companyRegionFilter);
+  const regionSearch = useNoticeRegions(regionTargets, mode === 'live' && (view === 'notices' || view === 'bookmarks'), true, live.queryVersion);
   const allCount = filters.autoRegion ? counts.matched : baseResults.length;
   const selectedNotices = filtered.filter(bid => selectedNoticeIds.includes(bid.id));
   const exportNotices = selectedNotices.length ? selectedNotices : filtered;
@@ -244,12 +249,11 @@ export default function App() {
                     : unknownSearchRegions > 0 ? <p>세부 지역이 확인되지 않은 공고 {unknownSearchRegions}건은 {filters.includeUnknownRegions ? '함께 표시합니다. 정확한 지역은 원문에서 확인해 주세요.' : '제외했습니다. 상세 검색의 ‘지역 미확인 공고 포함’으로 볼 수 있습니다.'}</p> : null}
                 {regionSearch.failed > 0 && <p>일부 지역 정보를 불러오지 못했습니다. 미확인 공고는 원문을 확인해 주세요.</p>}
               </div>
-              {regionFilterEnabled && (regionSearch.failed > 0 || sourceNotices.some(bid => !bid.allowedRegions?.length && (companyRegionFilter || bid.type === '용역'))) && <button className="button button-secondary" onClick={regionSearch.retry} disabled={regionSearch.loading || regionSearch.retryAt > Date.now()}>{regionSearch.retryAt > Date.now() ? '잠시 후 재조회' : '지역 다시 조회'}</button>}
             </div>}
 
             {(visibleNotices.length > 0 || activeStatuses.length > 0 || activeRegions.length > 0) && <>
               {selectedNotices.length > 0 && <div className="selection-summary"><span>{selectedNotices.length}건 선택 · 다운로드 시 선택한 공고를 내보냅니다.</span><button onClick={() => setSelectedNoticeIds([])}>선택 해제</button></div>}
-              <NoticeList bids={visibleNotices} now={statusNow} statuses={activeStatuses} onStatusesChange={value => updateFilter('statuses', value)} searchRegions={activeRegions} resultsPaused={regionSearch.loading} keyword={[filters.keyword, mode === 'live' && view === 'notices' ? live.query.keyword : ''].filter(Boolean).join(' ')} profile={profile} bookmarks={bookmarks} selected={selectedNoticeIds} onSelect={setSelectedNoticeIds} onOpen={setSelectedBid} onBookmark={toggleBookmark} />
+              <NoticeList regionLookup={regionSearch} bids={visibleNotices} now={statusNow} statuses={activeStatuses} onStatusesChange={value => updateFilter('statuses', value)} searchRegions={activeRegions} resultsPaused={regionSearch.loading} keyword={[filters.keyword, mode === 'live' && view === 'notices' ? live.query.keyword : ''].filter(Boolean).join(' ')} profile={profile} bookmarks={bookmarks} selected={selectedNoticeIds} onSelect={setSelectedNoticeIds} onOpen={setSelectedBid} onBookmark={toggleBookmark} />
             </>}
             {visibleNotices.length === 0 && <div className="empty-state"><div className="empty-icon">{view === 'bookmarks' && bookmarks.length === 0 ? <Bookmark size={30} /> : <FileSearch size={32} />}</div><h3>{mode === 'live' && view === 'notices' && live.requiresKeyword ? '검색할 공고명을 입력해 주세요' : mode === 'live' && live.loading ? '공고를 불러오는 중입니다' : mode === 'live' && live.error && view === 'notices' ? '현재 조건의 공고를 조회하지 못했습니다' : view === 'bookmarks' && bookmarks.length === 0 ? '아직 저장한 관심공고가 없습니다' : '조건에 맞는 공고가 없습니다'}</h3><p>{mode === 'live' && view === 'notices' && live.requiresKeyword ? '위 검색창에 철거·석면 등 공고명을 입력해 주세요.' : mode === 'live' && view === 'notices' && live.error ? '조회 상태는 위 안내에서 확인할 수 있습니다.' : view === 'bookmarks' && bookmarks.length === 0 ? '공고 옆 별표를 누르면 이 업체의 관심공고에 저장됩니다.' : '검색어를 바꾸거나 선택한 조건을 조금 넓혀보세요.'}</p><button className="button button-primary" onClick={view === 'bookmarks' && bookmarks.length === 0 ? () => navigate('notices') : resetFilters}>{view === 'bookmarks' && bookmarks.length === 0 ? '입찰공고 둘러보기' : '검색 조건 초기화'}<ArrowRight size={16} /></button></div>}
 
@@ -261,6 +265,7 @@ export default function App() {
       </>}
       <footer className="app-footer"><div><span className="footer-brand">공사입찰 검색</span><span>내 업체에 맞는 공고, 더 간편하게.</span></div><div className="footer-links"><span>{mode === 'live' ? '공개 공고·결과 조회 및 회원별 입찰 준비 관리' : '화면·공고·업체 정보는 테스트용 예시입니다.'}</span><a href="https://www.g2b.go.kr" target="_blank" rel="noreferrer">나라장터<ExternalLink size={12} /></a></div></footer>
     </main>
+    <FloatingQuickLinks key={profile.id} profile={profile} />
     {selectedBid && <BidDetail bid={selectedBid} now={statusNow} profile={profile} assessment={assessRegion(selectedBid, profile)} isBookmarked={bookmarks.includes(selectedBid.id)} onClose={() => setSelectedBid(null)} onToggleBookmark={() => toggleBookmark(selectedBid.id)} onEnriched={detail => applyNoticeDetail(selectedBid.id, detail)} preparation={mode === 'live' ? <BidPreparation bidId={selectedBid.id} bid={selectedBid} member={member} /> : undefined} />}
     <div className={`toast ${toast ? 'visible' : ''}`} role="status" aria-live="polite">{toast && <><span><Check size={15} /></span>{toast}</>}</div>
   </div>;

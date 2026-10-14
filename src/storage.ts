@@ -1,5 +1,6 @@
 import type { CompanyProfile } from './types';
 import { isOptionalBusinessNumber, normalizeBusinessNumber } from './company-profile';
+import { readQuickLinks } from './quick-links';
 
 export const STORAGE_KEY = 'construction-bid.prototype.v1';
 export interface PrototypeState {
@@ -38,6 +39,7 @@ export function loadPrototypeState(defaultProfiles: CompanyProfile[], storage?: 
     const profiles = defaultProfiles.map(profile => saved.profiles.find((item: CompanyProfile) => item.id === profile.id) ?? profile)
       .map(profile => ({ ...profile, licenses: [...profile.licenses],
         ...(profile.businessNumber === undefined ? {} : { businessNumber: normalizeBusinessNumber(profile.businessNumber)! }),
+        ...(profile.quickLinks === undefined ? {} : { quickLinks: readQuickLinks(profile.quickLinks) }),
       }));
     const bookmarks: PrototypeState['bookmarks'] = {};
     const preferences: PrototypeState['preferences'] = {};
@@ -60,6 +62,7 @@ export function savePrototypeState(state: PrototypeState, storage?: StorageLike)
     if (!state.profiles.every(profile => isOptionalBusinessNumber(profile.businessNumber))) return false;
     const profiles = state.profiles.map(profile => ({ ...profile,
       ...(profile.businessNumber === undefined ? {} : { businessNumber: normalizeBusinessNumber(profile.businessNumber)! }),
+      ...(profile.quickLinks === undefined ? {} : { quickLinks: readQuickLinks(profile.quickLinks) }),
     }));
     (storage ?? window.localStorage).setItem(STORAGE_KEY, JSON.stringify({ ...state, profiles }));
     return true;

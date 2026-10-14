@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { Building2, Check, Info, MapPin, RotateCcw, Save, ShieldCheck, UserRound } from 'lucide-react';
+import { Building2, Check, Info, Link2, MapPin, RotateCcw, Save, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 import { DISTRICTS, LICENSES, PROVINCES } from '../data';
 import type { CompanyProfile } from '../types';
 import { formatBusinessNumber, normalizeBusinessNumber } from '../company-profile';
+import { QUICK_LINK_LABEL_LIMIT, quickLinkDrafts, validateQuickLinkDrafts } from '../quick-links';
+import './FloatingQuickLinks.css';
 
 interface ProfileViewProps {
   profile: CompanyProfile;
@@ -13,7 +15,7 @@ interface ProfileViewProps {
 type ProfileErrors = Partial<Record<'companyName' | 'businessNumber' | 'email', string>>;
 
 function copyProfile(profile: CompanyProfile): CompanyProfile {
-  return { ...profile, businessNumber: formatBusinessNumber(profile.businessNumber), licenses: [...profile.licenses] };
+  return { ...profile, businessNumber: formatBusinessNumber(profile.businessNumber), licenses: [...profile.licenses], quickLinks: quickLinkDrafts(profile.quickLinks) };
 }
 
 function profileHasChanges(profile: CompanyProfile, draft: CompanyProfile): boolean {
@@ -21,22 +23,26 @@ function profileHasChanges(profile: CompanyProfile, draft: CompanyProfile): bool
     .some((key) => profile[key] !== draft[key])
     || (normalizeBusinessNumber(profile.businessNumber ?? '') ?? profile.businessNumber)
       !== (normalizeBusinessNumber(draft.businessNumber ?? '') ?? draft.businessNumber)
-    || [...profile.licenses].sort().join('\u0000') !== [...draft.licenses].sort().join('\u0000');
+    || [...profile.licenses].sort().join('\u0000') !== [...draft.licenses].sort().join('\u0000')
+    || JSON.stringify(quickLinkDrafts(profile.quickLinks)) !== JSON.stringify(draft.quickLinks);
 }
 
 export function ProfileView({ profile, onSave, persistence = 'browser' }: ProfileViewProps) {
   const id = useId();
   const [draft, setDraft] = useState(() => copyProfile(profile));
   const [errors, setErrors] = useState<ProfileErrors>({});
+  const [quickLinkErrors, setQuickLinkErrors] = useState<Record<number, string>>({});
   const [feedback, setFeedback] = useState('');
   const previousProfileId = useRef(profile.id);
   const companyInput = useRef<HTMLInputElement>(null);
   const businessNumberInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
+  const quickLinkInputs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
     setDraft(copyProfile(profile));
     setErrors({});
+    setQuickLinkErrors({});
     if (previousProfileId.current !== profile.id) setFeedback('');
     previousProfileId.current = profile.id;
   }, [profile]);
@@ -47,12 +53,18 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
   const regionLabel = [draft.province, draft.district].filter(Boolean).join(' ');
   const hasRegion = Boolean(draft.province && draft.district);
 
-  const updateField = (field: Exclude<keyof CompanyProfile, 'id' | 'licenses'>, value: string) => {
+  const updateField = (field: Exclude<keyof CompanyProfile, 'id' | 'licenses' | 'quickLinks'>, value: string) => {
     setDraft((current) => ({ ...current, [field]: value }));
     setFeedback('');
     if (field === 'companyName' || field === 'businessNumber' || field === 'email') {
       setErrors((current) => ({ ...current, [field]: undefined }));
     }
+  };
+
+  const updateQuickLink = (index: number, patch: { label?: string; url?: string }) => {
+    setDraft(current => ({ ...current, quickLinks: (current.quickLinks ?? quickLinkDrafts(undefined)).map((link, slot) => slot === index ? { ...link, ...patch } : link) }));
+    setQuickLinkErrors(current => { const next = { ...current }; delete next[index]; return next; });
+    setFeedback('');
   };
 
   const toggleLicense = (license: string) => {
@@ -68,6 +80,7 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
   const resetDraft = () => {
     setDraft(copyProfile(profile));
     setErrors({});
+    setQuickLinkErrors({});
     setFeedback('변경 내용을 취소했습니다.');
   };
 
@@ -77,16 +90,19 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
     const companyName = draft.companyName.trim();
     const businessNumber = normalizeBusinessNumber(draft.businessNumber ?? '');
     const email = draft.email.trim();
+    const shortcuts = validateQuickLinkDrafts(draft.quickLinks ?? []);
     if (!companyName) nextErrors.companyName = '업체명을 입력해주세요.';
     if (businessNumber === null) nextErrors.businessNumber = '사업자등록번호 10자리를 입력해주세요. 예: 123-45-67890';
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       nextErrors.email = '이메일 주소를 확인해주세요. 예: name@example.com';
     }
     setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) {
+    setQuickLinkErrors(shortcuts.errors);
+    if (Object.keys(nextErrors).length || Object.keys(shortcuts.errors).length) {
       if (nextErrors.companyName) companyInput.current?.focus();
       else if (nextErrors.businessNumber) businessNumberInput.current?.focus();
-      else emailInput.current?.focus();
+      else if (nextErrors.email) emailInput.current?.focus();
+      else quickLinkInputs.current[Number(Object.keys(shortcuts.errors)[0])]?.focus();
       setFeedback('입력 내용을 확인한 후 다시 저장해주세요.');
       return;
     }
@@ -98,6 +114,7 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
       address: draft.address.trim(),
       contactName: draft.contactName.trim(),
       licenses: [...draft.licenses],
+      quickLinks: shortcuts.links,
     };
     onSave(savedProfile);
     setDraft(copyProfile(savedProfile));
@@ -208,6 +225,36 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
                 {errors.email && <p id={`${id}-email-error`} className="profile-field-error">{errors.email}</p>}
               </div>
             </div>
+          </section>
+
+          <section className="profile-form-section" aria-labelledby={`${id}-links-heading`}>
+            <div className="profile-section-heading">
+              <span className="profile-section-icon"><Link2 size={19} aria-hidden="true" /></span>
+              <div><h2 id={`${id}-links-heading`}>내 바로가기</h2><p>자주 사용하는 웹사이트를 최대 4개 등록하세요. 저장하면 화면 오른쪽에 따라다니는 버튼으로 표시됩니다.</p></div>
+            </div>
+            <div className="profile-quick-links">
+              {(draft.quickLinks ?? []).map((link, index) => (
+                <div className="profile-quick-link" key={index}>
+                  <span className="profile-quick-link-number" aria-hidden="true">{index + 1}</span>
+                  <div className="profile-field">
+                    <label className="field-label" htmlFor={`${id}-link-name-${index}`}>바로가기 {index + 1} 이름</label>
+                    <input className="field" id={`${id}-link-name-${index}`} value={link.label} maxLength={QUICK_LINK_LABEL_LIMIT}
+                      placeholder="버튼 이름" onChange={event => updateQuickLink(index, { label: event.target.value })} />
+                  </div>
+                  <div className="profile-field">
+                    <label className="field-label" htmlFor={`${id}-link-url-${index}`}>URL</label>
+                    <input className="field" id={`${id}-link-url-${index}`} aria-label={`바로가기 ${index + 1} URL`}
+                      ref={element => { quickLinkInputs.current[index] = element; }} value={link.url} inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                      maxLength={2048} placeholder="https://웹사이트주소" onChange={event => updateQuickLink(index, { url: event.target.value })}
+                      aria-invalid={Boolean(quickLinkErrors[index])} aria-describedby={quickLinkErrors[index] ? `${id}-link-error-${index}` : undefined} />
+                    {quickLinkErrors[index] && <p className="profile-field-error" id={`${id}-link-error-${index}`}>{quickLinkErrors[index]}</p>}
+                  </div>
+                  <button className="profile-quick-link-delete" type="button" aria-label={`바로가기 ${index + 1} 삭제`} title="바로가기 삭제"
+                    disabled={!link.label && !link.url} onClick={() => updateQuickLink(index, { label: '', url: '' })}><Trash2 size={17} aria-hidden="true" /></button>
+                </div>
+              ))}
+            </div>
+            <p className="profile-field-help">주소에 https://를 생략해도 됩니다. 버튼 이름을 비워두면 사이트 주소가 표시됩니다. 삭제한 바로가기도 정보 저장 후 적용됩니다.</p>
           </section>
 
           <footer className="profile-form-footer">

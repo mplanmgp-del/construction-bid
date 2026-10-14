@@ -13,7 +13,7 @@ const number = (value: number) => value.toLocaleString('ko-KR');
 const money = (value: number | null) => value == null ? '-' : `${number(value)}원`;
 const day = (value: string) => normalizeAwardDay(value)?.replaceAll('-', '.') || '-';
 
-export function CompanyAwardsPanel({ company, from, to }: { company: PublicCompany; from?: string; to?: string }) {
+export function CompanyAwardsPanel({ company, from, to, registrationPending = false }: { company: PublicCompany; from?: string; to?: string; registrationPending?: boolean }) {
   const [jobs, setJobs] = useState<AwardJob[]>([]);
   const [running, setRunning] = useState(false);
   const [range, setRange] = useState<AwardDateRange | null>(null);
@@ -26,6 +26,9 @@ export function CompanyAwardsPanel({ company, from, to }: { company: PublicCompa
   const run = useRef<{ token: number; controller: AbortController | null }>({ token: 0, controller: null });
   const jobSnapshot = useRef<AwardJob[]>([]);
   const listHeading = useRef<HTMLHeadingElement | null>(null);
+  const automaticStart = normalizeAwardDay(from || company.registrationDate);
+  const automaticEnd = normalizeAwardDay(to || koreanToday());
+  const waitingForRegistration = registrationPending && !automaticStart;
 
   function publish(next: AwardJob[]) {
     const snapshot = next.map(job => ({ ...job }));
@@ -93,15 +96,15 @@ export function CompanyAwardsPanel({ company, from, to }: { company: PublicCompa
   }
 
   useEffect(() => {
-    const start = normalizeAwardDay(from || company.registrationDate);
-    const end = normalizeAwardDay(to || koreanToday());
+    const start = automaticStart;
+    const end = automaticEnd;
     setOpening(null); setPage(1); setIssue(''); setMessage(''); setRange(null); publish([]);
     setManualDates({ from: start || '', to: end || koreanToday() });
-    if (!start) { setNeedsStart(true); setRunning(false); }
+    if (!start) { setNeedsStart(!waitingForRegistration); setRunning(false); }
     else if (!end) { setNeedsStart(true); setRunning(false); setIssue('조회 종료일을 확인해 주세요.'); }
     else begin({ from: start, to: end });
     return () => { ++run.current.token; run.current.controller?.abort(); run.current.controller = null; };
-  }, [company.businessNumber, company.registrationDate, from, to]);
+  }, [company.businessNumber, automaticStart, automaticEnd, waitingForRegistration]);
 
   const rows = useMemo(() => mergeCompanyAwards(...jobs.map(job => job.result?.items ?? [])), [jobs]);
   const completed = jobs.filter(job => job.status === 'complete').length;
@@ -134,9 +137,10 @@ export function CompanyAwardsPanel({ company, from, to }: { company: PublicCompa
   }
 
   return <section className="company-awards panel" aria-label="업체 확정 낙찰 이력">
-    <header className="company-awards-heading"><span className="company-awards-symbol"><Trophy size={23} /></span><div><h2>확정 낙찰 이력</h2><p>나라장터에서 이 업체를 최종 낙찰업체로 공개한 공사·용역입니다.</p></div><span className={`company-awards-state${allComplete ? ' is-complete' : ''}`}>{running ? <><LoaderCircle size={13} className="company-awards-spin" />조회 중</> : allComplete ? <><CheckCircle2 size={13} />조회 완료</> : '조회 범위 확인'}</span></header>
+    <header className="company-awards-heading"><span className="company-awards-symbol"><Trophy size={23} /></span><div><h2>확정 낙찰 이력</h2><p>사업자등록번호로 조회한 공식 확정 낙찰입니다. 확인되는 즉시 표시합니다.</p></div><span className={`company-awards-state${allComplete ? ' is-complete' : ''}`}>{waitingForRegistration ? <><LoaderCircle size={13} className="company-awards-spin" />등록일 확인 중</> : running ? <><LoaderCircle size={13} className="company-awards-spin" />조회 중</> : allComplete ? <><CheckCircle2 size={13} />조회 완료</> : '조회 범위 확인'}</span></header>
 
-    {needsStart ? <form className="company-awards-start" onSubmit={event => { event.preventDefault(); begin(manualDates); }}><div><Info size={18} /><p>{!normalizeAwardDay(company.registrationDate) && !from ? '등록일이 제공되지 않아 전체 조회의 시작일을 정할 수 없습니다. 개찰 시작일을 입력해 주세요.' : '조회할 개찰 시작일과 종료일을 확인해 주세요.'}</p></div><label>개찰 시작일<input required type="date" value={manualDates.from} onChange={event => setManualDates({ ...manualDates, from: event.target.value })} /></label><label>개찰 종료일<input required type="date" value={manualDates.to} onChange={event => setManualDates({ ...manualDates, to: event.target.value })} /></label><button type="submit"><Play size={14} />낙찰 이력 조회</button></form> : range && <div className="company-awards-progress"><div className="company-awards-progress-top"><div><span><CalendarDays size={15} />개찰일 {day(range.from)} ~ {day(range.to)}</span><p>{!from && range.from === normalizeAwardDay(company.registrationDate) ? '업체 등록일' : '선택한 시작일'}부터 조회 · 조회 일수 제한 없음 · 최신 구간부터 확인</p></div><div className="company-awards-controls">{running ? <button onClick={() => stop()}><CirclePause size={15} />조회 중지</button> : remaining > 0 ? <button onClick={resume}><Play size={15} />남은 구간 이어받기</button> : <button onClick={refreshLatest}><RefreshCw size={14} />최신 구간 다시 조회</button>}</div></div><div className="company-awards-progress-track" role="progressbar" aria-label="낙찰 이력 조회 진행률" aria-valuemin={0} aria-valuemax={jobs.length} aria-valuenow={completed}><span style={{ width: `${progress}%` }} /></div><div className="company-awards-progress-meta"><strong>{number(completed)} / {number(jobs.length)}구간 완료</strong><span>공사·용역 포함 · 남은 {number(remaining)}구간{incomplete.length > 0 && ` · 다시 확인 ${number(incomplete.length)}구간`}</span></div></div>}
+    {waitingForRegistration && <p className="company-awards-message" role="status"><LoaderCircle size={16} className="company-awards-spin" />전체 기간을 조회하기 위해 공식 업체 등록일을 확인하고 있습니다.</p>}
+    {needsStart && !waitingForRegistration ? <form className="company-awards-start" onSubmit={event => { event.preventDefault(); begin(manualDates); }}><div><Info size={18} /><p>{!normalizeAwardDay(company.registrationDate) && !from ? '등록일이 제공되지 않아 전체 조회의 시작일을 정할 수 없습니다. 개찰 시작일을 입력해 주세요.' : '조회할 개찰 시작일과 종료일을 확인해 주세요.'}</p></div><label>개찰 시작일<input required type="date" value={manualDates.from} onChange={event => setManualDates({ ...manualDates, from: event.target.value })} /></label><label>개찰 종료일<input required type="date" value={manualDates.to} onChange={event => setManualDates({ ...manualDates, to: event.target.value })} /></label><button type="submit"><Play size={14} />낙찰 이력 조회</button></form> : range && <div className="company-awards-progress"><div className="company-awards-progress-top"><div><span><CalendarDays size={15} />개찰일 {day(range.from)} ~ {day(range.to)}</span><p>{!from && range.from === normalizeAwardDay(company.registrationDate) ? '업체 등록일' : '선택한 시작일'}부터 조회 · 조회 일수 제한 없음 · 최신 구간부터 확인</p></div><div className="company-awards-controls">{running ? <button onClick={() => stop()}><CirclePause size={15} />조회 중지</button> : remaining > 0 ? <button onClick={resume}><Play size={15} />남은 구간 이어받기</button> : <button onClick={refreshLatest}><RefreshCw size={14} />최신 구간 다시 조회</button>}</div></div><div className="company-awards-progress-track" role="progressbar" aria-label="낙찰 이력 조회 진행률" aria-valuemin={0} aria-valuemax={jobs.length} aria-valuenow={completed}><span style={{ width: `${progress}%` }} /></div><div className="company-awards-progress-meta"><strong>{number(completed)} / {number(jobs.length)}구간 완료</strong><span>공사·용역 포함 · 남은 {number(remaining)}구간{incomplete.length > 0 && ` · 다시 확인 ${number(incomplete.length)}구간`}</span></div></div>}
 
     {issue && <p className="company-awards-message is-error" role="alert"><Info size={16} />{issue}</p>}
     {message && <p className="company-awards-message" role="status"><Info size={16} />{message}</p>}

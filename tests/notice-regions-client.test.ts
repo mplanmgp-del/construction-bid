@@ -19,6 +19,87 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+it('automatically targets both businesses on the visible page, and all candidates only for region filtering', () => {
+  const bids = Array.from({ length: 62 }, (_, index) => service(`R${index}`, { type: index % 2 ? '공사' : '용역' }));
+  const visible = bids.slice(30, 60);
+  expect(regions.selectNoticeRegionTargets(bids, visible, false, false)).toEqual(visible);
+  const services = bids.filter(bid => bid.type === '용역');
+  expect(regions.selectNoticeRegionTargets(bids, visible, true, false)).toEqual(services);
+  expect(regions.selectNoticeRegionTargets(bids, visible, true, true)).toEqual(bids);
+  const confirm = (bid: BidNotice) => regions.seedNoticeDetailRegions(bid, {
+    number: bid.number, revision: bid.revision, allowedRegions: ['서울특별시'], regionComplete: true,
+    licenses: [], licenseComplete: false, fetchedAt: '2026-10-14T01:00:00Z', warnings: [], notice: bid,
+  });
+  services.slice(0, 10).forEach(confirm);
+  // As service matches enter the page, the in-flight target identities stay fixed.
+  expect(regions.selectNoticeRegionTargets(bids, bids.slice(0, 30), true, false)).toEqual(services);
+  services.slice(10).forEach(confirm);
+  const settled = regions.selectNoticeRegionTargets(bids, visible, true, false);
+  expect(settled.filter(bid => bid.type === '용역')).toHaveLength(31);
+  expect(settled.filter(bid => bid.type === '공사')).toHaveLength(15);
+});
+
+it('allows visible construction checks after service checks fail, without treating a failure as a match', async () => {
+  const construction = service('C1', { type: '공사' }); const bid = service('S1');
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [row('S1', { complete: false, allowedRegions: null })] })));
+  await regions.loadNoticeRegions([bid], new AbortController().signal);
+  expect(regions.selectNoticeRegionTargets([construction, bid], [construction], true, false)).toEqual([construction, bid]);
+  expect(regions.mergeNoticeRegions([bid], regions.getCachedNoticeRegions([bid]))[0].allowedRegions).toBeNull();
+});
+
+it('retains every region in an active 1001-notice snapshot and reuses it through effect re-registration', async () => {
+  const services = Array.from({ length: 1001 }, (_, index) => service(`S${index}`));
+  const construction = service('C1', { type: '공사' });
+  const candidates = [construction, ...services];
+  const release = regions.pinNoticeRegions(candidates);
+  const fetcher = vi.fn(async (path: string) => {
+    const url = new URL(path, 'https://example.test');
+    return Response.json({ items: url.searchParams.get('notices')!.split(',').map(value => row(value.split(':')[0])) });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  await regions.loadNoticeRegions(services, new AbortController().signal);
+  expect(regions.getCachedNoticeRegions(services).size).toBe(1001);
+  expect(regions.mergeNoticeRegions(services, regions.getCachedNoticeRegions(services))[0].allowedRegions).toEqual(['서울특별시']);
+  expect(regions.selectNoticeRegionTargets(candidates, [construction], true, false)[0]).toBe(construction);
+  const calls = fetcher.mock.calls.length;
+  // React cleans up the previous effect before registering the same search again.
+  release(); release();
+  const releaseAgain = regions.pinNoticeRegions([...candidates]);
+  await Promise.resolve();
+  expect(regions.getCachedNoticeRegions(services).size).toBe(1001);
+  await regions.loadNoticeRegions(services, new AbortController().signal);
+  expect(fetcher).toHaveBeenCalledTimes(calls);
+  releaseAgain(); await Promise.resolve();
+  expect(regions.getCachedNoticeRegions(services).size).toBe(1000);
+});
+
+it('shares exact complete detail regions with later list loads without fetching details or regions again', async () => {
+  const bid = service('R1', { type: '공사' });
+  const detail = { number: 'R1', revision: '000', allowedRegions: ['서울특별시', '경기도'], regionComplete: true,
+    licenses: [], licenseComplete: false, fetchedAt: '2026-10-14T01:00:00Z', warnings: [], notice: bid };
+  const listener = vi.fn(); const unsubscribe = regions.subscribeNoticeRegions(listener);
+  regions.seedNoticeDetailRegions(bid, { ...detail, revision: '001' });
+  regions.seedNoticeDetailRegions(bid, { ...detail, notice: { ...bid, type: '용역' } });
+  expect(regions.getCachedNoticeRegions([bid]).size).toBe(0);
+  regions.seedNoticeDetailRegions(bid, detail);
+  expect(listener).toHaveBeenCalledTimes(1);
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  const result = await regions.loadNoticeRegions([bid], new AbortController().signal);
+  expect(regions.mergeNoticeRegions([bid], result.entries)[0].allowedRegions).toEqual(detail.allowedRegions);
+  expect(fetcher).not.toHaveBeenCalled(); unsubscribe();
+});
+
+it('does not let an unfinished region request erase regions confirmed by detail', async () => {
+  const bid = service('R1'); let resolve!: (value: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(done => { resolve = done; })));
+  const work = regions.loadNoticeRegions([bid], new AbortController().signal);
+  regions.seedNoticeDetailRegions(bid, { number: 'R1', revision: '000', allowedRegions: ['서울특별시'], regionComplete: true,
+    licenses: [], licenseComplete: false, fetchedAt: '2026-10-14T01:00:00Z', warnings: [], notice: bid });
+  resolve(Response.json({ items: [row('R1', { complete: false, allowedRegions: null })] }));
+  const result = await work;
+  expect(regions.mergeNoticeRegions([bid], result.entries)[0].allowedRegions).toEqual(['서울특별시']);
+});
+
 it('hydrates only unknown live regions, including services with a site address', async () => {
   const bids = [service('R1'), service('R2', { province: '경기도' }), service('R3', { allowedRegions: [] }),
     service('R4', { type: '공사', allowedRegions: ['전국'] }), service('R5', { source: 'demo' }), service('R6', { allowedRegions: ['부산광역시'] })];
@@ -118,6 +199,8 @@ it('reuses successful public region data for five minutes across calls and revis
   await regions.loadNoticeRegions([service('R1', { revision: '001' })], signal);
   expect(fetcher).toHaveBeenCalledTimes(2);
   vi.advanceTimersByTime(300_000);
+  expect(regions.getCachedNoticeRegions([service('R1')]).size).toBe(0);
+  expect(regions.mergeNoticeRegions([service('R1')], regions.getCachedNoticeRegions([service('R1')], true), true)[0].allowedRegions).toEqual(['서울특별시']);
   await regions.loadNoticeRegions([service('R1')], signal);
   expect(fetcher).toHaveBeenCalledTimes(3);
 });

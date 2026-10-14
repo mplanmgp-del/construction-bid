@@ -12,15 +12,16 @@ const count = (page?: CompanyIndexedPage<unknown>) => {
   return value == null ? '-' : `${number(value)}건`;
 };
 
-export function CompanyIndexedRecords({ history, onAwardPage, onContractPage, onOpening }: {
+export function CompanyIndexedRecords({ history, onAwardPage, onContractPage, onOpening, showAwards = true }: {
   history: CompanyHistory;
+  showAwards?: boolean;
   onAwardPage: (page: number) => void;
   onContractPage: (page: number) => void;
   onOpening: (row: CompanyParticipation, button: HTMLButtonElement) => void;
 }) {
   const awards = history.awards, contracts = history.contracts;
   return <div className="company-indexed-records">
-    <section className="company-indexed-section company-indexed-awards panel" aria-label="수집된 참여 중 낙찰">
+    {showAwards && <section className="company-indexed-section company-indexed-awards panel" aria-label="수집된 참여 중 낙찰">
       <header className="company-section-heading"><div><span className="company-indexed-label"><Trophy size={16} />입찰 결과</span><h2>수집된 참여 중 낙찰 <span>{count(awards)}</span></h2><p>공식 참여 기록에서 낙찰이 확인된 이력입니다. 전체 최종낙찰 이력과 범위가 다를 수 있습니다.</p></div></header>
       <SourceCoverage page={awards} basis="개찰일" />
       {awards?.items.length ? <>
@@ -28,7 +29,7 @@ export function CompanyIndexedRecords({ history, onAwardPage, onContractPage, on
         <div className="company-history-mobile">{awards.items.map(row => <article key={row.id}><div><span>{row.type} · {day(row.openingAt)}</span><span className="company-outcome is-won">낙찰 확인</span></div><AwardTitle row={row} /><p>{row.agency || '-'}</p><dl><div><dt>낙찰금액</dt><dd>{money(row.winningAmount)}</dd></div><div><dt>계약방법</dt><dd>{row.method || '-'}</dd></div></dl>{row.number && <button className="company-opening-trigger" onClick={event => onOpening(row, event.currentTarget)}><ListOrdered size={14} />투찰업체·순위 보기</button>}</article>)}</div>
       </> : <EmptySource page={awards} subject="낙찰" />}
       <IndexedPagination page={awards} name="수집된 낙찰" onPage={onAwardPage} />
-    </section>
+    </section>}
 
     <section className="company-indexed-section company-indexed-contracts panel" aria-label="계약 이력">
       <header className="company-section-heading"><div><span className="company-indexed-label"><FileCheck2 size={16} />계약 정보</span><h2>계약 이력 <span>{count(contracts)}</span></h2><p>수의계약을 포함한 공식 계약 기록입니다. 계약 건수를 입찰 낙찰 건수에 더하지 않습니다.</p></div></header>
