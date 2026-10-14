@@ -1,4 +1,5 @@
 import type { CompanyProfile } from './types';
+import { isOptionalBusinessNumber, normalizeBusinessNumber } from './company-profile';
 
 export const STORAGE_KEY = 'construction-bid.prototype.v1';
 export interface PrototypeState {
@@ -23,6 +24,7 @@ function isProfile(value: unknown): value is CompanyProfile {
   if (!value || typeof value !== 'object') return false;
   const profile = value as Record<string, unknown>;
   return ['id', 'companyName', 'province', 'district', 'address', 'contactName', 'email'].every(key => typeof profile[key] === 'string')
+    && isOptionalBusinessNumber(profile.businessNumber)
     && Array.isArray(profile.licenses) && profile.licenses.every(license => typeof license === 'string');
 }
 
@@ -34,7 +36,9 @@ export function loadPrototypeState(defaultProfiles: CompanyProfile[], storage?: 
     const saved = JSON.parse(raw);
     if (saved.version !== 1 || !Array.isArray(saved.profiles) || !saved.profiles.every(isProfile)) throw new Error('invalid state');
     const profiles = defaultProfiles.map(profile => saved.profiles.find((item: CompanyProfile) => item.id === profile.id) ?? profile)
-      .map(profile => ({ ...profile, licenses: [...profile.licenses] }));
+      .map(profile => ({ ...profile, licenses: [...profile.licenses],
+        ...(profile.businessNumber === undefined ? {} : { businessNumber: normalizeBusinessNumber(profile.businessNumber)! }),
+      }));
     const bookmarks: PrototypeState['bookmarks'] = {};
     const preferences: PrototypeState['preferences'] = {};
     for (const profile of profiles) {
@@ -52,6 +56,13 @@ export function loadPrototypeState(defaultProfiles: CompanyProfile[], storage?: 
 }
 
 export function savePrototypeState(state: PrototypeState, storage?: StorageLike): boolean {
-  try { (storage ?? window.localStorage).setItem(STORAGE_KEY, JSON.stringify(state)); return true; }
+  try {
+    if (!state.profiles.every(profile => isOptionalBusinessNumber(profile.businessNumber))) return false;
+    const profiles = state.profiles.map(profile => ({ ...profile,
+      ...(profile.businessNumber === undefined ? {} : { businessNumber: normalizeBusinessNumber(profile.businessNumber)! }),
+    }));
+    (storage ?? window.localStorage).setItem(STORAGE_KEY, JSON.stringify({ ...state, profiles }));
+    return true;
+  }
   catch { return false; }
 }

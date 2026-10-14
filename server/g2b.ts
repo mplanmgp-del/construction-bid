@@ -2,6 +2,8 @@ import type { BidNotice, Category } from '../src/types.ts';
 import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage, G2bNoticeRegions, G2bNoticeRegionsPage, G2bOpeningResult, G2bResultPage, G2bResultSummary } from '../src/g2b-types.ts';
 import { mapDetailSections } from './g2b-detail.ts';
 import { createRelatedLoader } from './g2b-related.ts';
+import { createCompanyLoader } from './g2b-company.ts';
+import { createArchivePageLoader } from './company-archive-page.ts';
 import { startSearchWindows } from '../src/live/start-range.ts';
 import { ProviderQuotaError, providerRetryAfter } from './provider-quota.ts';
 
@@ -387,5 +389,6 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       return { items, totalCount: items.length, page: 1, pageSize: items.length, hasMore: false, fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings };
     });
   }
-  return { notices, startNotices, detail, results, related, resultSummary, participationRegions, noticeRegions };
+  return { notices, startNotices, detail, results, related, resultSummary, participationRegions, noticeRegions,
+    company: createCompanyLoader(request, now), archivePage: createArchivePageLoader(request, now) };
 }

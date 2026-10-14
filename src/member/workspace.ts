@@ -1,5 +1,6 @@
 import type { BidNotice, CompanyProfile } from '../types';
 import type { G2bNoticeDetail } from '../g2b-types';
+import { isOptionalBusinessNumber, normalizeBusinessNumber } from '../company-profile';
 
 export const PREPARATION_STAGES = ['검토중', '준비중', '제출완료(직접확인)', '보류'] as const;
 export interface BidPreparationRecord {
@@ -60,6 +61,7 @@ export function validateWorkspace(value: unknown, userId: string): MemberWorkspa
   const profile = data.profile;
   if (data.version !== 1 || !profile || profile.id !== userId ||
     !['companyName', 'province', 'district', 'address', 'contactName', 'email'].every(key => typeof profile[key as keyof CompanyProfile] === 'string') ||
+    !isOptionalBusinessNumber(profile.businessNumber) ||
     !Array.isArray(profile.licenses) || !profile.licenses.every(item => typeof item === 'string') ||
     !Array.isArray(data.bookmarks) || !data.bookmarks.every(item => typeof item === 'string') ||
     typeof data.preferences?.autoRegion !== 'boolean' || !data.preparations || typeof data.preparations !== 'object' || Array.isArray(data.preparations) ||
@@ -69,7 +71,10 @@ export function validateWorkspace(value: unknown, userId: string): MemberWorkspa
   const noticeSnapshots = data.noticeSnapshots && typeof data.noticeSnapshots === 'object' && !Array.isArray(data.noticeSnapshots)
     ? Object.fromEntries(Object.entries(data.noticeSnapshots).filter(([key, item]) => validNoticeSnapshot(item) && item.id === key))
     : {};
-  return structuredClone({ ...data, noticeSnapshots });
+  return structuredClone({ ...data, profile: {
+    ...profile,
+    ...(profile.businessNumber === undefined ? {} : { businessNumber: normalizeBusinessNumber(profile.businessNumber)! }),
+  }, noticeSnapshots });
 }
 
 /** One controller belongs to one authenticated user; dispose it on account changes. */

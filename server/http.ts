@@ -1,6 +1,8 @@
 import { createG2bClient, G2bError, parseSearch } from './g2b.ts';
 import { loadPublicSearch } from './public-search-cache.ts';
 import { ProviderQuotaError } from './provider-quota.ts';
+import { CompanyLookupError } from './g2b-company.ts';
+import { createCompanyArchiveReader, parseCompanyHistoryQuery } from './company-history.ts';
 import type { G2bApiError, G2bNoticeRegionsPage } from '../src/g2b-types.ts';
 
 type Client = ReturnType<typeof createG2bClient>;
@@ -15,6 +17,36 @@ function serverClient(force = false) {
 
 export async function handleG2bRequest(path: string, params: URLSearchParams, api: Client = serverClient(params.get('refresh') === '1')): Promise<{ status: number; body: unknown; cacheStatus?: string; retryAfterSeconds?: number }> {
   try {
+    if (path === '/api/companies' || path === '/api/company-history') {
+      const archive = createCompanyArchiveReader({ url: process.env.VITE_SUPABASE_URL, key: process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY });
+      if (path === '/api/company-history') {
+        const query = parseCompanyHistoryQuery(params);
+        const body = await archive.history(query);
+        return { status: 200, body };
+      }
+      const q = params.get('q')?.trim() || '';
+      const bizno = q.replace(/[\s-]/g, '');
+      if (/^\d{10}$/.test(bizno)) {
+        try {
+          const result = await api.company(bizno);
+          if (result.company) return { status: 200, body: { items: [result.company], message: result.warnings.join(' ') } };
+          const stored = await archive.company(bizno);
+          return { status: 200, body: { items: stored ? [stored] : [], message: stored ? '현재 등록정보가 없어 공개 이력에 기록된 업체명을 표시합니다.' : '' } };
+        } catch (error) {
+          let stored = null;
+          try { stored = await archive.company(bizno); } catch { /* Preserve the original provider error. */ }
+          if (!stored) throw error;
+          return { status: 200, body: { items: [stored], message: '최신 업체 등록정보를 확인하지 못해 저장된 공개 업체 정보를 표시합니다.' } };
+        }
+      }
+      const items = await archive.search(q);
+      return { status: 200, body: { items, message: '수집된 공개 업체명에서 검색합니다. 목록에 없는 업체는 사업자등록번호 10자리로 직접 조회해 주세요.' } };
+    }
+    if (path === '/api/archive-page') {
+      const day = params.get('day') || '';
+      const query = parseSearch(new URLSearchParams({ type: params.get('type') || '', from: day, to: day, page: params.get('page') || '1' }), 1);
+      return { status: 200, body: await api.archivePage({ type: query.type, day, page: query.page }) };
+    }
     if (path === '/api/notice-regions') {
       const type = params.get('type');
       const values = (params.get('notices') || '').split(',');
@@ -56,7 +88,7 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
     }
     return { status: 404, body: { error: { code: 'NOT_FOUND', message: '존재하지 않는 API입니다.' } } };
   } catch (error) {
-    const known = error instanceof G2bError || error instanceof ProviderQuotaError ? error : new G2bError(500, 'INTERNAL_ERROR', '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    const known = error instanceof G2bError || error instanceof ProviderQuotaError || error instanceof CompanyLookupError ? error : new G2bError(500, 'INTERNAL_ERROR', '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     const retryAfterSeconds = known instanceof ProviderQuotaError ? known.retryAfterSeconds : undefined;
     const body: G2bApiError = { error: { code: known.code, message: known.message, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) } };
     return { status: known.status, body, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) };

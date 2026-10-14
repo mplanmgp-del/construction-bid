@@ -8,6 +8,7 @@ export interface RegionAssessment { status: RegionStatus; reason: string; }
 export interface CompanyProfile {
   id: string; companyName: string; province: string; district: string;
   address: string; licenses: string[]; contactName: string; email: string;
+  businessNumber?: string;
 }
 export interface BidNotice {
   id: string; number: string; revision: string; title: string; agency: string;

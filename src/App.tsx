@@ -18,7 +18,7 @@ import type { G2bNoticeDetail } from './g2b-types';
 import { useLiveNotices } from './live/useLiveNotices';
 import { useNoticeRegions } from './live/useNoticeRegions';
 import { LiveSearch } from './live/LiveSearch';
-import { PublicResults } from './live/PublicResults';
+import { CompanyDashboard } from './company/CompanyDashboard';
 import { currentNotice, koreanToday, mergeById } from './live/client';
 
 type View = 'notices' | 'bookmarks' | 'profile' | 'results';
@@ -34,13 +34,13 @@ function saveDownload(blob: Blob, filename: string) {
 export default function App() {
   const [mode, setMode] = useState<'live' | 'demo'>('live');
   const member = useMemberWorkspace();
-  const live = useLiveNotices(mode === 'live');
+  const [view, setView] = useState<View>(() => window.location.hash === '#my-bids' ? 'results' : 'notices');
+  const live = useLiveNotices(mode === 'live' && (view === 'notices' || view === 'bookmarks'));
   const [loaded] = useState(() => loadPrototypeState(DEMO_PROFILES));
   const [state, setState] = useState<PrototypeState>(loaded.state);
   const [storageWarning, setStorageWarning] = useState(loaded.warning);
   const guestProfile: CompanyProfile = { id: 'guest', companyName: '업체 정보 미등록', province: '', district: '', address: '', licenses: [], contactName: '', email: '' };
   const profile = mode === 'live' ? member.workspace?.profile ?? guestProfile : state.profiles.find(item => item.id === state.activeProfileId) ?? state.profiles[0];
-  const [view, setView] = useState<View>('notices');
   const [filters, setFilters] = useState<SearchFilters>(() => ({ ...DEFAULT_FILTERS, category: '전체', status: '전체', autoRegion: false }));
   const [searchInput, setSearchInput] = useState(live.query.keyword);
   const [page, setPage] = useState(1);
@@ -207,14 +207,14 @@ export default function App() {
   return <div className="app-shell">
     <header className="app-header"><div className="header-inner">
       <button className="brand" onClick={() => navigate('notices')} aria-label="공사입찰 검색 홈"><span className="brand-mark"><span /><span /><span /></span><span>공사입찰 <b>검색</b></span></button>
-      <nav className="main-nav" aria-label="주 메뉴"><button className={view === 'notices' ? 'active' : ''} onClick={() => navigate('notices')}><ClipboardList size={17} /><span>입찰공고</span></button><button className={view === 'bookmarks' ? 'active' : ''} onClick={() => navigate('bookmarks')}><Bookmark size={17} /><span>관심공고</span>{bookmarks.length > 0 && <span className="nav-count">{bookmarks.length}</span>}</button><button className={view === 'profile' ? 'active' : ''} onClick={() => navigate('profile')}><UserRound size={17} /><span>내 정보</span></button>{mode === 'live' && <button className={view === 'results' ? 'active' : ''} onClick={() => navigate('results')}><FileSearch size={17} /><span>개찰결과</span></button>}</nav>
+      <nav className="main-nav" aria-label="주 메뉴"><button className={view === 'notices' ? 'active' : ''} onClick={() => navigate('notices')}><ClipboardList size={17} /><span>입찰공고</span></button><button className={view === 'bookmarks' ? 'active' : ''} onClick={() => navigate('bookmarks')}><Bookmark size={17} /><span>관심공고</span>{bookmarks.length > 0 && <span className="nav-count">{bookmarks.length}</span>}</button><button className={view === 'profile' ? 'active' : ''} onClick={() => navigate('profile')}><UserRound size={17} /><span>내 정보</span></button>{mode === 'live' && <button className={view === 'results' ? 'active' : ''} onClick={() => navigate('results')}><FileSearch size={17} /><span>MY입찰관리</span></button>}</nav>
       <div className="header-account">{mode === 'live' ? <button className="button button-secondary" onClick={() => navigate('profile')}>{member.user ? '내 계정' : '로그인'}</button> : <div className="account-select"><span className="account-avatar">{profile.companyName[0] || '업'}</span><label className="sr-only" htmlFor="demo-profile-switch">테스트 업체 전환</label><select id="demo-profile-switch" value={profile.id} onChange={event => switchProfile(event.target.value)}>{state.profiles.map(item => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select><ChevronDown size={15} /></div>}</div>
     </div></header>
 
     <main className="main-container">
       {mode === 'demo' && storageWarning && <div className="storage-warning" role="status"><Info size={16} />{storageWarning}<button className="icon-button" onClick={() => setStorageWarning(null)} aria-label="안내 닫기"><X size={15} /></button></div>}
       {mode === 'live' && <div className="live-member-status" role="status">{member.user ? `회원 저장: ${member.saveStatus === 'saved' ? '클라우드 저장 완료' : member.saveStatus === 'saving' ? '저장 중' : member.saveStatus === 'error' ? '저장 실패 — 내 정보에서 재시도' : member.loading ? '불러오는 중' : '준비'}` : '로그인하면 내 업체·관심공고·투찰 준비 기록을 기기 간에 이어서 사용할 수 있습니다.'}</div>}
-      {view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <PublicResults /> : <>
+      {view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
         <section className="search-intro"><div><div className="eyebrow"><span className="eyebrow-line" />공공입찰을 더 명확하게</div><h1>{view === 'bookmarks' ? '관심공고' : '철거·공사 입찰공고'}</h1><p>{view === 'bookmarks' ? '저장한 공고를 모아보고, 다음 입찰을 준비하세요.' : '우리 업체의 지역조건에 맞는 공고를 한곳에서 확인하세요.'}</p></div><div className="intro-note"><span className="small-dot" />{mode === 'live' ? '나라장터 공공데이터 연동' : '나라장터 공고 · 예시 데이터'}<span className="intro-date">{mode === 'live' ? `한국시간 ${koreanToday().replaceAll('-', '.')}` : `예시 기준일 ${DEMO_TODAY.replaceAll('-', '.')}`}</span></div></section>
 
         <section className="company-strip" aria-label="내 업체 지역 자동필터"><div className="company-strip-info"><span className="company-icon"><Building2 size={20} /></span><div><div className="company-name">{profile.companyName || '업체 정보 미등록'}<span>내 업체</span></div><div className="company-address"><MapPin size={12} />본점 {profile.province} {profile.district}</div></div><button className="company-edit" aria-label="업체 정보 수정" onClick={() => navigate('profile')}><Settings2 size={14} /><span>업체 정보 수정</span></button></div><div className="auto-filter-control"><div><label className="switch-label"><input type="checkbox" checked={filters.autoRegion} onChange={event => { updateFilter('autoRegion', event.target.checked); updateFilter('regionView', 'all'); }} /><span className="switch-track" /><strong>내 지역 조건에 맞는 공고</strong></label><p>{filters.autoRegion ? '내 업체 지역과 일치하거나 전국인 공고만 표시합니다. 미확인 공고는 자동필터를 끄고 원문을 확인해 주세요.' : '지역조건에 관계없이 모든 공고를 표시하고 있습니다.'}</p></div><span className="filter-state">{filters.autoRegion ? '자동필터 ON' : '자동필터 OFF'}</span></div></section>

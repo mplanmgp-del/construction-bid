@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Building2, Check, Info, MapPin, RotateCcw, Save, ShieldCheck, UserRound } from 'lucide-react';
 import { DISTRICTS, LICENSES, PROVINCES } from '../data';
 import type { CompanyProfile } from '../types';
+import { formatBusinessNumber, normalizeBusinessNumber } from '../company-profile';
 
 interface ProfileViewProps {
   profile: CompanyProfile;
@@ -9,15 +10,17 @@ interface ProfileViewProps {
   persistence?: 'browser' | 'cloud';
 }
 
-type ProfileErrors = Partial<Record<'companyName' | 'email', string>>;
+type ProfileErrors = Partial<Record<'companyName' | 'businessNumber' | 'email', string>>;
 
 function copyProfile(profile: CompanyProfile): CompanyProfile {
-  return { ...profile, licenses: [...profile.licenses] };
+  return { ...profile, businessNumber: formatBusinessNumber(profile.businessNumber), licenses: [...profile.licenses] };
 }
 
 function profileHasChanges(profile: CompanyProfile, draft: CompanyProfile): boolean {
   return (['companyName', 'province', 'district', 'address', 'contactName', 'email'] as const)
     .some((key) => profile[key] !== draft[key])
+    || (normalizeBusinessNumber(profile.businessNumber ?? '') ?? profile.businessNumber)
+      !== (normalizeBusinessNumber(draft.businessNumber ?? '') ?? draft.businessNumber)
     || [...profile.licenses].sort().join('\u0000') !== [...draft.licenses].sort().join('\u0000');
 }
 
@@ -28,6 +31,7 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
   const [feedback, setFeedback] = useState('');
   const previousProfileId = useRef(profile.id);
   const companyInput = useRef<HTMLInputElement>(null);
+  const businessNumberInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -46,7 +50,7 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
   const updateField = (field: Exclude<keyof CompanyProfile, 'id' | 'licenses'>, value: string) => {
     setDraft((current) => ({ ...current, [field]: value }));
     setFeedback('');
-    if (field === 'companyName' || field === 'email') {
+    if (field === 'companyName' || field === 'businessNumber' || field === 'email') {
       setErrors((current) => ({ ...current, [field]: undefined }));
     }
   };
@@ -71,14 +75,17 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
     event.preventDefault();
     const nextErrors: ProfileErrors = {};
     const companyName = draft.companyName.trim();
+    const businessNumber = normalizeBusinessNumber(draft.businessNumber ?? '');
     const email = draft.email.trim();
     if (!companyName) nextErrors.companyName = '업체명을 입력해주세요.';
+    if (businessNumber === null) nextErrors.businessNumber = '사업자등록번호 10자리를 입력해주세요. 예: 123-45-67890';
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       nextErrors.email = '이메일 주소를 확인해주세요. 예: name@example.com';
     }
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       if (nextErrors.companyName) companyInput.current?.focus();
+      else if (nextErrors.businessNumber) businessNumberInput.current?.focus();
       else emailInput.current?.focus();
       setFeedback('입력 내용을 확인한 후 다시 저장해주세요.');
       return;
@@ -86,6 +93,7 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
     const savedProfile = {
       ...draft,
       companyName,
+      businessNumber: businessNumber ?? '',
       email,
       address: draft.address.trim(),
       contactName: draft.contactName.trim(),
@@ -125,6 +133,17 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
                   onChange={(event) => updateField('companyName', event.target.value)}
                   aria-invalid={Boolean(errors.companyName)} aria-describedby={errors.companyName ? `${id}-company-error` : undefined} required />
                 {errors.companyName && <p id={`${id}-company-error`} className="profile-field-error">{errors.companyName}</p>}
+              </div>
+              <div className="profile-field profile-field-full">
+                <label className="field-label" htmlFor={`${id}-business-number`}>사업자등록번호 <span className="profile-optional">선택</span></label>
+                <input ref={businessNumberInput} id={`${id}-business-number`} className="field" value={draft.businessNumber ?? ''}
+                  inputMode="numeric" maxLength={12} placeholder="123-45-67890"
+                  onChange={(event) => updateField('businessNumber', event.target.value)}
+                  onBlur={() => setDraft((current) => ({ ...current, businessNumber: formatBusinessNumber(current.businessNumber) }))}
+                  aria-invalid={Boolean(errors.businessNumber)}
+                  aria-describedby={`${id}-business-number-help${errors.businessNumber ? ` ${id}-business-number-error` : ''}`} />
+                <p id={`${id}-business-number-help`} className="profile-field-help">MY입찰관리에서 우리 업체의 공개 입찰 이력을 조회할 때 사용합니다.</p>
+                {errors.businessNumber && <p id={`${id}-business-number-error`} className="profile-field-error">{errors.businessNumber}</p>}
               </div>
               <div className="profile-field">
                 <label className="field-label" htmlFor={`${id}-province`}>본점 소재지 · 시·도</label>

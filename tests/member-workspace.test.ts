@@ -28,6 +28,28 @@ describe('member workspace isolation and persistence', () => {
     expect(() => validateWorkspace({ ...emptyMemberWorkspace('a'), bookmarks: [1] }, 'a')).toThrow();
     expect(() => validateWorkspace({ ...emptyMemberWorkspace('a'), preparations: { id: { stage: '실제제출됨', note: '', updatedAt: '' } } }, 'a')).toThrow();
   });
+  it('accepts old profiles without a business number but rejects invalid supplied values', () => {
+    const oldWorkspace = emptyMemberWorkspace('a');
+    expect(validateWorkspace(oldWorkspace, 'a').profile.businessNumber).toBeUndefined();
+    for (const businessNumber of [null, 1234567890, '123', '123a4567890']) {
+      expect(() => validateWorkspace({ ...oldWorkspace, profile: { ...oldWorkspace.profile, businessNumber } }, 'a')).toThrow('Invalid workspace');
+    }
+  });
+  it('saves and restores a normalized business number without changing the member profile or other account', async () => {
+    let saved: MemberWorkspace | null = null;
+    const repository = repo();
+    repository.save = vi.fn(async (_userId, data) => { saved = structuredClone(data); return 'saved'; });
+    const controller = new MemberWorkspaceController('a', 'a@example.com', repository, storage());
+    await controller.load();
+    controller.update(current => ({ ...current, profile: { ...current.profile, companyName: '서울 업체', province: '서울특별시', licenses: ['철거'], businessNumber: '001-02-00003' } }));
+    expect(await controller.flush()).toBe(true);
+    expect(saved!.profile).toMatchObject({ id: 'a', companyName: '서울 업체', province: '서울특별시', licenses: ['철거'], email: 'a@example.com', businessNumber: '0010200003' });
+    repository.load = vi.fn(async () => ({ data: saved!, updatedAt: 'saved' }));
+    const restored = new MemberWorkspaceController('a', '', repository, storage());
+    await restored.load();
+    expect(restored.getSnapshot().data?.profile.businessNumber).toBe('0010200003');
+    expect(() => validateWorkspace(saved, 'b')).toThrow('Invalid workspace');
+  });
   it('keeps usable saved notices and rejects malformed snapshots that would break filters', () => {
     const notice = NOTICES[0];
     const source = { ...emptyMemberWorkspace('a'), noticeSnapshots: { [notice.id]: notice, malformed: { id: 'malformed', title: 'Broken', documents: [] } } };
