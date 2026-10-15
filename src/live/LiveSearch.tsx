@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
-import { ArrowRight, RefreshCw, Search, X } from 'lucide-react';
+import { ArrowRight, Search, X } from 'lucide-react';
 import { dateRangeError } from './client';
 import type { NoticeQuery } from './useLiveNotices';
 
-export function LiveSearch({ query, loading, refreshBlocked = false, onSearch, onRefresh }: { query: NoticeQuery; loading: boolean; refreshBlocked?: boolean; onSearch: (query: NoticeQuery) => void; onRefresh: () => void }) {
+export function LiveSearch({ query, loading, refreshBlocked = false, onSearch }: { query: NoticeQuery; loading: boolean; refreshBlocked?: boolean; onSearch: (query: NoticeQuery) => void; onRefresh: () => void }) {
   const [draft, setDraft] = useState(query);
   const [error, setError] = useState('');
   const keywordInput = useRef<HTMLInputElement>(null);
@@ -30,7 +30,6 @@ export function LiveSearch({ query, loading, refreshBlocked = false, onSearch, o
         <label className="notice-search-type">업무 구분<select name="type" value={draft.type} onChange={event => { setDraft({ ...draft, type: event.target.value as NoticeQuery['type'] }); setError(''); }}><option>공사·용역</option><option>공사</option><option>용역</option></select></label>
         <label>개시 기간 시작<input name="from" aria-label="입찰 개시 기간 시작" type="date" required value={draft.from} onChange={event => { setDraft({ ...draft, from: event.target.value }); setError(''); }} /></label>
         <label>개시 기간 종료<input name="to" aria-label="입찰 개시 기간 종료" type="date" required value={draft.to} onChange={event => { setDraft({ ...draft, to: event.target.value }); setError(''); }} /></label>
-        <button type="button" className="button button-secondary notice-search-refresh" disabled={loading || !query.keyword.trim() || refreshBlocked || changed} title={changed ? '변경한 조건은 검색 버튼으로 조회해 주세요.' : '현재 검색 결과를 최신 자료로 갱신합니다.'} onClick={onRefresh}><RefreshCw size={15} />새로고침</button>
       </div>
     </form>
     {error && <p id="notice-search-error" className="live-error" role="alert">{error}</p>}
