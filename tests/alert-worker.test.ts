@@ -105,5 +105,3 @@ describe('official registration and modification polling',()=>{
     expect(await runAlertWorker(store,{now})).toMatchObject({skipped:true});
   });
 });
-
-

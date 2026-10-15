@@ -1,4 +1,4 @@
-import type { BidNotice, Category, CompanyProfile, SearchFilters } from './types';
+import type { BidNotice, Category, CompanyProfile, SearchFilters } from './types.ts';
 
 export const DEMO_TODAY = '2026-10-12';
 

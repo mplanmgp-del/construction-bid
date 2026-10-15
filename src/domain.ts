@@ -1,7 +1,7 @@
-import type { BidNotice, CompanyProfile, RegionAssessment, SearchFilters, SearchRegion } from './types';
-import { DEMO_TODAY, DISTRICTS } from './data';
-import { noticeState } from './notice-status';
-import { canonicalProvince, canonicalSearchProvince, normalizeSearchRegion, selectedRegions, selectedStatuses } from './search-filters';
+import type { BidNotice, CompanyProfile, RegionAssessment, SearchFilters, SearchRegion } from './types.ts';
+import { DEMO_TODAY, DISTRICTS } from './data.ts';
+import { noticeState } from './notice-status.ts';
+import { canonicalProvince, canonicalSearchProvince, normalizeSearchRegion, selectedRegions, selectedStatuses } from './search-filters.ts';
 
 const cleanText = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ');
 const canonicalLicense = (value: string) => cleanText(value.replace(/[ㆍ・ᆞ]/g, '·')).replace(/\/\d+$/, '').replace(/\s+/g, '');

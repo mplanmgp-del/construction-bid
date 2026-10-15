@@ -1,4 +1,4 @@
-import type { BidNotice, NoticeStatus } from './types';
+import type { BidNotice, NoticeStatus } from './types.ts';
 
 export const CLOSING_SOON_MS = 24 * 60 * 60 * 1000;
 type NoticeState = { label: NoticeStatus | '-'; tone: 'opened' | 'active' | 'urgent' | 'scheduled' | 'unknown'; description: string };

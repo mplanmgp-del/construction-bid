@@ -1,7 +1,7 @@
-import { CATEGORIES, type CompanyProfile } from '../types';
-import { assessRegion, assessSearchRegions } from '../domain';
-import { canonicalProvince } from '../search-filters';
-import { DEFAULT_ALERT_SETTINGS, type AlertNotice, type AlertSettings, type AlertMatch } from './types';
+import { CATEGORIES, type CompanyProfile } from '../types.ts';
+import { assessRegion, assessSearchRegions } from '../domain.ts';
+import { canonicalProvince } from '../search-filters.ts';
+import { DEFAULT_ALERT_SETTINGS, type AlertNotice, type AlertSettings, type AlertMatch } from './types.ts';
 
 const clean = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ');
 const canonical = (value: string) => clean(value).toLowerCase();

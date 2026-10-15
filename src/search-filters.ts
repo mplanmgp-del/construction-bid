@@ -1,4 +1,4 @@
-import { NOTICE_STATUSES, type NoticeStatus, type SearchFilters, type SearchRegion } from './types';
+import { NOTICE_STATUSES, type NoticeStatus, type SearchFilters, type SearchRegion } from './types.ts';
 
 const provinceAliases: Record<string, string> = {
   서울: '서울특별시', 서울특별시: '서울특별시', 부산: '부산광역시', 부산광역시: '부산광역시',

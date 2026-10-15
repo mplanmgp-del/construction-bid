@@ -1,4 +1,4 @@
-import type { BidNotice, Category, CompanyProfile } from '../types';
+import type { BidNotice, Category, CompanyProfile } from '../types.ts';
 
 export interface AlertFilter {
   keywords: string[];
