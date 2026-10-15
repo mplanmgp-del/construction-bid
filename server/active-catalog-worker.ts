@@ -143,7 +143,7 @@ function reuseParticipantConditions(notice: AlertNotice, cached?: AlertNotice): 
   };
 }
 
-/** A durable claim gives verification an initial lane before bounded source discovery. */
+/** Discover live changes first, then share the remaining bounded work with verification and history. */
 export async function runActiveCatalogWorker(store: ActiveCatalogStore, options: {
   provider?: ActiveCatalogProvider; now?: number; maxRequests?: number; budgetMs?: number; clock?: () => number;
 } = {}) {
@@ -253,17 +253,13 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   };
   try {
     if (!claim.scopeVersion) throw new Error('공고 알림 조건의 수집 범위를 확인하지 못했습니다.');
-    // Ready verification cannot be starved by a slow 999-row source response.
-    await parallel(claim.verify.slice(0, 4), verifyIdentity);
-    await flushGroups();
     const failedSources: NonNullable<ActiveCatalogCommit['failedSources']> = [];
     // The public deadline index is shared across search and alerts. Its source
     // coverage must never depend on whether an individual has enabled alerts.
-    const liveSources = claim.sources.filter(job => job.kind !== 'history'), historySources = claim.sources.filter(job => job.kind === 'history');
-    // Every due live registration/modification window keeps the ten-minute cadence.
-    // Historical discovery follows in at most two lanes, bounded by the same clock and request budget.
-    const jobs = [...liveSources, ...historySources.slice(0, 2)];
-    await parallel(jobs, async (job: ActiveCatalogSourceJob) => {
+    const liveSources = claim.sources.filter(job => job.kind !== 'history');
+    const historySources = claim.sources.filter(job => job.kind === 'history')
+      .sort((a, b) => Date.parse(b.from) - Date.parse(a.from));
+    const discoverSources = async (jobs: ActiveCatalogSourceJob[]) => parallel(jobs, async (job: ActiveCatalogSourceJob) => {
       try {
         const suffix = job.type === '공사' ? 'Cnstwk' : 'Servc';
         const params: Record<string, string> = {
@@ -313,6 +309,13 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
         else sources++;
       } catch (error) { if (!(error instanceof WorkerBudgetExhausted)) failedSources.push({ id: job.id, error: safeError(error), ...(error instanceof SourceSnapshotChanged ? { restart: true } : {}) }); }
     });
+    // Every due live registration/modification window precedes the backlog.
+    await discoverSources(liveSources);
+    // Ready verification cannot be starved by a slow historical source response.
+    await parallel(claim.verify.slice(0, 4), verifyIdentity);
+    await flushGroups();
+    // Historical discovery uses at most two recent windows, with the same clock and request budget.
+    await discoverSources(historySources.slice(0, 2));
     if (failedSources.length) {
       warnings.push(...failedSources.map(item => item.error));
       // Discovery failure cannot acknowledge its source page or prevent an

@@ -248,6 +248,76 @@ describe('all-age active catalog collection', () => {
     ]);
   });
 
+  it('discovers all live windows before prioritized verification and the two newest historical windows', async () => {
+    const identities = Array.from({ length: 6 }, (_, index) => ({ type: '공사' as const, number: `R26STAGE${index}` }));
+    const db = store([
+      source({ id: 'old-history' }),
+      source({ id: 'registered-construction', kind: 'registered' }),
+      source({ id: 'september-history', from: '2026-09-01T00:00:00+09:00', to: '2026-09-30T23:59:00+09:00' }),
+      source({ id: 'modified-construction', kind: 'modified' }),
+      source({ id: 'registered-service', kind: 'registered', type: '용역' }),
+      source({ id: 'october-history', from: '2026-10-01T00:00:00+09:00', to: '2026-10-15T15:30:00+09:00' }),
+      source({ id: 'modified-service', kind: 'modified', type: '용역' }),
+    ], identities, []);
+    const calls: string[] = [];
+    const provider: ActiveCatalogProvider = async (operation, params) => {
+      calls.push(params.inqryDiv === '2' ? `verify:${params.bidNtceNo}`
+        : operation.endsWith('PPSSrch') ? `history:${params.inqryBgnDt}` : `${operation}:${params.inqryDiv}`);
+      return params.inqryDiv === '2'
+        ? { items: [row({ bidNtceNo: params.bidNtceNo, ntceKindNm: '취소공고' })], totalCount: 1 }
+        : { items: [], totalCount: 0 };
+    };
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(calls).toEqual([
+      'getBidPblancListInfoCnstwk:1', 'getBidPblancListInfoCnstwk:3',
+      'getBidPblancListInfoServc:1', 'getBidPblancListInfoServc:3',
+      'verify:R26STAGE0', 'verify:R26STAGE1', 'verify:R26STAGE2', 'verify:R26STAGE3',
+      'history:202610010000', 'history:202609010000', 'verify:R26STAGE4', 'verify:R26STAGE5',
+    ]);
+    expect(result).toMatchObject({ ok: true, sources: 6, searchGroups: 6, requests: 12 });
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id)).toEqual([
+      'registered-construction', 'modified-construction', 'registered-service', 'modified-service', 'october-history', 'september-history',
+    ]);
+  });
+
+  it('leaves verification and old source windows unacknowledged when the live windows use the request budget', async () => {
+    const db = store([source(), source({ id: 'registered-construction', kind: 'registered' }),
+      source({ id: 'modified-construction', kind: 'modified' }), source({ id: 'registered-service', kind: 'registered', type: '용역' }),
+      source({ id: 'modified-service', kind: 'modified', type: '용역' })], [{ type: '공사', number: 'R26BK01359594' }], []);
+    const provider = vi.fn<ActiveCatalogProvider>(async (_operation, params) => params.inqryDiv === '2'
+      ? { items: [row({ ntceKindNm: '취소공고' })], totalCount: 1 } : { items: [], totalCount: 0 });
+    const result = await runActiveCatalogWorker(db, { provider, now, maxRequests: 4 });
+    expect(provider.mock.calls.map(([operation, params]) => [operation, params.inqryDiv])).toEqual([
+      ['getBidPblancListInfoCnstwk', '1'], ['getBidPblancListInfoCnstwk', '3'],
+      ['getBidPblancListInfoServc', '1'], ['getBidPblancListInfoServc', '3'],
+    ]);
+    expect(result).toMatchObject({ ok: true, sources: 4, searchGroups: 0, requests: 4 });
+    expect(db.publishSearchVerified).not.toHaveBeenCalled();
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id)).toEqual([
+      'registered-construction', 'modified-construction', 'registered-service', 'modified-service',
+    ]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedSources ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedGroups ?? [])).toEqual([]);
+    expect(db.finish).toHaveBeenCalledWith('lease', {});
+  });
+
+  it('does not fetch historical pages or publish backlog after live discovery exhausts the provider quota', async () => {
+    const db = store([source(), source({ id: 'registered-construction', kind: 'registered' }),
+      source({ id: 'modified-construction', kind: 'modified' }), source({ id: 'registered-service', kind: 'registered', type: '용역' }),
+      source({ id: 'modified-service', kind: 'modified', type: '용역' })], [{ type: '공사', number: 'R26BK01359594' }], []);
+    const provider = vi.fn<ActiveCatalogProvider>(async () => { throw new ProviderQuotaError(1800); });
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: false, sources: 0, searchGroups: 0, requests: 4 });
+    expect(provider.mock.calls.map(([operation, params]) => [operation, params.inqryDiv])).toEqual([
+      ['getBidPblancListInfoCnstwk', '1'], ['getBidPblancListInfoCnstwk', '3'],
+      ['getBidPblancListInfoServc', '1'], ['getBidPblancListInfoServc', '3'],
+    ]);
+    expect(db.publishSearchVerified).not.toHaveBeenCalled();
+    expect(db.indexUpsert).not.toHaveBeenCalled();
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
+    expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String), retryAfterSeconds: 1800 });
+  });
+
   it('discovers a 1995-posted active notice with a 2099 deadline and no opening date', async () => {
     const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row({ bidClseDt: '2099-03-04 10:00:00' })], totalCount: 1 }));
     const db = store([source()]);
