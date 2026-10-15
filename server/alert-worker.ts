@@ -60,12 +60,12 @@ export async function runAlertWorker(store:AlertStore,{dispatchOnly=false,provid
           checkpoint.catalogDeltaFrom=new Date(Math.max(0,Date.parse(through)-2*60_000)).toISOString();
           checkpoint.catalogDeltaThrough=null;checkpoint.catalogDeltaCursor=null;
           await dispatch();
-          if(claim.catalogCursor!=='__complete__') {
-            const scan=await scanCatalogForAlerts(catalog,provider,claim.rules,claim.catalogCursor??null,commitNotices,deadline,now);
-            checkpoint.catalogCursor=scan.complete&&scan.status?.bootstrapComplete&&scan.status.pendingVerification===0?'__complete__':scan.cursor;
-            checkpoint.coverageFrom=scan.status?.coverageFrom??checkpoint.coverageFrom;
-            if(scan.error)warning=`전체 공고 비교 재시도 대기: ${scan.error}`;
-          }
+          // An unchanged source head can enter the rolling deadline range as the KST day advances.
+          // Recheck this bounded index range each cycle; the membership/version ledger suppresses repeats.
+          const scan=await scanCatalogForAlerts(catalog,provider,claim.rules,claim.catalogCursor==='__complete__'?null:claim.catalogCursor??null,commitNotices,deadline,now);
+          checkpoint.catalogCursor=scan.complete&&scan.status?.bootstrapComplete&&scan.status.pendingVerification===0?'__complete__':scan.cursor;
+          checkpoint.coverageFrom=scan.status?.coverageFrom??checkpoint.coverageFrom;
+          if(scan.error)warning=`공고 마감 범위 비교 재시도 대기: ${scan.error}`;
         }
       } else {
       const end=Math.floor(now/60_000)*60_000;

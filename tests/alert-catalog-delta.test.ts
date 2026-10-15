@@ -53,12 +53,25 @@ describe('catalog live changes before the full historical comparison', () => {
     expect(page).toHaveBeenCalledTimes(1);
     expect(commit.mock.calls.at(-1)?.[1]).toMatchObject({ finish: true, checkpoint: { catalogDeltaFrom: new Date(now - 600000).toISOString(), catalogDeltaThrough: new Date(now).toISOString(), catalogDeltaCursor: null } });
   });
-  it('polls only changes after the historical comparison has finished', async () => {
+  it('rechecks the current rolling deadline range after the baseline comparison has finished', async () => {
     const { store, commit } = harness({ catalogCursor: '__complete__' });
     const page = vi.fn(async (_query: ActiveCatalogPageQuery = {}) => ({ groups: [], nextCursor: null, status: { ...status, bootstrapComplete: true, pendingSources: 0 } }));
     await runAlertWorker(store, { now, provider: vi.fn(), catalog: { page }, deadline: Date.now() + 45000 });
-    expect(page).toHaveBeenCalledTimes(1);
+    expect(page).toHaveBeenCalledTimes(2);
+    expect(page.mock.calls[1][0]).toMatchObject({cursor:null,deadlineFrom:'2026-10-08',deadlineTo:'2026-10-22'});
     expect(commit.mock.calls.at(-1)?.[1]).toMatchObject({ checkpoint: { catalogCursor: '__complete__' } });
+  });
+  it('compares an unchanged head newly entering the seven-day window on the following KST day',async()=>{
+    const tomorrow=Date.parse('2026-10-16T10:00:00+09:00');
+    const {store,commit}=harness({catalogCursor:'__complete__',cursor:new Date(tomorrow-600000).toISOString(),catalogDeltaFrom:new Date(tomorrow-600000).toISOString()});
+    const unchanged=group('ROLLING_WINDOW');unchanged.latest.deadline='2026-10-23T10:00:00+09:00';unchanged.latest.openingAt='2026-10-23T11:00:00+09:00';
+    const page=vi.fn(async(query:ActiveCatalogPageQuery={})=>({groups:query.changedSince?[]:[unchanged],nextCursor:null,status:{...status,bootstrapComplete:true,pendingSources:0}}));
+    await runAlertWorker(store,{now:tomorrow,provider:vi.fn(),catalog:{page},deadline:Date.now()+45000});
+    expect(page.mock.calls[0][0]).toMatchObject({changedSince:new Date(tomorrow-600000).toISOString()});
+    expect(page.mock.calls[1]?.[0]).toMatchObject({cursor:null,deadlineFrom:'2026-10-09',deadlineTo:'2026-10-23'});
+    const observations=commit.mock.calls.flatMap(call=>(call[1] as {observations?:{notice:AlertNotice}[]}).observations??[]);
+    expect(observations.map(item=>item.notice.number)).toEqual(['ROLLING_WINDOW']);
+    expect(commit.mock.calls.at(-1)?.[1]).toMatchObject({checkpoint:{catalogCursor:'__complete__'}});
   });
   it('records completed baseline comparison only after historical discovery and verification are complete', async () => {
     const { store, commit } = harness();
