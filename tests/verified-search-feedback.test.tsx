@@ -49,3 +49,18 @@ it('keeps focused coverage pending until source and participant checks complete'
   expect(html).toContain('조건 확인 대기 67건');
   expect(html).not.toContain('관심 분야 투찰 가능 공고 확인 완료');
 });
+it('shows a separate status-loading message without claiming collection completion after fast results arrive', () => {
+  const html = renderToStaticMarkup(<VerifiedSearchFeedback page={{ ...page, status: null, statusLoading: true, statusError: '' }} loading={false} stale={false} error="" onRestart={() => {}} />);
+  expect(html).toContain('검색 결과를 표시했습니다. 수집·검증 상태를 불러오는 중입니다.');
+  expect(html).not.toContain('최초 수집 완료'); expect(html).not.toContain('수집 공간 한도 도달');
+});
+it('keeps result availability distinct from failed aggregate metadata', () => {
+  const html = renderToStaticMarkup(<VerifiedSearchFeedback page={{ ...page, status: null, statusLoading: false, statusError: '상태 연결 실패' }} loading={false} stale={false} error="" onRestart={() => {}} />);
+  expect(html).toContain('상태 연결 실패'); expect(html).toContain('검색 결과는 계속 볼 수 있습니다.');
+  expect(html).toContain('전체 수집 여부는 아직 확인하지 못했습니다.'); expect(html).not.toContain('확인 완료');
+});
+it('never labels stale aggregate metadata as currently complete', () => {
+  const currentCoverage = { scope: 'demolition-title-v1', cutoff: page.asOf, checked: 746, pending: 0, verificationPending: 0, complete: true };
+  const html = renderToStaticMarkup(<VerifiedSearchFeedback page={{ ...page, status: { ...page, currentCoverage }, statusLoading: false, statusError: '' }} loading={false} stale error="" onRestart={() => {}} />);
+  expect(html).toContain('이전 조회 결과'); expect(html).not.toContain('관심 분야 투찰 가능 공고 확인 완료');
+});

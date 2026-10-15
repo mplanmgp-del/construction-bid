@@ -26,7 +26,7 @@ export function LiveSearch({ query, loading, refreshBlocked = false, onSearch }:
         <label className="sr-only" htmlFor="notice-keyword">공고명</label>
         <input ref={keywordInput} id="notice-keyword" name="keyword" value={draft.keyword} onChange={event => { setDraft({ ...draft, keyword: event.target.value }); setError(''); }} placeholder="공고명 검색 (비우면 전체)" maxLength={100} autoComplete="off" aria-describedby={error ? 'notice-search-error' : undefined} />
         {draft.keyword && <button type="button" className="icon-button" aria-label="검색어 지우기" onClick={() => { setDraft({ ...draft, keyword: '' }); setError(''); keywordInput.current?.focus(); }}><X size={18} /></button>}
-        <button className="button button-primary notice-search-submit" type="submit" disabled={loading || (!changed && refreshBlocked)}>{loading ? '조회 중' : '검색'}<ArrowRight size={18} aria-hidden="true" /></button>
+        <button className="button button-primary notice-search-submit" type="submit" disabled={!changed && (loading || refreshBlocked)}>{loading && !changed ? '조회 중' : '검색'}<ArrowRight size={18} aria-hidden="true" /></button>
       </div>
       <div className="notice-search-options">
         <label className="notice-search-type">업무 구분<select name="type" value={draft.type} onChange={event => { setDraft({ ...draft, type: event.target.value as NoticeQuery['type'] }); setError(''); }}><option>공사·용역</option><option>공사</option><option>용역</option></select></label>

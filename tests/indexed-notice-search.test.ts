@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { IndexedNoticesController, browserIndexedNoticeRepository, normalizeIndexedSearch, type IndexedNoticeRepository } from '../src/live/indexed-notice-search';
-import type { VerifiedNoticeSearchPage } from '../src/live/active-catalog-types';
+import type { VerifiedNoticeSearchPage, VerifiedNoticeSearchResults, VerifiedNoticeSearchStatus } from '../src/live/active-catalog-types';
 import { DEFAULT_FILTERS, NOTICES } from '../src/data';
 import { ApiError, fetchApi } from '../src/live/client';
 vi.mock('../src/live/client', async original => ({ ...await original<typeof import('../src/live/client')>(), fetchApi: vi.fn() }));
@@ -12,9 +12,78 @@ it('gets both businesses, full filters and only minimal company geography in one
   const input = { ...query(), profile: { ...query().profile, companyName: 'DO NOT SEND', email: 'secret@example.test', licenses: ['PRIVATE'] }, filters: { ...query().filters, license: '철거면허', minAmount: '100', maxAmount: '200', contractMethod: '제한경쟁', excludeKeyword: '설계', regions: [{ province: '경기', district: '성남시' }], statuses: ['예정' as const], sort: 'amountDesc' as const, autoRegion: true } };
   vi.mocked(fetchApi).mockResolvedValueOnce(page()); await browserIndexedNoticeRepository.search(normalizeIndexedSearch(input), new AbortController().signal);
   expect(fetchApi).toHaveBeenCalledTimes(1); const path = vi.mocked(fetchApi).mock.calls[0][0]; const params = new URL(path, 'https://example.test').searchParams;
-  expect(Object.fromEntries(params)).toMatchObject({ mode: 'search', type: '공사·용역', from: '1995-10-01', to: '2100-12-31', limit: '50' });
+  expect(Object.fromEntries(params)).toMatchObject({ mode: 'search-results', type: '공사·용역', from: '1995-10-01', to: '2100-12-31', limit: '50' });
   expect(JSON.parse(params.get('filters')!)).toMatchObject({ license: '철거면허', minAmount: '100', maxAmount: '200', contractMethod: '제한경쟁', excludeKeyword: '설계', sort: 'amountDesc', autoRegion: true, statuses: ['예정'], regions: [{ province: '경기도', district: '성남시' }] });
   expect(JSON.parse(params.get('companyRegion')!)).toEqual(query().profile); expect(path).not.toMatch(/DO NOT SEND|secret|PRIVATE|mode=number/);
+});
+const results = (patch: Partial<VerifiedNoticeSearchResults> = {}): VerifiedNoticeSearchResults => {
+  const value = page();
+  return { items: value.items, totalCount: value.totalCount, page: value.page, pageSize: value.pageSize, hasMore: value.hasMore,
+    nextCursor: value.nextCursor, snapshotVersion: value.snapshotVersion, asOf: value.asOf, fetchedAt: value.fetchedAt, source: value.source, ...patch };
+};
+const status = (patch: Partial<VerifiedNoticeSearchStatus> = {}): VerifiedNoticeSearchStatus => {
+  const value = page();
+  return { snapshotVersion: value.snapshotVersion, asOf: value.asOf, indexCoverage: value.indexCoverage, sourceSyncedThrough: value.sourceSyncedThrough,
+    verifiedCount: value.verifiedCount, pendingCount: value.pendingCount, conditionPendingCount: value.conditionPendingCount, storage: value.storage, ...patch };
+};
+const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; };
+async function settleMetadata() { for (let tick = 0; tick < 8; tick++) await Promise.resolve(); }
+it('requests status separately with the first fast result anchor and never a pagination cursor', async () => {
+  vi.mocked(fetchApi).mockClear(); vi.mocked(fetchApi).mockResolvedValueOnce(status());
+  await browserIndexedNoticeRepository.status!({ ...normalizeIndexedSearch(query()), asOf: page().asOf, snapshotVersion: '123' }, new AbortController().signal);
+  const params = new URL(vi.mocked(fetchApi).mock.calls[0][0], 'https://example.test').searchParams;
+  expect(Object.fromEntries(params)).toMatchObject({ mode: 'search-status', asOf: page().asOf, snapshotVersion: '123', keyword: '철거' });
+  expect(params.has('cursor')).toBe(false);
+});
+it('shows fast results while aggregate status is pending and requests status only once across pagination', async () => {
+  const pending = deferred<VerifiedNoticeSearchStatus>();
+  const search = vi.fn().mockResolvedValueOnce(results()).mockResolvedValueOnce(results({ items: [NOTICES[1]], nextCursor: null }));
+  const metadata = vi.fn(() => pending.promise), instance = new IndexedNoticesController({ search, status: metadata }); instance.setUser('public');
+  await instance.search(query());
+  expect(instance.getSnapshot()).toMatchObject({ loading: false, items: [NOTICES[0]], totalCount: 501, meta: { status: null, statusLoading: true } });
+  expect(metadata).toHaveBeenCalledWith(expect.objectContaining({ asOf: page().asOf, snapshotVersion: 'epoch1' }), expect.any(AbortSignal));
+  await instance.next(); expect(search).toHaveBeenCalledTimes(2); expect(metadata).toHaveBeenCalledOnce();
+  const selectionKey = instance.getSnapshot().selectionKey;
+  pending.resolve(status()); await settleMetadata();
+  expect(instance.getSnapshot()).toMatchObject({ pageNumber: 2, items: [NOTICES[1]], meta: { statusLoading: false, status: { pendingCount: 9 } } });
+  expect(instance.getSnapshot().selectionKey).toBe(selectionKey); instance.dispose();
+});
+it('keeps successful results when aggregate status fails instead of reporting a completed empty search', async () => {
+  const instance = new IndexedNoticesController({ search: async () => results(), status: async () => { throw new Error('상태 연결 실패'); } }); instance.setUser('public');
+  await instance.search(query()); await settleMetadata();
+  expect(instance.getSnapshot()).toMatchObject({ loading: false, error: '', items: [NOTICES[0]], totalCount: 501,
+    meta: { status: null, statusLoading: false, statusError: '상태 연결 실패' } }); instance.dispose();
+});
+it('aborts obsolete aggregate requests and cannot attach their late completion to a new filter query', async () => {
+  const old = deferred<VerifiedNoticeSearchStatus>(), current = deferred<VerifiedNoticeSearchStatus>();
+  const metadata = vi.fn().mockImplementationOnce(() => old.promise).mockImplementationOnce(() => current.promise);
+  const instance = new IndexedNoticesController({ search: vi.fn().mockResolvedValueOnce(results()).mockResolvedValueOnce(results({ items: [NOTICES[1]], snapshotVersion: 'epoch2' })), status: metadata }); instance.setUser('public');
+  await instance.search(query()); const oldSignal = metadata.mock.calls[0][1];
+  await instance.search({ ...query(), keyword: '석면' }); expect(oldSignal.aborted).toBe(true);
+  current.resolve(status({ snapshotVersion: 'epoch2', pendingCount: 4 })); await settleMetadata();
+  old.resolve(status({ pendingCount: 0, indexCoverage: { complete: true, checked: 746, pending: 0 } })); await settleMetadata();
+  expect(instance.getSnapshot()).toMatchObject({ items: [NOTICES[1]], meta: { snapshotVersion: 'epoch2', status: { pendingCount: 4 } } }); instance.dispose();
+});
+it('keeps results visible but fences pagination when the status endpoint reports a changed result generation', async () => {
+  const search = vi.fn(async () => results()), instance = new IndexedNoticesController({ search, status: async () => { throw new ApiError('공고 변경', 'SEARCH_CHANGED', 409); } }); instance.setUser('public');
+  await instance.search(query()); await settleMetadata();
+  expect(instance.getSnapshot()).toMatchObject({ items: [NOTICES[0]], stale: true, loading: false, meta: { status: null } });
+  await instance.next(); expect(search).toHaveBeenCalledOnce(); instance.dispose();
+});
+it('expires visible results even while aggregate metadata is pending and ignores its late completion', async () => {
+  vi.useFakeTimers(); vi.setSystemTime('2026-10-15T03:00:00Z');
+  const pending = deferred<VerifiedNoticeSearchStatus>(), metadata = vi.fn<NonNullable<IndexedNoticeRepository['status']>>(() => pending.promise);
+  const instance = new IndexedNoticesController({ search: async () => results({ validUntil: '2026-10-15T03:01:00Z' }), status: metadata }); instance.setUser('public');
+  await instance.search(query()); vi.advanceTimersByTime(60_000);
+  expect(metadata.mock.calls[0][1].aborted).toBe(true);
+  pending.resolve(status({ pendingCount: 0 })); await settleMetadata();
+  expect(instance.getSnapshot()).toMatchObject({ items: [NOTICES[0]], stale: true, meta: { status: null, statusLoading: false } }); instance.dispose();
+});
+it('rejects aggregate metadata from a different phase cutoff without replacing a valid result page', async () => {
+  const instance = new IndexedNoticesController({ search: async () => results(), status: async () => status({ asOf: '2026-10-15T03:01:00Z' }) }); instance.setUser('public');
+  await instance.search(query()); await settleMetadata();
+  expect(instance.getSnapshot()).toMatchObject({ items: [NOTICES[0]], stale: false, meta: { status: null, statusLoading: false } });
+  expect(instance.getSnapshot().meta?.statusError).toContain('조회 기준이 달라'); instance.dispose();
 });
 it('keeps public searches stable while an unrelated member profile loads and keys company-region filtering by geography only', () => {
   const plain = normalizeIndexedSearch(query());

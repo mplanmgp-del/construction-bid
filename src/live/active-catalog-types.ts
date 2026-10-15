@@ -68,13 +68,24 @@ export interface VerifiedNoticeSearchQuery {
   filters: SearchFilters; profile?: { province: string; district: string };
   limit?: number; cursor?: string;
 }
-export interface VerifiedNoticeSearchPage extends G2bNoticePage {
+export type VerifiedNoticeSearchStatusQuery = Omit<VerifiedNoticeSearchQuery, 'cursor'> & { asOf: string; snapshotVersion: string };
+export interface VerifiedNoticeSearchResults extends G2bNoticePage {
   nextCursor: string | null; snapshotVersion: string; asOf: string;
   validUntil?: string;
+}
+export interface VerifiedNoticeSearchStatus {
+  snapshotVersion: string; asOf: string;
   indexCoverage: { complete: boolean; pending: number; checked: number };
   sourceSyncedThrough: string | null; verifiedCount: number; pendingCount: number; conditionPendingCount: number;
   storage: { bytes: number; ceiling: number; full: boolean };
   sourceError?: string | null;
   currentCoverage?: CurrentCatalogCoverage;
+  warnings?: string[];
+}
+/** Compatibility response for the existing combined search endpoint. */
+export interface VerifiedNoticeSearchPage extends VerifiedNoticeSearchResults, VerifiedNoticeSearchStatus {}
+/** Browser result state; aggregate metadata may still be loading or unavailable. */
+export interface VerifiedNoticeSearchView extends VerifiedNoticeSearchResults {
+  status: VerifiedNoticeSearchStatus | null; statusLoading: boolean; statusError: string;
 }
 export interface SearchVerifiedBatch { scopeVersion: string; groups: AlertNotice[][] }
