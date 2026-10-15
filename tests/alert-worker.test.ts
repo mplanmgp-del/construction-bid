@@ -9,6 +9,15 @@ const notice=(patch:Partial<AlertNotice>={}):AlertNotice=>({id:'g2b:공사:R26BK
 const rule:WorkerRule={userId:'owner',profile:null,settings:{...structuredClone(DEFAULT_ALERT_SETTINGS),enabled:true,activatedAt:'2026-10-15T09:00:00+09:00'}};
 const member=(fact:Observation)=>[{userId:'owner',key:fact.key,lastVersion:fact.version}];
 describe('durable alert event planning',()=>{
+  it('includes actual matching reasons and missing conditions in new alert messages',()=>{
+    const s=structuredClone(rule);s.settings.filter.regions=['경기'];s.settings.filter.regionBasis='site';
+    const n=notice({province:'',district:''});
+    const plan=planAlertChanges([n],[],[],[s],now);
+    expect(plan.events[0].message).toContain('확인 필요');expect(plan.events[0].message).toContain('관심 검색어 일치');
+    expect(plan.events[0].message).toContain('현장·수행 위치 확인 필요');
+    const again=planAlertChanges([n],plan.observations,member(plan.observations[0]),[s],now);
+    expect(again.events).toEqual([]);
+  });
   it('emits a new match once and advances only on meaningful changes, including reversion',()=>{
     const first=planAlertChanges([notice()],[],[],[rule],now);expect(first.events.map(x=>x.kind)).toEqual(['new']);
     const fact=first.observations[0];

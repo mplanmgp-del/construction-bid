@@ -1,7 +1,7 @@
-import { CATEGORIES, type CompanyProfile } from '../types.ts';
+import { CATEGORIES, type CompanyProfile, type RegionAssessment } from '../types.ts';
 import { assessRegion, assessSearchRegions } from '../domain.ts';
-import { canonicalProvince } from '../search-filters.ts';
-import { DEFAULT_ALERT_SETTINGS, type AlertNotice, type AlertSettings, type AlertMatch } from './types.ts';
+import { canonicalProvince, canonicalSearchProvince } from '../search-filters.ts';
+import { DEFAULT_ALERT_SETTINGS, type AlertNotice, type AlertSettings, type AlertMatch, type AlertRegionBasis } from './types.ts';
 
 const clean = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ');
 const canonical = (value: string) => clean(value).toLowerCase();
@@ -12,6 +12,25 @@ const region = (value: string) => {
   const parts = clean(value).split(' ');
   return [canonicalProvince(parts[0]) || parts[0], ...parts.slice(1)].join(' ');
 };
+const regionBases: AlertRegionBasis[] = ['auto', 'site', 'participation', 'either', 'both'];
+const provided = (value: string | undefined) => Boolean(value?.trim()) && !/^(?:기관 미제공|미제공|원문 확인|확인 필요|없음|-)$/u.test(clean(value!));
+
+/** Preference matching only; geography and license overlap do not establish eligibility. */
+function assessAlertRegions(notice: AlertNotice, values: string[], basis: AlertRegionBasis): RegionAssessment {
+  const selected = values.map(value => { const parts=clean(value).split(' '); return {province:parts[0],district:parts[1],locality:parts.slice(2).join(' ')}; });
+  const site = (): RegionAssessment => canonicalSearchProvince(notice.province)
+    ? assessSearchRegions({...notice,type:'공사'},selected)
+    : {status:'review',reason:'현장·수행 위치 확인 필요'};
+  const participation = (): RegionAssessment => notice.regionComplete
+    ? assessSearchRegions({...notice,type:'용역'},selected)
+    : {status:'review',reason:'참가 가능 지역 확인 필요'};
+  if(basis==='auto')return notice.type==='공사'?site():participation();
+  if(basis==='site')return site();
+  if(basis==='participation')return participation();
+  const assessments=[site(),participation()];
+  const priority=basis==='both'?['excluded','review','matched'] as const:['matched','review','excluded'] as const;
+  return priority.map(status=>assessments.find(item=>item.status===status)).find(item=>item!==undefined)!;
+}
 
 /** Only source facts affect a version. A clock tick, ordering and revision label do not. */
 function content(notice: AlertNotice): Record<string, unknown> {
@@ -52,8 +71,8 @@ export function normalizeAlertSettings(input: unknown): AlertSettings {
   const object=(value:unknown):value is Record<string,unknown>=>Boolean(value)&&typeof value==='object'&&!Array.isArray(value);
   if(!object(input)||!object(input.filter)) throw new Error('알림 조건을 확인해 주세요.');
   const source=input.filter;
-  const strings=(key:string,maxLength=100):string[]=>{
-    const value=source[key];
+  const strings=(key:string,maxLength=100,optional=false):string[]=>{
+    const value=source[key]===undefined&&optional?[]:source[key];
     if(!Array.isArray(value)||value.length>20||value.some(item=>typeof item!=='string'||!item.trim()||item.length>maxLength||/[\u0000-\u001f]/.test(item))) throw new Error('알림 조건은 항목별 20개 이내로 입력해 주세요.');
     return [...new Set(value.map(value=>clean(value as string)))];
   };
@@ -66,13 +85,19 @@ export function normalizeAlertSettings(input: unknown): AlertSettings {
   const types=strings('types'), categories=strings('categories');
   if(!types.length||types.some(type=>!['공사','용역'].includes(type)))throw new Error('공사 또는 용역을 선택해 주세요.');
   if(categories.some(item=>![...CATEGORIES,'기타'].includes(item as never)))throw new Error('작업 분야를 확인해 주세요.');
+  const regionBasis=source.regionBasis===undefined?'auto':source.regionBasis;
+  if(!regionBases.includes(regionBasis as AlertRegionBasis))throw new Error('지역 비교 기준을 확인해 주세요.');
+  const minDaysUntilDeadline=source.minDaysUntilDeadline===undefined?null:amount(source.minDaysUntilDeadline);
+  if(minDaysUntilDeadline!==null&&minDaysUntilDeadline>365)throw new Error('마감까지 남은 기간은 0~365일의 정수로 입력해 주세요.');
   const filter:AlertSettings['filter']={keywords:strings('keywords',80),excludeKeywords:strings('excludeKeywords',80),
     types:types as ('공사'|'용역')[],categories:categories as AlertSettings['filter']['categories'],
     regions:strings('regions'),licenses:strings('licenses',120),minAmount:amount(source.minAmount),maxAmount:amount(source.maxAmount),
-    includeUnknown:bool(source.includeUnknown,'미확인 조건'),useCompanyRegion:bool(source.useCompanyRegion,'업체 지역')};
+    includeUnknown:bool(source.includeUnknown,'미확인 조건'),useCompanyRegion:bool(source.useCompanyRegion,'업체 지역'),
+    regionBasis:regionBasis as AlertRegionBasis,agencies:strings('agencies',100,true),contractMethods:strings('contractMethods',100,true),minDaysUntilDeadline,
+    useCompanyLicenses:source.useCompanyLicenses===undefined?false:bool(source.useCompanyLicenses,'업체 면허')};
   if(filter.minAmount!==null&&filter.maxAmount!==null&&filter.minAmount>filter.maxAmount)throw new Error('최소 금액은 최대 금액 이하로 입력해 주세요.');
   const enabled=bool(input.enabled,'알림');
-  if(enabled&&!filter.keywords.length&&!filter.categories.length&&!filter.regions.length&&!filter.licenses.length&&!filter.useCompanyRegion&&filter.minAmount===null&&filter.maxAmount===null)throw new Error('맞춤 알림 조건을 한 가지 이상 입력해 주세요.');
+  if(enabled&&!filter.keywords.length&&!filter.categories.length&&!filter.regions.length&&!filter.licenses.length&&!filter.useCompanyRegion&&!filter.useCompanyLicenses&&!filter.agencies!.length&&!filter.contractMethods!.length&&filter.minDaysUntilDeadline===null&&filter.minAmount===null&&filter.maxAmount===null)throw new Error('맞춤 알림 조건을 한 가지 이상 입력해 주세요.');
   return {...structuredClone(DEFAULT_ALERT_SETTINGS),enabled,filter,notifyChanges:bool(input.notifyChanges,'변경 알림'),
     pushEnabled:bool(input.pushEnabled,'푸시 알림'),
     activatedAt:typeof input.activatedAt==='string'?input.activatedAt:null,updatedAt:typeof input.updatedAt==='string'?input.updatedAt:null};
@@ -90,14 +115,17 @@ export function matchAlertNotice(notice: AlertNotice, settings: AlertSettings, p
   if(filter.excludeKeywords.some(keyword=>text.includes(canonical(keyword))))return no();
   if(!filter.types.includes(notice.type)||filter.categories.length&&!filter.categories.includes(notice.category))return no();
   if(filter.keywords.length)reasons.push('관심 검색어 일치');
+  if(filter.categories.length)reasons.push('관심 분야 일치');
   if(filter.regions.length) {
-    const assessment=assessSearchRegions(notice,filter.regions.map(value=>{const parts=clean(value).split(' ');return {province:parts[0],district:parts[1],locality:parts.slice(2).join(' ')};}));
+    const basis=filter.regionBasis??'auto';
+    const assessment=assessAlertRegions(notice,filter.regions,basis);
     if(assessment.status==='excluded')return no();
-    if(assessment.status==='review'||notice.type==='용역'&&!notice.regionComplete)missing.push('검색 지역 확인 필요');
-    else reasons.push('검색 지역 일치');
+    if(assessment.status==='review')missing.push(assessment.reason);
+    else reasons.push(basis==='both'?'현장·참가 지역 모두 일치':basis==='site'?'현장·수행 지역 일치':basis==='participation'?'참가 가능 지역 일치':'검색 지역 일치');
   }
   if(filter.useCompanyRegion) {
     if(!profile)missing.push('업체 소재지 확인 필요');
+    else if(!notice.regionComplete)missing.push('업체 지역조건 확인 필요');
     else {
       const assessment=assessRegion(notice,profile);
       if(assessment.status==='excluded')return no();
@@ -108,6 +136,31 @@ export function matchAlertNotice(notice: AlertNotice, settings: AlertSettings, p
     if(!notice.licenseComplete||!notice.licenses.length)missing.push('면허조건 확인 필요');
     else if(!filter.licenses.some(wanted=>notice.licenses.some(item=>license(item)===license(wanted))))return no();
     else reasons.push('관심 면허 일치');
+  }
+  if(filter.useCompanyLicenses) {
+    const held=profile?.licenses?.filter(provided)??[];
+    if(!held.length)missing.push('내 업체 보유 면허 확인 필요');
+    else if(!notice.licenseComplete||!notice.licenses.length)missing.push('공고 면허조건 확인 필요');
+    else if(!held.some(wanted=>notice.licenses.some(item=>license(item)===license(wanted))))return no();
+    else {
+      reasons.push('내 업체 보유 면허 관련 공고');
+      if(sorted(notice.licenses,license).length>1)missing.push('복수 면허 조합 확인 필요');
+    }
+  }
+  if(filter.agencies?.length) {
+    const agencies=[notice.agency,notice.demandAgency].filter(provided) as string[];
+    if(!agencies.length)missing.push('발주·수요기관 확인 필요');
+    else if(!filter.agencies.some(wanted=>agencies.some(item=>canonical(item).includes(canonical(wanted)))))return no();
+    else reasons.push('발주·수요기관 일치');
+  }
+  if(filter.contractMethods?.length) {
+    if(!provided(notice.contractMethod))missing.push('계약방법 확인 필요');
+    else if(!filter.contractMethods.some(wanted=>canonical(wanted)===canonical(notice.contractMethod)))return no();
+    else reasons.push('계약방법 일치');
+  }
+  if(filter.minDaysUntilDeadline!==null&&filter.minDaysUntilDeadline!==undefined) {
+    if(Number.isFinite(deadline)&&deadline-now<filter.minDaysUntilDeadline*86_400_000)return no();
+    if(Number.isFinite(deadline))reasons.push(`제출 마감까지 ${filter.minDaysUntilDeadline}일 이상`);
   }
   if(filter.minAmount!==null||filter.maxAmount!==null) {
     if(notice.estimatedPrice===null)missing.push('추정가격 확인 필요');

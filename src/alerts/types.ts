@@ -1,5 +1,6 @@
 import type { BidNotice, Category, CompanyProfile } from '../types.ts';
 
+export type AlertRegionBasis = 'auto' | 'site' | 'participation' | 'either' | 'both';
 export interface AlertFilter {
   keywords: string[];
   excludeKeywords: string[];
@@ -11,6 +12,12 @@ export interface AlertFilter {
   maxAmount: number | null;
   includeUnknown: boolean;
   useCompanyRegion: boolean;
+  /** Absent fields in saved settings keep the previous matching behavior. */
+  regionBasis?: AlertRegionBasis;
+  agencies?: string[];
+  contractMethods?: string[];
+  minDaysUntilDeadline?: number | null;
+  useCompanyLicenses?: boolean;
 }
 export interface AlertSettings {
   enabled: boolean;
@@ -74,6 +81,7 @@ export interface WorkerRule {
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   enabled: false,
   filter: { keywords: ['철거', '해체', '석면', '건설폐기물'], excludeKeywords: [], types: ['공사', '용역'],
-    categories: [], regions: [], licenses: [], minAmount: null, maxAmount: null, includeUnknown: true, useCompanyRegion: false },
+    categories: [], regions: [], licenses: [], minAmount: null, maxAmount: null, includeUnknown: true, useCompanyRegion: false,
+    regionBasis: 'either', agencies: [], contractMethods: [], minDaysUntilDeadline: null, useCompanyLicenses: false },
   notifyChanges: true, pushEnabled: false, activatedAt: null, updatedAt: null,
 };

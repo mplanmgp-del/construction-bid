@@ -50,8 +50,8 @@ describe('personal alert account lifecycle', () => {
     expect(controller.getSnapshot().overview?.unreadCount).toBe(0);
   });
   it('keeps the live search keyword and detailed conditions when preparing an alert filter', () => {
-    const filter = alertFilterFromSearch({ ...DEFAULT_FILTERS, keyword: '', category: '석면', regions: [{ province: '경기도', district: '성남시' }], minAmount: '10000000' }, { type: '공사·용역', keyword: '철거', from: '2026-10-01', to: '2026-10-15' });
-    expect(filter).toMatchObject({ keywords: ['철거'], types: ['공사', '용역'], categories: ['석면'], regions: ['경기도 성남시'], minAmount: 10000000 });
+    const filter = alertFilterFromSearch({ ...DEFAULT_FILTERS, keyword: '', category: '석면', regions: [{ province: '경기도', district: '성남시' }], minAmount: '10000000',contractMethod:'제한경쟁' }, { type: '공사·용역', keyword: '철거', from: '2026-10-01', to: '2026-10-15' });
+    expect(filter).toMatchObject({ keywords: ['철거'], types: ['공사', '용역'], categories: ['석면'], regions: ['경기도 성남시'], minAmount: 10000000,contractMethods:['제한경쟁'],regionBasis:'auto' });
   });
   it('appends inbox pages without discarding existing matches and ignores duplicate inbox rows', async () => {
     const item = { id: 'one', kind: 'test' as const, notice: null, message: '첫 알림', changeFields: [], createdAt: '', readAt: null };
@@ -79,6 +79,12 @@ describe('personal alert account lifecycle', () => {
 });
 
 describe('alert presentation and direct links', () => {
+  it('shows saved-condition comparison reasons and missing data on existing notice cards',()=>{
+    const notice={...NOTICES[0],source:'live' as const,status:'접수중' as const,deadline:'2099-10-20T10:00:00+09:00',sourceUpdatedAt:'',regionComplete:true,licenseComplete:true,province:'',district:''};
+    const settings=structuredClone(DEFAULT_ALERT_SETTINGS);settings.enabled=true;settings.filter.keywords=[];settings.filter.regions=['경기'];settings.filter.regionBasis='site';
+    const html=renderToStaticMarkup(<AlertsPage alerts={access(overview({settings,existingMatches:[{...notice,status:'접수중'}]}))} signedIn onLogin={()=>{}} />);
+    expect(html).toContain('조건 확인 필요');expect(html).toContain('현장·수행 위치 확인 필요');expect(html).toContain('현재 저장한 조건');
+  });
   it('keeps alerts reachable independently of locked managed menus', () => {
     expect(appViewFromHash('#alerts')).toBe('alerts'); expect(appViewHash('alerts')).toBe('#alerts');
     expect(menuIsLocked('alerts', false, false, [])).toBe(false);
@@ -106,5 +112,29 @@ describe('alert presentation and direct links', () => {
     const data=overview({status:{...overview().status,configured:true,paused:true}});
     const html=renderToStaticMarkup(<AlertsPage alerts={access(data)} signedIn onLogin={()=>{}} />);
     expect(html).toContain('내 알림 꺼짐');
+  });
+  it('restores saved comparison choices for both construction and service alerts', () => {
+    const data = overview({ settings: { ...DEFAULT_ALERT_SETTINGS, filter: { ...DEFAULT_ALERT_SETTINGS.filter,
+      regionBasis: 'both', agencies: ['성남시', '한국환경공단'], contractMethods: ['제한경쟁', '일반경쟁'],
+      minDaysUntilDeadline: 3, useCompanyLicenses: true,
+    } } });
+    const html = renderToStaticMarkup(<AlertsPage alerts={access(data)} signedIn onLogin={() => {}} />);
+    expect(html).toContain('<option value="both" selected="">현장·참가 지역 모두</option>');
+    expect(html).toMatch(/name="agencies"[^>]*value="성남시, 한국환경공단"/);
+    expect(html).toMatch(/name="contractMethods"[^>]*value="제한경쟁, 일반경쟁"/);
+    const deadlineInput = html.match(/<input[^>]*name="minDaysUntilDeadline"[^>]*>/)?.[0];
+    expect(deadlineInput).toContain('min="0"');
+    expect(deadlineInput).toContain('max="365"');
+    expect(deadlineInput).toContain('value="3"');
+    expect(html).toMatch(/name="useCompanyLicenses"[^>]*checked=""/);
+    for (const value of ['auto', 'site', 'participation', 'either', 'both']) expect(html).toContain(`<option value="${value}"`);
+  });
+  it('keeps the previous regional comparison when loading settings without a region basis', () => {
+    const filter = { ...DEFAULT_ALERT_SETTINGS.filter };
+    delete filter.regionBasis;
+    const data = overview({ settings: { ...DEFAULT_ALERT_SETTINGS, filter } });
+    const html = renderToStaticMarkup(<AlertsPage alerts={access(data)} signedIn onLogin={() => {}} />);
+    expect(html).toContain('<option value="auto" selected="">업무별 기본</option>');
+    expect(html).toMatch(/name="minDaysUntilDeadline"[^>]*value=""/);
   });
 });

@@ -19,7 +19,8 @@ export function planAlertChanges(notices:AlertNotice[],previous:Observation[],me
     for(const rule of rules) {
       if(!rule.settings.enabled) continue;
       const membership=seen.get(`${rule.userId}:${key}`),last=membership?.lastVersion;
-      const matched=matchAlertNotice(notice,rule.settings,rule.profile,now).matched;
+      const comparison=matchAlertNotice(notice,rule.settings,rule.profile,now);
+      const matched=comparison.matched;
       if(!matched&&last===undefined) continue;
       // A retained dedup ledger is not a subscription to an old, now unrelated filter.
       // Compare the previous source facts too, so losing eligibility/cancellation is still reported.
@@ -35,7 +36,7 @@ export function planAlertChanges(notices:AlertNotice[],previous:Observation[],me
       } else if(matched) {
         const activation=Date.parse(rule.settings.activatedAt||new Date(now).toISOString());
         if(Date.parse(notice.postedAt)<activation) plan.existing.push({userId:rule.userId,key,version});
-        else plan.events.push({userId:rule.userId,key,version,kind:'new',message:'설정한 조건에 맞는 새 공고가 등록되었습니다.',changeFields:[]});
+        else plan.events.push({userId:rule.userId,key,version,kind:'new',message:`${comparison.needsReview?'일부 조건 확인이 필요한 새 관심 공고가 등록되었습니다.':'설정한 조건에 맞는 새 공고가 등록되었습니다.'} ${comparison.reasons.join(' · ')}`.trim(),changeFields:[]});
       }
     }
     if(relevant) plan.observations.push({key,notice,fingerprint,version});
