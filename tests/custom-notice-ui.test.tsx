@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { customLookupAction, CustomNoticeResults, CustomNoticeSearch } from '../src/live/CustomNoticeSearch';
+import { customLookupAction, CustomNoticeResults, CustomNoticeSearch, futureNoticeDates } from '../src/live/CustomNoticeSearch';
 import { DEFAULT_ALERT_SETTINGS, type AlertNotice } from '../src/alerts/types';
 import { NOTICES, DEMO_PROFILES } from '../src/data';
 import type { useCustomNotices } from '../src/live/useCustomNotices';
@@ -27,8 +27,13 @@ describe('blue lookup button continuation policy', () => {
     expect(customLookupAction(null, query, true)).toBe('search');
     expect(customLookupAction(query, query, false)).toBe('search');
     expect(customLookupAction(query, { ...query, from: '2026-10-09' }, true)).toBe('search');
+    expect(customLookupAction(query, { ...query, basis: 'opening' }, true)).toBe('search');
     expect(customLookupAction(query, { ...query, settings: { ...settings, filter: { ...settings.filter, minAmount: 100 } } }, true)).toBe('search');
     expect(customLookupAction(query, { ...query, profile: { ...DEMO_PROFILES[0], province: '경기도' } }, true)).toBe('search');
+  });
+  it('uses a future opening period instead of a recent publication cutoff', () => {
+    expect(futureNoticeDates(365, new Date(now))).toEqual({ from: '2026-10-15', to: '2027-10-14' });
+    expect(futureNoticeDates(30, new Date('2026-10-14T15:30:00Z'))).toEqual({ from: '2026-10-15', to: '2026-11-13' });
   });
 });
 
@@ -56,6 +61,14 @@ describe('custom lookup result integrity', () => {
     expect(html).toContain('상세 조회 실패');
     expect(html).toContain('학교 철거 공사');
   });
+  it('keeps a cancelled latest revision visible as a state change rather than an active match', () => {
+    const cancelled = { ...bid, id: 'cancelled-latest', number: 'R26BK01359594', revision: '001', status: '취소' as const };
+    const html = results({ items: [], excludedItems: [cancelled] });
+    expect(html).toContain('취소·마감 이력 확인 1건');
+    expect(html).toContain('학교 철거 공사');
+    expect(html).toContain('R26BK01359594');
+    expect(html).not.toContain('맞춤 조건 일치');
+  });
   it('does not represent a failed empty lookup as a completed zero result', () => {
     const html = results({ items: [], error: '연결 실패', hasMore: true });
     expect(html).toContain('공고 조회를 완료하지 못했습니다');
@@ -67,7 +80,10 @@ describe('custom lookup result integrity', () => {
     const html = renderToStaticMarkup(<CustomNoticeSearch {...base} userId="a" settingsError="조건 연결 실패" onRetrySettings={() => {}} />);
     expect(html).toContain('조건 연결 실패');
     expect(html).toContain('조건 다시 불러오기');
-    expect(html).toContain('최근 90일');
-    expect(html).toContain('최대 90일');
+    expect(html).toContain('진행 공고 찾기');
+    expect(html).toContain('게시 기간으로 찾기');
+    expect(html).toContain('게시일과 관계없이');
+    expect(html).toContain('개찰 예정일 시작');
+    expect(html).toContain('앞으로 1년');
   });
 });

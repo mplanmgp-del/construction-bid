@@ -4,26 +4,29 @@ import { alertNoticeKey, isOlderAlertNotice, matchAlertNotice, normalizeAlertSet
 import type { AlertNotice, AlertSettings } from '../alerts/types';
 import { ApiError, dateRangeError, fetchApi } from './client';
 
-export interface CustomNoticeQuery { settings: AlertSettings; profile: CompanyProfile | null; from: string; to: string }
+export interface CustomNoticeQuery { settings: AlertSettings; profile: CompanyProfile | null; from: string; to: string; basis?: 'opening' }
 export interface CustomNoticeSource {
-  type: G2bBusinessType; from: string; to: string; keyword: string;
+  type: G2bBusinessType; from: string; to: string; keyword: string; basis?: 'opening';
   agency?: string; demandAgency?: string; license?: string;
   minAmount?: number; maxAmount?: number; excludeClosed?: true;
 }
 export interface CustomNoticeRepository {
   notices(source: CustomNoticeSource, page: number, signal: AbortSignal): Promise<G2bNoticePage>;
   detail(notice: Pick<BidNotice, 'number' | 'revision' | 'type'>, signal: AbortSignal): Promise<G2bNoticeDetail>;
+  lookup?(notice: Pick<BidNotice, 'number' | 'type'>, signal: AbortSignal): Promise<G2bNoticePage>;
 }
 export interface CustomNoticesSnapshot {
   userId: string | null; items: AlertNotice[]; loading: boolean; error: string; hasMore: boolean;
   candidateCount: number; checkedCount: number; apiRequests: number; fetchedAt: string | null;
+  excludedItems?: AlertNotice[];
 }
 const empty = (userId: string | null): CustomNoticesSnapshot => ({ userId, items: [], loading: false, error: '', hasMore: false,
-  candidateCount: 0, checkedCount: 0, apiRequests: 0, fetchedAt: null });
+  candidateCount: 0, checkedCount: 0, apiRequests: 0, fetchedAt: null, excludedItems: [] });
 const usable = (value: string) => value.trim() && !/^(?:기관 미제공|미제공|원문 확인|확인 필요|없음|-)$/u.test(value.trim());
 const plainLicense = (value: string) => value.normalize('NFKC').trim();
 const comparableLicense = (value: string) => plainLicense(value).toLowerCase().replace(/[ㆍ・ᆞ]/g, '·').replace(/\s+/g, '').replace(/\/\d+$/, '');
 export const CUSTOM_NOTICE_MAX_DAYS = 90;
+export const CUSTOM_ACTIVE_MAX_DAYS = 366;
 const PROVIDER_WINDOW_DAYS = 31;
 const DAY_MS = 86_400_000;
 function publicationWindows(from: string, to: string): Pick<CustomNoticeSource, 'from' | 'to'>[] {
@@ -46,11 +49,12 @@ function safeLicenseAxis(values: string[]): string[] {
 
 /** Push only one OR axis. The complete saved rule is always evaluated locally. */
 export function planCustomNoticeSearch(input: CustomNoticeQuery): { query: CustomNoticeQuery; sources: CustomNoticeSource[] } {
-  const periodError = dateRangeError(input.from, input.to, CUSTOM_NOTICE_MAX_DAYS);
+  const periodError = dateRangeError(input.from, input.to, input.basis === 'opening' ? CUSTOM_ACTIVE_MAX_DAYS : CUSTOM_NOTICE_MAX_DAYS);
   if (periodError) throw new Error(periodError);
   // Disabling notifications does not disable a deliberate, read-only search.
   const settings = normalizeAlertSettings({ ...input.settings, enabled: false });
-  const query: CustomNoticeQuery = { settings, profile: input.profile ? structuredClone(input.profile) : null, from: input.from, to: input.to };
+  const query: CustomNoticeQuery = { settings, profile: input.profile ? structuredClone(input.profile) : null, from: input.from, to: input.to,
+    ...(input.basis === 'opening' ? { basis: 'opening' as const } : {}) };
   const filter = settings.filter;
   const common = { keyword: '', ...(!filter.includeUnknown ? {
     excludeClosed: true as const, ...(filter.minAmount !== null ? { minAmount: filter.minAmount } : {}),
@@ -70,8 +74,11 @@ export function planCustomNoticeSearch(input: CustomNoticeQuery): { query: Custo
     axis.push(...filter.keywords.map(keyword => ({ keyword })), ...filter.keywords.map(agency => ({ agency })),
       ...filter.keywords.map(demandAgency => ({ demandAgency })));
   } else axis.push({});
-  const sources = publicationWindows(query.from, query.to).flatMap(window =>
-    axis.flatMap(part => filter.types.map(type => ({ ...common, ...window, ...part, type }))));
+  const windows = publicationWindows(query.from, query.to);
+  // Active searches start with openings closest to today. Posting searches keep their newest-first order.
+  if (query.basis === 'opening') windows.reverse();
+  const sources = windows.flatMap(window =>
+    axis.flatMap(part => filter.types.map(type => ({ ...common, ...window, ...part, type, ...(query.basis ? { basis: query.basis } : {}) }))));
   return { query, sources: [...new Map(sources.map(source => [JSON.stringify(source), source])).values()] };
 }
 
@@ -82,18 +89,40 @@ export const browserCustomNoticeRepository: CustomNoticeRepository = {
       ...(source.demandAgency ? { demandAgency: source.demandAgency } : {}), ...(source.license ? { license: source.license } : {}),
       ...(source.minAmount !== undefined ? { minAmount: String(source.minAmount) } : {}),
       ...(source.maxAmount !== undefined ? { maxAmount: String(source.maxAmount) } : {}),
+      ...(source.basis ? { basis: source.basis } : {}),
       ...(source.excludeClosed ? { excludeClosed: '1' } : {}) });
     return fetchApi<G2bNoticePage>(`/api/notices?${params}`, signal);
   },
   detail: (notice, signal) => fetchApi<G2bNoticeDetail>(`/api/detail?${new URLSearchParams({ number: notice.number, revision: notice.revision, type: notice.type })}`, signal),
+  lookup: (notice, signal) => fetchApi<G2bNoticePage>(`/api/notices?${new URLSearchParams({ mode: 'number', type: notice.type, number: notice.number })}`, signal),
 };
 
 interface Cursor { source: CustomNoticeSource; key: string; page: number }
-interface Candidate { key: string; notice: AlertNotice }
+interface Candidate { key: string; notice: AlertNotice; verified?: boolean }
 const SOURCE_BATCH_LIMIT = 12;
 const DETAIL_BATCH_LIMIT = 20;
 const CONCURRENCY = 4;
 const messageOf = (cause: unknown) => cause instanceof Error ? cause.message : '나라장터 연결 상태를 확인해 주세요.';
+const asAlertNotice = (row: BidNotice): AlertNotice => ({ ...row, source: 'live', sourceUpdatedAt: (row as Partial<AlertNotice>).sourceUpdatedAt || row.postedAt,
+  regionComplete: (row as Partial<AlertNotice>).regionComplete === true, licenseComplete: (row as Partial<AlertNotice>).licenseComplete === true });
+// Do not treat enriching a candidate with region/license details as a new list version.
+const sourceVersion = (row: AlertNotice) => JSON.stringify([row.revision, row.sourceUpdatedAt, row.status, row.title, row.agency, row.demandAgency,
+  row.deadline, row.openingAt, row.biddingStartAt, row.estimatedPrice, row.plannedAmount, row.contractMethod, row.category, row.province, row.district, row.noticeKind]);
+function completeLatest(page: G2bNoticePage, original: AlertNotice): AlertNotice {
+  if (page.quotaExceeded) throw new ApiError('나라장터 호출 한도에 도달했습니다. 잠시 후 다시 조회해 주세요.', 'G2B_QUOTA_EXCEEDED', 429, page.retryAfterSeconds);
+  if (!Array.isArray(page.items) || !page.items.length || page.hasMore !== false || !Number.isInteger(page.totalCount)
+    || page.totalCount !== page.items.length || !Number.isFinite(Date.parse(page.fetchedAt))) throw new Error('공고의 최신 차수 전체 이력을 확인하지 못했습니다.');
+  const revisions = new Set<string>();
+  for (const row of page.items) {
+    if (row.number !== original.number || row.type !== original.type || !/^\d{3}$/.test(row.revision) || revisions.has(row.revision)) {
+      throw new Error('최신 공고의 번호·업무·차수 정보를 확인하지 못했습니다.');
+    }
+    revisions.add(row.revision);
+  }
+  const latest = asAlertNotice([...page.items].sort((first, second) => Number(second.revision) - Number(first.revision))[0]);
+  if (isOlderAlertNotice(latest, original)) throw new Error('목록보다 오래된 차수 이력입니다. 최신 공고를 다시 확인해 주세요.');
+  return latest;
+}
 
 function requiredDetails(notice: AlertNotice, query: CustomNoticeQuery) {
   const filter = query.settings.filter, basis = filter.regionBasis ?? 'auto';
@@ -124,20 +153,21 @@ export class CustomNoticesController {
   private candidates = new Map<string, AlertNotice>();
   private checked = new Set<string>();
   private matches = new Map<string, AlertNotice>();
+  private excluded = new Map<string, AlertNotice>();
   private failures = new Map<string, string>();
   constructor(private repository: CustomNoticeRepository = browserCustomNoticeRepository, private clock: () => number = Date.now) {}
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(changes: Partial<CustomNoticesSnapshot> = {}) {
     this.pending = this.pending.filter(item => this.candidates.get(item.key) === item.notice);
-    this.snapshot = { ...this.snapshot, items: [...this.matches.values()], candidateCount: this.candidates.size, checkedCount: this.checked.size,
+    this.snapshot = { ...this.snapshot, items: [...this.matches.values()], excludedItems: [...this.excluded.values()], candidateCount: this.candidates.size, checkedCount: this.checked.size,
       hasMore: this.sources.length > 0 || this.pending.length > 0,
       error: this.failures.size ? `일부 공고 또는 상세 조건을 조회하지 못했습니다. ${[...new Set(this.failures.values())].join(' ')} 확인된 결과를 먼저 표시합니다. 더 조회하면 실패한 범위를 다시 확인합니다.` : '', ...changes };
     this.listeners.forEach(listener => listener());
   }
   clear = () => {
     this.generation++; this.request?.abort(); this.request = null; this.running = null; this.query = null;
-    this.sources = []; this.pending = []; this.candidates.clear(); this.checked.clear(); this.matches.clear(); this.failures.clear();
+    this.sources = []; this.pending = []; this.candidates.clear(); this.checked.clear(); this.matches.clear(); this.excluded.clear(); this.failures.clear();
     this.snapshot = empty(this.snapshot.userId); this.listeners.forEach(listener => listener());
   };
   setUser(userId?: string) { this.clear(); this.snapshot = empty(userId || null); this.listeners.forEach(listener => listener()); }
@@ -159,7 +189,15 @@ export class CustomNoticesController {
   };
   private finish(candidate: Candidate) {
     if (!this.query || this.candidates.get(candidate.key) !== candidate.notice) return;
+    if (this.query.basis === 'opening' && !candidate.verified) return;
     this.checked.add(candidate.key);
+    if (this.query.basis === 'opening') {
+      const deadline = Date.parse(candidate.notice.deadline);
+      if (candidate.notice.status === '취소' || candidate.notice.status === '마감' || Number.isFinite(deadline) && deadline <= this.clock()) {
+        this.excluded.set(candidate.key, candidate.notice); this.matches.delete(candidate.key); return;
+      }
+      this.excluded.delete(candidate.key);
+    }
     const matched = matchAlertNotice(candidate.notice, { ...this.query.settings, enabled: true }, this.query.profile, this.clock());
     if (matched.matched) this.matches.set(candidate.key, candidate.notice); else this.matches.delete(candidate.key);
   }
@@ -167,12 +205,16 @@ export class CustomNoticesController {
     if (!this.query) return;
     const relaxed = { ...this.query.settings, enabled: true, filter: { ...this.query.settings.filter, includeUnknown: true } };
     for (const row of page.items) {
-      const notice: AlertNotice = { ...row, source: 'live', sourceUpdatedAt: (row as Partial<AlertNotice>).sourceUpdatedAt || row.postedAt,
-        regionComplete: (row as Partial<AlertNotice>).regionComplete === true, licenseComplete: (row as Partial<AlertNotice>).licenseComplete === true };
+      const notice = asAlertNotice(row);
       const key = alertNoticeKey(notice), previous = this.candidates.get(key);
-      if (previous && (isOlderAlertNotice(notice, previous) || notice.revision === previous.revision)) continue;
-      this.candidates.set(key, notice); this.checked.delete(key); this.matches.delete(key); this.failures.delete(`detail:${key}`);
+      if (previous && (isOlderAlertNotice(notice, previous) || (this.query.basis === 'opening'
+        ? sourceVersion(notice) === sourceVersion(previous) : notice.revision === previous.revision))) continue;
+      this.candidates.set(key, notice); this.checked.delete(key); this.matches.delete(key); this.excluded.delete(key);
+      this.failures.delete(`detail:${key}`); this.failures.delete(`latest:${key}`);
       const candidate = { key, notice };
+      // Opening lists may contain an old original whose newer cancellation has a different opening date.
+      // Never publish it, or reject it on obsolete facts, until every revision is checked by number.
+      if (this.query.basis === 'opening') { this.pending.push(candidate); continue; }
       // Missing facts cannot fail this prefilter; known mismatches avoid expensive detail calls.
       if (!matchAlertNotice(notice, relaxed, this.query.profile, this.clock()).matched) this.checked.add(key);
       else {
@@ -209,30 +251,61 @@ export class CustomNoticesController {
       }
     };
     const loadDetail = async (candidate: Candidate) => {
-      countRequest();
       let current = candidate;
+      let latestPending = this.query?.basis === 'opening' && !candidate.verified;
       try {
-        const detail = await this.repository.detail(candidate.notice, controller.signal);
-        if (!active() || this.candidates.get(candidate.key) !== candidate.notice || !this.query) return;
-        if (detail.number !== candidate.notice.number || detail.revision !== candidate.notice.revision
-          || detail.notice && (detail.notice.type !== candidate.notice.type || detail.notice.number !== candidate.notice.number || detail.notice.revision !== candidate.notice.revision)) {
+        if (latestPending) {
+          if (!this.repository.lookup) throw new Error('최신 공고 차수 조회를 사용할 수 없습니다.');
+          countRequest();
+          const versions = await this.repository.lookup(candidate.notice, controller.signal);
+          if (!active() || this.candidates.get(candidate.key) !== candidate.notice || !this.query) return;
+          const notice = completeLatest(versions, candidate.notice);
+          this.candidates.set(candidate.key, notice); current = { key: candidate.key, notice, verified: true };
+          // Closed/cancelled latest revisions are useful evidence even if the provider changed their opening date.
+          const deadline = Date.parse(notice.deadline);
+          if (notice.status === '취소' || notice.status === '마감' || Number.isFinite(deadline) && deadline <= this.clock()) {
+            latestPending = false; this.failures.delete(`latest:${candidate.key}`); this.finish(current); this.publish(); return;
+          }
+          const opening = Date.parse(notice.openingAt);
+          if (!Number.isFinite(opening)) throw new Error('최신 공고의 개찰일을 확인하지 못했습니다.');
+          this.failures.delete(`latest:${candidate.key}`); latestPending = false;
+          const openingDay = new Date(opening + 9 * 60 * 60_000).toISOString().slice(0, 10);
+          if (openingDay < this.query.from || openingDay > this.query.to) {
+            this.checked.add(candidate.key); this.matches.delete(candidate.key); this.excluded.delete(candidate.key); this.publish(); return;
+          }
+          const relaxed = { ...this.query.settings, enabled: true, filter: { ...this.query.settings.filter, includeUnknown: true } };
+          if (!matchAlertNotice(notice, relaxed, this.query.profile, this.clock()).matched) {
+            this.finish(current); this.publish(); return;
+          }
+        }
+        if (!this.query) return;
+        const needed = requiredDetails(current.notice, this.query);
+        if (!needed.region && !needed.license) { this.finish(current); this.publish(); return; }
+        countRequest();
+        const detail = await this.repository.detail(current.notice, controller.signal);
+        if (!active() || this.candidates.get(current.key) !== current.notice || !this.query) return;
+        if (detail.number !== current.notice.number || detail.revision !== current.notice.revision
+          || detail.notice && (detail.notice.type !== current.notice.type || detail.notice.number !== current.notice.number || detail.notice.revision !== current.notice.revision)) {
           throw new Error('상세 공고의 식별정보를 확인하지 못했습니다.');
         }
-        const needed = requiredDetails(candidate.notice, this.query);
         const regionComplete = detail.regionComplete === true && (detail.allowedRegions === null || Array.isArray(detail.allowedRegions));
         const licenseComplete = detail.licenseComplete === true && Array.isArray(detail.licenses);
-        const notice: AlertNotice = { ...candidate.notice, ...detail.notice, source: 'live', sourceUpdatedAt: candidate.notice.sourceUpdatedAt,
-          allowedRegions: regionComplete ? detail.allowedRegions : candidate.notice.allowedRegions,
-          licenses: licenseComplete ? detail.licenses : candidate.notice.licenses,
-          regionComplete: candidate.notice.regionComplete || regionComplete, licenseComplete: candidate.notice.licenseComplete || licenseComplete };
-        this.candidates.set(candidate.key, notice); current = { key: candidate.key, notice };
+        const notice: AlertNotice = { ...current.notice, ...detail.notice, source: 'live', sourceUpdatedAt: current.notice.sourceUpdatedAt,
+          allowedRegions: regionComplete ? detail.allowedRegions : current.notice.allowedRegions,
+          licenses: licenseComplete ? detail.licenses : current.notice.licenses,
+          regionComplete: current.notice.regionComplete || regionComplete, licenseComplete: current.notice.licenseComplete || licenseComplete };
+        this.candidates.set(candidate.key, notice); current = { ...current, notice };
         if (needed.region && !notice.regionComplete || needed.license && !notice.licenseComplete) throw new Error('상세 참가 지역 또는 면허조건을 모두 확인하지 못했습니다.');
         this.failures.delete(`detail:${candidate.key}`); this.finish(current); this.publish();
       } catch (cause) {
         if (!active() || this.candidates.get(current.key) !== current.notice) return;
-        failedDetails.add(current.key); this.pending.push(current); this.failures.set(`detail:${current.key}`, messageOf(cause));
+        failedDetails.add(current.key);
+        // A version or opening-date failure is never downgraded to an unknown, potentially active original.
+        if (latestPending) current = { ...current, verified: false };
+        this.pending.push(current); this.failures.set(`${latestPending ? 'latest' : 'detail'}:${current.key}`, messageOf(cause));
         // A failed detail remains unknown. The user's includeUnknown preference decides its visibility.
-        this.finish(current); this.publish();
+        if (!latestPending) this.finish(current);
+        this.publish();
       }
     };
     try {

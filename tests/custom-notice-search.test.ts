@@ -4,7 +4,7 @@ import { DEFAULT_ALERT_SETTINGS, type AlertNotice, type AlertSettings } from '..
 import type { G2bNoticeDetail, G2bNoticePage } from '../src/g2b-types';
 import {
   CustomNoticesController, browserCustomNoticeRepository, planCustomNoticeSearch,
-  visibleCustomNotices, type CustomNoticeQuery, type CustomNoticeRepository,
+  visibleCustomNotices, CUSTOM_ACTIVE_MAX_DAYS, type CustomNoticeQuery, type CustomNoticeRepository,
 } from '../src/live/custom-notice-search';
 import { fetchApi } from '../src/live/client';
 
@@ -128,6 +128,161 @@ describe('custom notice request planning', () => {
     const params = new URL(path, 'https://test.local').searchParams;
     expect(Object.fromEntries(params)).toMatchObject({ type: '공사', from: '2026-10-09', to: '2026-10-15', page: '2', pageSize: '100', agency: '교육청', minAmount: '0', maxAmount: '999', excludeClosed: '1' });
     expect(params.has('profile')).toBe(false); expect(params.has('userId')).toBe(false); expect(params.has('window')).toBe(false);
+  });
+});
+
+describe('active notices use opening dates and verify every latest revision', () => {
+  const activeQuery = (filter: Partial<AlertSettings['filter']> = {}): CustomNoticeQuery => ({
+    ...query(filter), basis: 'opening', from: '2026-10-15', to: '2027-10-15',
+  });
+  const oldOpen = (number = 'R26BK01359594', overrides: Partial<AlertNotice> = {}) => notice(number, {
+    postedAt: '2026-02-26T17:23:00+09:00', sourceUpdatedAt: '2026-02-26T17:23:00+09:00',
+    openingAt: '2027-03-05T11:00:00+09:00', deadline: '2027-03-05T10:00:00+09:00', status: '접수중', ...overrides,
+  });
+  it('covers 366 inclusive opening days in provider windows and preserves old posting limits', () => {
+    const plan = planCustomNoticeSearch(activeQuery());
+    expect(CUSTOM_ACTIVE_MAX_DAYS).toBe(366); expect(plan.query.basis).toBe('opening');
+    expect(plan.sources).toHaveLength(12);
+    expect(plan.sources.every(source => source.basis === 'opening' && Date.parse(source.to) - Date.parse(source.from) <= 30 * 86_400_000)).toBe(true);
+    expect(plan.sources[0].from).toBe('2026-10-15'); expect(plan.sources.at(-1)?.to).toBe('2027-10-15');
+    expect(() => planCustomNoticeSearch({ ...activeQuery(), to: '2027-10-16' })).toThrow('366일');
+    expect(() => planCustomNoticeSearch({ ...query(), to: '2027-10-15' })).toThrow('90일');
+  });
+  it('propagates opening dates and sends an all-revision number lookup without the original order', async () => {
+    vi.mocked(fetchApi).mockResolvedValue(page([]));
+    const source = planCustomNoticeSearch(activeQuery()).sources[0];
+    await browserCustomNoticeRepository.notices(source, 1, new AbortController().signal);
+    expect(new URL(String(vi.mocked(fetchApi).mock.calls[0][0]), 'https://test.local').searchParams.get('basis')).toBe('opening');
+    await browserCustomNoticeRepository.lookup!(oldOpen(), new AbortController().signal);
+    const params = new URL(String(vi.mocked(fetchApi).mock.calls[1][0]), 'https://test.local').searchParams;
+    expect(Object.fromEntries(params)).toEqual({ mode: 'number', type: '공사', number: 'R26BK01359594' });
+  });
+  it('discovers a February posting with a future opening date and publishes it only after complete latest verification', async () => {
+    let finish!: (value: G2bNoticePage) => void;
+    const lookup = vi.fn<NonNullable<CustomNoticeRepository['lookup']>>(() => new Promise(resolve => { finish = resolve; }));
+    const detail = vi.fn<CustomNoticeRepository['detail']>();
+    const controller = new CustomNoticesController({ ...repository(async () => page([oldOpen()]), detail), lookup }, () => now);
+    controller.setUser('a'); const pending = controller.search(activeQuery());
+    await vi.waitFor(() => expect(lookup).toHaveBeenCalledTimes(1));
+    expect(controller.getSnapshot().items).toEqual([]);
+    finish(page([oldOpen()])); await pending;
+    expect(controller.getSnapshot()).toMatchObject({ items: [expect.objectContaining({ postedAt: '2026-02-26T17:23:00+09:00' })], checkedCount: 1, hasMore: false });
+    expect(detail).not.toHaveBeenCalled(); expect(lookup).toHaveBeenCalledTimes(1);
+  });
+  it('never publishes original 000 when the complete latest revision is a cancellation, even without requested details', async () => {
+    const cancel = oldOpen('R26BK01359594', { revision: '001', status: '취소', sourceUpdatedAt: '2026-02-27T10:00:00+09:00' });
+    const detail = vi.fn<CustomNoticeRepository['detail']>();
+    const controller = new CustomNoticesController({ ...repository(async () => page([oldOpen()]), detail), lookup: async () => page([cancel, oldOpen()]) }, () => now);
+    controller.setUser('a'); await controller.search(activeQuery({ includeUnknown: true }));
+    expect(controller.getSnapshot()).toMatchObject({ items: [], excludedItems: [expect.objectContaining({ revision: '001', status: '취소' })], checkedCount: 1, hasMore: false });
+    expect(detail).not.toHaveBeenCalled();
+  });
+  it.each(['missing', 'failure', 'partial', 'count', 'wrong-number', 'wrong-type', 'invalid-revision', 'duplicate'])(
+    'keeps unverified originals hidden when latest lookup is %s and exposes a retry', async mode => {
+      const bid = oldOpen();
+      const lookup = mode === 'missing' ? undefined : async () => {
+        if (mode === 'failure') throw new Error('최신 차수 조회 실패');
+        const result = page(mode === 'duplicate' ? [bid, { ...bid }] : [{ ...bid,
+          ...(mode === 'wrong-number' ? { number: 'OTHER' } : {}), ...(mode === 'wrong-type' ? { type: '용역' as const } : {}),
+          ...(mode === 'invalid-revision' ? { revision: 'abc' } : {}) }], mode === 'partial');
+        if (mode === 'count') result.totalCount++;
+        return result;
+      };
+      const controller = new CustomNoticesController({ ...repository(async () => page([bid])), lookup }, () => now);
+      controller.setUser('a'); await controller.search(activeQuery({ includeUnknown: true }));
+      expect(controller.getSnapshot()).toMatchObject({ items: [], excludedItems: [], checkedCount: 0, hasMore: true });
+      expect(controller.getSnapshot().error).not.toBe('');
+    });
+  it('retries latest verification and applies required details to the changed revision, never the obsolete original', async () => {
+    let failed = true;
+    const changed = oldOpen('R26BK01359594', { revision: '002', id: 'g2b:공사:R26BK01359594:002', sourceUpdatedAt: '2026-10-01T11:00:00+09:00' });
+    const detail = vi.fn<CustomNoticeRepository['detail']>(async bid => ({ number: bid.number, revision: bid.revision,
+      regionComplete: true, licenseComplete: true, allowedRegions: ['전국'], licenses: ['철거'], fetchedAt: '2026-10-15T03:00:00Z', warnings: [] }));
+    const controller = new CustomNoticesController({ ...repository(async () => page([oldOpen()]), detail), lookup: async () => {
+      if (failed) throw new Error('연결 실패'); return page([oldOpen(), changed]);
+    } }, () => now);
+    controller.setUser('a'); await controller.search(activeQuery({ licenses: ['철거'], includeUnknown: true }));
+    expect(controller.getSnapshot().items).toEqual([]); expect(detail).not.toHaveBeenCalled();
+    failed = false; await controller.loadMore();
+    expect(detail).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ revision: '002' }), expect.any(AbortSignal));
+    expect(controller.getSnapshot()).toMatchObject({ items: [expect.objectContaining({ revision: '002', sourceUpdatedAt: '2026-10-01T11:00:00+09:00', licenseComplete: true })], error: '', hasMore: false });
+  });
+  it('removes latest closed results and skips details for known latest mismatches', async () => {
+    const bids = [oldOpen('CLOSED'), oldOpen('MISMATCH')];
+    const detail = vi.fn<CustomNoticeRepository['detail']>();
+    const controller = new CustomNoticesController({ ...repository(async () => page(bids), detail), lookup: async bid => page([
+      oldOpen(bid.number, bid.number === 'CLOSED' ? { revision: '001', deadline: '2026-10-14T10:00:00+09:00' } : { revision: '001', title: '다른 공사' }),
+    ]) }, () => now);
+    controller.setUser('a'); await controller.search(activeQuery({ keywords: ['철거'], licenses: ['철거'] }));
+    expect(controller.getSnapshot()).toMatchObject({ items: [], excludedItems: [expect.objectContaining({ number: 'CLOSED' })], checkedCount: 2 });
+    expect(detail).not.toHaveBeenCalled();
+  });
+  it('caps complete latest validation at 20 candidates per batch and continues without repeating verified candidates', async () => {
+    const bids = Array.from({ length: 25 }, (_, index) => oldOpen(`ACTIVE${index}`));
+    const lookup = vi.fn<NonNullable<CustomNoticeRepository['lookup']>>(async bid => page([bids.find(item => item.number === bid.number)!]));
+    const controller = new CustomNoticesController({ ...repository(async () => page(bids)), lookup }, () => now);
+    controller.setUser('a'); await controller.search(activeQuery());
+    expect(lookup).toHaveBeenCalledTimes(20); expect(controller.getSnapshot()).toMatchObject({ items: expect.any(Array), checkedCount: 20, hasMore: true });
+    await controller.loadMore(); expect(lookup).toHaveBeenCalledTimes(25);
+    expect(controller.getSnapshot()).toMatchObject({ items: expect.any(Array), checkedCount: 25, hasMore: false });
+    expect(controller.getSnapshot().items).toHaveLength(25);
+  });
+  it('withholds an unknown latest opening date, then rechecks the latest revision before applying the date range', async () => {
+    let openingAt = '';
+    const controller = new CustomNoticesController({ ...repository(async () => page([oldOpen()])),
+      lookup: async () => page([oldOpen('R26BK01359594', { revision: '001', openingAt })]) }, () => now);
+    controller.setUser('a'); await controller.search(activeQuery({ includeUnknown: true }));
+    expect(controller.getSnapshot()).toMatchObject({ items: [], checkedCount: 0, hasMore: true });
+    expect(controller.getSnapshot().error).toContain('개찰일');
+    openingAt = '2028-03-01T10:00:00+09:00'; await controller.loadMore();
+    expect(controller.getSnapshot()).toMatchObject({ items: [], excludedItems: [], checkedCount: 1, hasMore: false, error: '' });
+  });
+  it('does not let a late original lookup overwrite a newer cancellation discovered while it was in flight', async () => {
+    const original = oldOpen('R26BK01359594', { openingAt: '2026-10-20T10:00:00+09:00' });
+    const cancelled = { ...original, revision: '001', status: '취소' as const, sourceUpdatedAt: '2026-10-16T10:00:00+09:00' };
+    let finish!: (value: G2bNoticePage) => void;
+    const lookup = vi.fn<NonNullable<CustomNoticeRepository['lookup']>>((bid) => (bid as AlertNotice).revision === '000'
+      ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(page([cancelled, original])));
+    const controller = new CustomNoticesController({ ...repository(async (_source, currentPage) => page([currentPage === 1 ? original : cancelled], currentPage === 1, currentPage)), lookup }, () => now);
+    controller.setUser('a'); const pending = controller.search({ ...activeQuery(), to: '2026-10-31' });
+    await vi.waitFor(() => expect(controller.getSnapshot().excludedItems).toHaveLength(1));
+    expect(controller.getSnapshot().items).toEqual([]);
+    finish(page([original])); await pending;
+    expect(controller.getSnapshot()).toMatchObject({ items: [], excludedItems: [expect.objectContaining({ revision: '001' })], checkedCount: 1, error: '' });
+  });
+  it('revalidates a changed status at the same revision and removes its previous active match', async () => {
+    const original = oldOpen('R26BK01359594', { openingAt: '2026-10-20T10:00:00+09:00' });
+    const cancelled = { ...original, status: '취소' as const };
+    let lastPage = 0;
+    const controller = new CustomNoticesController({ ...repository(async (_source, currentPage) => {
+      lastPage = currentPage; return page([currentPage < 13 ? original : cancelled], currentPage < 13, currentPage);
+    }), lookup: async () => page([lastPage < 13 ? original : cancelled]) }, () => now);
+    controller.setUser('a'); await controller.search({ ...activeQuery(), to: '2026-10-31' });
+    expect(controller.getSnapshot()).toMatchObject({ items: [expect.any(Object)], hasMore: true });
+    await controller.loadMore();
+    expect(controller.getSnapshot()).toMatchObject({ items: [], excludedItems: [expect.objectContaining({ revision: '000', status: '취소' })], hasMore: false });
+  });
+  it('ignores an old-account latest lookup that resolves after account change', async () => {
+    let finish!: (value: G2bNoticePage) => void; let signal!: AbortSignal;
+    const controller = new CustomNoticesController({ ...repository(async () => page([oldOpen()])), lookup: async (_bid, abort) => {
+      signal = abort; return new Promise(resolve => { finish = resolve; });
+    } }, () => now);
+    controller.setUser('a'); const pending = controller.search(activeQuery());
+    await vi.waitFor(() => expect(signal).toBeDefined()); controller.setUser('b');
+    expect(signal.aborted).toBe(true); expect(visibleCustomNotices(controller.getSnapshot(), 'b')).toMatchObject({ items: [], excludedItems: [] });
+    finish(page([oldOpen()])); await pending;
+    expect(controller.getSnapshot()).toMatchObject({ userId: 'b', items: [], excludedItems: [], apiRequests: 0, loading: false });
+  });
+  it('keeps mandatory version validation and subsequent details within four concurrent candidate checks', async () => {
+    let inFlight = 0, maximum = 0;
+    const pause = async () => { maximum = Math.max(maximum, ++inFlight); await new Promise(resolve => setTimeout(resolve, 1)); inFlight--; };
+    const bids = Array.from({ length: 8 }, (_, index) => oldOpen(`ACTIVE${index}`));
+    const controller = new CustomNoticesController({ ...repository(async () => page(bids), async bid => {
+      await pause(); return { number: bid.number, revision: bid.revision, regionComplete: true, licenseComplete: true,
+        allowedRegions: ['전국'], licenses: ['철거'], fetchedAt: '2026-10-15T03:00:00Z', warnings: [] };
+    }), lookup: async bid => { await pause(); return page([bids.find(item => item.number === bid.number)!]); } }, () => now);
+    controller.setUser('a'); await controller.search(activeQuery({ licenses: ['철거'], includeUnknown: true }));
+    expect(maximum).toBe(4); expect(controller.getSnapshot().items).toHaveLength(8);
   });
 });
 

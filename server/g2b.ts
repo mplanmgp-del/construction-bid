@@ -135,8 +135,16 @@ export function mapResult(row: Row, type: G2bBusinessType, index = 0): G2bOpenin
 
 export interface SearchQuery {
   type: G2bBusinessType; from: string; to: string; page: number; pageSize: number; keyword: string;
+  basis?: 'opening';
   agency?: string; demandAgency?: string; license?: string;
   minAmount?: number; maxAmount?: number; excludeClosed?: boolean;
+}
+export function parseNoticeNumberQuery(params: URLSearchParams): { type: G2bBusinessType; number: string } {
+  const type = params.get('type'), number = params.get('number')?.trim() || '';
+  if ((type !== '공사' && type !== '용역') || !/^[a-zA-Z0-9_-]{1,40}$/.test(number)) {
+    throw new G2bError(400, 'INVALID_QUERY', '공고번호와 업무 구분을 확인해 주세요.');
+  }
+  return { type, number };
 }
 function integerParam(value: string | null, fallback: number, maximum: number): number {
   if (value === null) return fallback;
@@ -154,6 +162,9 @@ export function parseSearch(params: URLSearchParams, maximumDays = 31): SearchQu
   const keyword = params.get('keyword')?.trim() || '';
   if (keyword.length > 100 || /[\u0000-\u001f]/.test(keyword)) throw new G2bError(400, 'INVALID_QUERY', '검색어는 100자 이내로 입력해 주세요.');
   const query: SearchQuery = { type, from, to, keyword, page: integerParam(params.get('page'), 1, 10_000), pageSize: integerParam(params.get('pageSize'), 100, 100) };
+  const basis = params.get('basis') ?? 'posted';
+  if (basis !== 'posted' && basis !== 'opening') throw new G2bError(400, 'INVALID_QUERY', '조회 기준은 공고 게시일 또는 개찰일로 선택해 주세요.');
+  if (basis === 'opening') query.basis = basis;
   for (const name of ['agency', 'demandAgency', 'license'] as const) {
     const raw = params.get(name) ?? '', value = raw.trim();
     if (value.length > 100 || /[\u0000-\u001f\u007f]/.test(raw)) throw new G2bError(400, 'INVALID_QUERY', '기관명과 면허명은 제어문자 없이 100자 이내로 입력해 주세요.');
@@ -289,7 +300,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
   }
   async function notices(query: SearchQuery): Promise<G2bNoticePage> {
     const result = await request(BID_BASE, query.type === '공사' ? 'getBidPblancListInfoCnstwkPPSSrch' : 'getBidPblancListInfoServcPPSSrch', {
-      inqryDiv: '1', inqryBgnDt: query.from.replaceAll('-', '') + '0000', inqryEndDt: query.to.replaceAll('-', '') + '2359',
+      inqryDiv: query.basis === 'opening' ? '2' : '1', inqryBgnDt: query.from.replaceAll('-', '') + '0000', inqryEndDt: query.to.replaceAll('-', '') + '2359',
       pageNo: String(query.page), numOfRows: String(query.pageSize), ...(query.keyword ? { bidNtceNm: query.keyword } : {}),
       ...(query.agency ? { ntceInsttNm: query.agency } : {}), ...(query.demandAgency ? { dminsttNm: query.demandAgency } : {}),
       ...(query.license ? { indstrytyNm: query.license } : {}),
@@ -301,6 +312,23 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     const items = result.items.map(row => mapNotice(row, query.type, now()));
     return { items, totalCount: result.totalCount, page: query.page, pageSize: query.pageSize,
       hasMore: query.page * query.pageSize < result.totalCount, fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings };
+  }
+  async function lookupNotices(type: G2bBusinessType, number: string): Promise<G2bNoticePage> {
+    const query = parseNoticeNumberQuery(new URLSearchParams({ type, number }));
+    // Omitting bidNtceOrd requests the complete history for this notice number.
+    // Publication dates must not hide an old notice whose deadline is still open.
+    const operation = query.type === '공사' ? 'getBidPblancListInfoCnstwk' : 'getBidPblancListInfoServc';
+    const params = { inqryDiv: '2', bidNtceNo: query.number, pageNo: '1', numOfRows: '999' };
+    const result = await request(BID_BASE, operation, params);
+    if (result.totalCount > 999 || result.items.length !== result.totalCount
+      || result.items.some(row => !matchesNoticeRow(row, query.number, text(row.bidNtceOrd).padStart(3, '0'), query.type))
+      || new Set(result.items.map(identity)).size !== result.items.length) {
+      cache.delete(`provider:${BID_BASE}:${operation}:${new URLSearchParams(params)}`);
+      throw new G2bError(502, 'G2B_INCOMPLETE_RESPONSE', '공고의 전체 변경·취소 이력을 확인하지 못했습니다. 최신 상태를 판단할 수 없어 조회를 중단했습니다. 잠시 후 다시 조회해 주세요.');
+    }
+    const items = result.items.map(row => mapNotice(row, query.type, now())).sort((first, second) => Number(second.revision) - Number(first.revision));
+    return { items, totalCount: items.length, page: 1, pageSize: 999, hasMore: false,
+      fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings: [] };
   }
   async function detail(number: string, revision: string, type: G2bBusinessType): Promise<G2bNoticeDetail> {
     const params = { inqryDiv: '2', bidNtceNo: number, bidNtceOrd: revision, pageNo: '1', numOfRows: '999' };
@@ -399,7 +427,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       return { items, totalCount: items.length, page: 1, pageSize: items.length, hasMore: false, fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings };
     });
   }
-  return { notices, startNotices, detail, results, related, resultSummary, participationRegions, noticeRegions,
+  return { notices, lookupNotices, startNotices, detail, results, related, resultSummary, participationRegions, noticeRegions,
     openingResults, company: createCompanyLoader(request, now), companyNames: createCompanyNameLoader(request, now), companyAwards: createCompanyAwardsLoader(request, now),
     companyParticipation: createCompanyParticipationLoader(request, now), companyContracts: createCompanyContractsLoader(request, now),
     contractArchivePage: createContractArchivePageLoader(request, now), companyArchive: createCompanyLoader(request, now, { maxPages: 1 }),

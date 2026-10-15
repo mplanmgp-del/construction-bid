@@ -1,4 +1,4 @@
-import { createG2bClient, G2bError, parseSearch } from './g2b.ts';
+import { createG2bClient, G2bError, parseNoticeNumberQuery, parseSearch } from './g2b.ts';
 import { waitUntil } from '@vercel/functions';
 import { loadPublicSearch } from './public-search-cache.ts';
 import { ProviderQuotaError } from './provider-quota.ts';
@@ -93,7 +93,13 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
       const body = await api.noticeRegions(notices, type);
       return { status: 200, body, ...(body.retryAfterSeconds ? { retryAfterSeconds: body.retryAfterSeconds } : {}) };
     }
-    if (path === '/api/notices') return { status: 200, body: await api.notices(parseSearch(params)) };
+    if (path === '/api/notices') {
+      if (params.get('mode') === 'number') {
+        const query = parseNoticeNumberQuery(params);
+        return { status: 200, body: await api.lookupNotices(query.type, query.number) };
+      }
+      return { status: 200, body: await api.notices(parseSearch(params)) };
+    }
     if (path === '/api/notices-start') {
       const index = params.get('window') ?? '';
       if (!/^[0-3]$/.test(index)) throw new G2bError(400, 'INVALID_QUERY', '조회 구간이 올바르지 않습니다.');

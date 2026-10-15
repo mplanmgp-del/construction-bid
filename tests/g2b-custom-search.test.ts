@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createG2bClient, parseSearch } from '../server/g2b';
+import { handleG2bRequest } from '../server/http';
 
 const params = (changes: Record<string, string> = {}) => new URLSearchParams({
   type: '공사', from: '2026-10-01', to: '2026-10-15', keyword: '철거', ...changes,
@@ -16,6 +17,23 @@ describe('custom notice query validation', () => {
     expect(parseSearch(params({ agency: ' 서울시 ', demandAgency: ' 교육청 ', license: ' 구조물해체·비계공사업 ', minAmount: '0', maxAmount: '9007199254740991', excludeClosed: '1' })))
       .toEqual({ type: '공사', from: '2026-10-01', to: '2026-10-15', keyword: '철거', page: 1, pageSize: 100,
         agency: '서울시', demandAgency: '교육청', license: '구조물해체·비계공사업', minAmount: 0, maxAmount: 9007199254740991, excludeClosed: true });
+  });
+
+  it('uses posting dates by default and preserves the legacy query shape for explicit posting dates', () => {
+    expect(parseSearch(params({ basis: 'posted' }))).toEqual(parseSearch(params()));
+  });
+
+  it('keeps an explicit opening-date basis for searches across old publication dates', () => {
+    expect(parseSearch(params({ basis: 'opening' }))).toMatchObject({ basis: 'opening', from: '2026-10-01', to: '2026-10-15' });
+  });
+
+  it.each(['', 'biddingStart', 'deadline', '2', 'OPENING'])('rejects unsupported date basis %j', basis => {
+    expect(() => parseSearch(params({ basis }))).toThrow();
+  });
+
+  it('retains the 31-day provider-window limit for opening-date searches', () => {
+    expect(() => parseSearch(params({ basis: 'opening', from: '2026-10-01', to: '2026-11-01' }))).toThrow();
+    expect(parseSearch(params({ basis: 'opening', from: '2026-10-01', to: '2026-10-31' }))).toMatchObject({ basis: 'opening' });
   });
 
   it.each(['agency', 'demandAgency', 'license'])('rejects overlong or control-containing %s conditions', field => {
@@ -37,6 +55,19 @@ describe('custom notice query validation', () => {
 });
 
 describe('custom conditions at the official notice API boundary', () => {
+  it.each(['공사', '용역'] as const)('passes %s opening-date bounds to inqryDiv 2 on the existing route', async type => {
+    let outgoing: URL | undefined;
+    const api = createG2bClient({ serviceKey: 'test', fetcher: async input => {
+      outgoing = new URL(String(input));
+      return Response.json({ response: { header: { resultCode: '00' }, body: { items: [], totalCount: 0 } } });
+    } });
+    const result = await handleG2bRequest('/api/notices', params({ type, basis: 'opening', agency: '서울시', excludeClosed: '1' }), api);
+    expect(result.status).toBe(200);
+    expect(outgoing?.pathname).toBe(`/1230000/ad/BidPublicInfoService/${type === '공사' ? 'getBidPblancListInfoCnstwkPPSSrch' : 'getBidPblancListInfoServcPPSSrch'}`);
+    expect(Object.fromEntries(outgoing!.searchParams)).toEqual({ inqryDiv: '2', inqryBgnDt: '202610010000', inqryEndDt: '202610152359',
+      pageNo: '1', numOfRows: '100', bidNtceNm: '철거', ntceInsttNm: '서울시', bidClseExcpYn: 'Y', type: 'json', serviceKey: 'test' });
+  });
+
   it.each(['공사', '용역'])('passes supported %s filters to one posting-date API request', async type => {
     const urls: URL[] = [];
     const api = createG2bClient({ serviceKey: 'test', fetcher: async input => {
