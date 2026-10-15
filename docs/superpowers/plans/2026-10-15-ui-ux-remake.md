@@ -48,5 +48,5 @@ Files: 기능별 CSS 및 src/ui/supporting-workspaces.css.
 - [x] 전체 Vitest --maxWorkers=4, npm run build, git diff --check.
 - [x] 실제 브라우저 390/768/1440px, 검색/번호/오류/필터/상세·계정·알림 확인.
 - [x] 코드 검토 및 관찰된 문제 수정, 증거 문서.
-- [ ] 원래 폴더에 안전하게 통합, 운영배포 없음.
-- [ ] 자동작업 PAUSED와 결과 안내.
+- [x] 원래 폴더에 안전하게 통합, 운영배포 없음.
+- [x] 자동작업 PAUSED와 결과 안내.
