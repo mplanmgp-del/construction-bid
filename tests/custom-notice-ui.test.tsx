@@ -1,10 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { CustomNoticeResults, CustomNoticeSearch } from '../src/live/CustomNoticeSearch';
+import { customLookupAction, CustomNoticeResults, CustomNoticeSearch } from '../src/live/CustomNoticeSearch';
 import { DEFAULT_ALERT_SETTINGS, type AlertNotice } from '../src/alerts/types';
 import { NOTICES, DEMO_PROFILES } from '../src/data';
 import type { useCustomNotices } from '../src/live/useCustomNotices';
 import { LiveSearch } from '../src/live/LiveSearch';
+import type { CustomNoticeQuery } from '../src/live/custom-notice-search';
 
 const now = Date.parse('2026-10-15T03:00:00Z');
 const settings = { ...structuredClone(DEFAULT_ALERT_SETTINGS), enabled: false,
@@ -15,6 +16,21 @@ const search: ReturnType<typeof useCustomNotices> = { userId: 'a', items: [bid],
   candidateCount: 1, checkedCount: 1, apiRequests: 1, fetchedAt: null, search: async () => {}, loadMore: async () => {}, clear: () => {} };
 const results = (state: Partial<typeof search> = {}) => renderToStaticMarkup(<CustomNoticeResults search={{ ...search, ...state }} settings={settings}
   profile={DEMO_PROFILES[0]} bookmarks={[bid.id]} onBookmark={() => {}} onOpen={() => {}} now={now} />);
+
+describe('blue lookup button continuation policy', () => {
+  const query: CustomNoticeQuery = { settings, profile: DEMO_PROFILES[0], from: '2026-07-18', to: '2026-10-15' };
+  it('continues pending ranges instead of resetting a repeated query', () => {
+    expect(customLookupAction(query, structuredClone(query), true)).toBe('more');
+    expect(customLookupAction(query, { ...query, settings: { ...settings, enabled: true } }, true)).toBe('more');
+  });
+  it('starts a new lookup after a date, filter, or company change, or once coverage is complete', () => {
+    expect(customLookupAction(null, query, true)).toBe('search');
+    expect(customLookupAction(query, query, false)).toBe('search');
+    expect(customLookupAction(query, { ...query, from: '2026-10-09' }, true)).toBe('search');
+    expect(customLookupAction(query, { ...query, settings: { ...settings, filter: { ...settings.filter, minAmount: 100 } } }, true)).toBe('search');
+    expect(customLookupAction(query, { ...query, profile: { ...DEMO_PROFILES[0], province: '경기도' } }, true)).toBe('search');
+  });
+});
 
 describe('custom lookup result integrity', () => {
   it('exposes the custom entry point alongside the general search form', () => {
@@ -51,5 +67,7 @@ describe('custom lookup result integrity', () => {
     const html = renderToStaticMarkup(<CustomNoticeSearch {...base} userId="a" settingsError="조건 연결 실패" onRetrySettings={() => {}} />);
     expect(html).toContain('조건 연결 실패');
     expect(html).toContain('조건 다시 불러오기');
+    expect(html).toContain('최근 90일');
+    expect(html).toContain('최대 90일');
   });
 });

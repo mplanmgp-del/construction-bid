@@ -82,10 +82,42 @@ describe('custom notice request planning', () => {
     input.profile = { id: 'a', companyName: 'A', province: '', district: '', address: '', contactName: '', email: '', licenses: ['철거', '석면'] };
     expect(planCustomNoticeSearch(input).sources.map(source => source.license)).toEqual(['철거', '석면']);
   });
-  it('validates the publication period and keeps it unchanged without a 90-day lookback', () => {
+  it('keeps a legacy 7-day publication period unchanged and validates the requested order', () => {
     expect(planCustomNoticeSearch(query()).sources[0]).toMatchObject({ from: '2026-10-09', to: '2026-10-15' });
-    expect(() => planCustomNoticeSearch({ ...query(), from: '2026-09-14' })).toThrow('31일');
     expect(() => planCustomNoticeSearch({ ...query(), from: '2026-10-16' })).toThrow('종료일');
+  });
+  it('covers exactly 90 publication days with non-overlapping provider windows of at most 31 days, newest first', () => {
+    const plan = planCustomNoticeSearch({ ...query(), from: '2026-07-18' });
+    expect(plan.query).toMatchObject({ from: '2026-07-18', to: '2026-10-15' });
+    expect(plan.sources.map(({ from, to }) => ({ from, to }))).toEqual([
+      { from: '2026-09-15', to: '2026-10-15' },
+      { from: '2026-08-15', to: '2026-09-14' },
+      { from: '2026-07-18', to: '2026-08-14' },
+    ]);
+    const days = plan.sources.flatMap(source => Array.from({ length: (Date.parse(source.to) - Date.parse(source.from)) / 86_400_000 + 1 },
+      (_, index) => new Date(Date.parse(source.from) + index * 86_400_000).toISOString().slice(0, 10)));
+    expect(days).toHaveLength(90); expect(new Set(days).size).toBe(90);
+    expect([...days].sort()[0]).toBe('2026-07-18'); expect([...days].sort().at(-1)).toBe('2026-10-15');
+  });
+  it('repeats the complete keyword and business-type union for every date window', () => {
+    const plan = planCustomNoticeSearch({ ...query({ keywords: ['철거'], types: ['공사', '용역'] }), from: '2026-07-18' });
+    expect(plan.sources).toHaveLength(18);
+    for (let index = 0; index < 3; index++) {
+      const window = plan.sources.slice(index * 6, (index + 1) * 6);
+      expect(new Set(window.map(source => `${source.from}/${source.to}`)).size).toBe(1);
+      expect(window.map(source => `${source.type}:${source.keyword ? 'title' : source.agency ? 'agency' : 'demand'}`))
+        .toEqual(['공사:title', '용역:title', '공사:agency', '용역:agency', '공사:demand', '용역:demand']);
+    }
+  });
+  it('accepts a 31-day window unchanged and splits a 32-day window without overlap', () => {
+    expect(planCustomNoticeSearch({ ...query(), from: '2026-09-15' }).sources).toHaveLength(1);
+    expect(planCustomNoticeSearch({ ...query(), from: '2026-09-14' }).sources.map(({ from, to }) => ({ from, to })))
+      .toEqual([{ from: '2026-09-15', to: '2026-10-15' }, { from: '2026-09-14', to: '2026-09-14' }]);
+  });
+  it('keeps date boundaries exact across a leap day and rejects the 91st day', () => {
+    expect(planCustomNoticeSearch({ ...query(), from: '2024-01-01', to: '2024-03-30' }).sources.map(({ from, to }) => ({ from, to })))
+      .toEqual([{ from: '2024-02-29', to: '2024-03-30' }, { from: '2024-01-29', to: '2024-02-28' }, { from: '2024-01-01', to: '2024-01-28' }]);
+    expect(() => planCustomNoticeSearch({ ...query(), from: '2026-07-17' })).toThrow('90일');
   });
   it('sends only public API fields and explicit page parameters to /api/notices', async () => {
     vi.mocked(fetchApi).mockResolvedValueOnce(page([]));
@@ -182,6 +214,27 @@ describe('custom notice incremental loading and account boundaries', () => {
     expect(requested).toEqual(Array.from({ length: 14 }, (_, index) => index + 1));
     expect(controller.getSnapshot()).toMatchObject({ hasMore: false, items: expect.any(Array), candidateCount: 14, apiRequests: 14 });
   });
+  it('continues every 90-day window and its pages across batches without merging cursors or repeating notices', async () => {
+    const requests: string[] = [];
+    const controller = new CustomNoticesController(repository(async (source, number) => {
+      requests.push(`${source.from}/${source.to}/${source.keyword ? 'title' : source.agency ? 'agency' : 'demand'}/${source.type}/${number}`);
+      return page([notice('R26SHARED001')], number === 1, number);
+    }), () => now);
+    controller.setUser('a'); await controller.search({ ...query({ keywords: ['철거'], types: ['공사', '용역'] }), from: '2026-07-18' });
+    expect(requests).toHaveLength(12); expect(controller.getSnapshot()).toMatchObject({ hasMore: true, apiRequests: 12, candidateCount: 1 });
+    expect(requests.slice(0, 6).every(request => request.startsWith('2026-09-15/2026-10-15/'))).toBe(true);
+    await controller.loadMore(); expect(requests).toHaveLength(24); expect(controller.getSnapshot().hasMore).toBe(true);
+    await controller.loadMore(); expect(requests).toHaveLength(36);
+    expect(new Set(requests).size).toBe(36);
+    for (const start of ['2026-09-15', '2026-08-15', '2026-07-18']) {
+      const range = requests.filter(request => request.startsWith(start));
+      expect(range).toHaveLength(12); expect(range.filter(request => request.endsWith('/1'))).toHaveLength(6);
+      expect(range.filter(request => request.endsWith('/2'))).toHaveLength(6);
+    }
+    expect(controller.getSnapshot()).toMatchObject({ hasMore: false, apiRequests: 36, candidateCount: 1, checkedCount: 1 });
+    expect(controller.getSnapshot().items).toHaveLength(1);
+    await controller.loadMore(); expect(requests).toHaveLength(36);
+  });
   it('verifies at most 20 candidates per batch and leaves remaining candidates for more', async () => {
     const detail = vi.fn<CustomNoticeRepository['detail']>(async bid => ({ number: bid.number, revision: bid.revision, regionComplete: true, licenseComplete: true, allowedRegions: ['전국'], licenses: ['철거'], fetchedAt: '2026-10-15T03:00:00Z', warnings: [] }));
     const controller = new CustomNoticesController(repository(async () => page(Array.from({ length: 25 }, (_, index) => notice(`R26TEST${index}`))), detail), () => now);
@@ -255,8 +308,8 @@ describe('custom notice incremental loading and account boundaries', () => {
   it('makes no provider call for an invalid date range and snapshots input against later edits', async () => {
     const load = vi.fn<CustomNoticeRepository['notices']>(async () => page([notice()]));
     const controller = new CustomNoticesController(repository(load), () => now); controller.setUser('a');
-    await controller.search({ ...query(), to: '2026-11-30' });
-    expect(load).not.toHaveBeenCalled(); expect(controller.getSnapshot().error).toContain('31일');
+    await controller.search({ ...query(), from: '2026-07-17' });
+    expect(load).not.toHaveBeenCalled(); expect(controller.getSnapshot().error).toContain('90일');
     const input = query({ keywords: ['철거'] }); const pending = controller.search(input);
     input.settings.filter.keywords[0] = '없는 검색어'; await pending;
     expect(controller.getSnapshot().items).toHaveLength(1);

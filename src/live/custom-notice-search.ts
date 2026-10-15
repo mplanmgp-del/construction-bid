@@ -23,6 +23,20 @@ const empty = (userId: string | null): CustomNoticesSnapshot => ({ userId, items
 const usable = (value: string) => value.trim() && !/^(?:기관 미제공|미제공|원문 확인|확인 필요|없음|-)$/u.test(value.trim());
 const plainLicense = (value: string) => value.normalize('NFKC').trim();
 const comparableLicense = (value: string) => plainLicense(value).toLowerCase().replace(/[ㆍ・ᆞ]/g, '·').replace(/\s+/g, '').replace(/\/\d+$/, '');
+export const CUSTOM_NOTICE_MAX_DAYS = 90;
+const PROVIDER_WINDOW_DAYS = 31;
+const DAY_MS = 86_400_000;
+function publicationWindows(from: string, to: string): Pick<CustomNoticeSource, 'from' | 'to'>[] {
+  const first = Date.parse(from), windows: Pick<CustomNoticeSource, 'from' | 'to'>[] = [];
+  // The public endpoint accepts at most 31 inclusive days per call. Search the
+  // requested period, newest first, without repeating or omitting boundary days.
+  for (let end = Date.parse(to); end >= first;) {
+    const start = Math.max(first, end - (PROVIDER_WINDOW_DAYS - 1) * DAY_MS);
+    windows.push({ from: new Date(start).toISOString().slice(0, 10), to: new Date(end).toISOString().slice(0, 10) });
+    end = start - DAY_MS;
+  }
+  return windows;
+}
 function safeLicenseAxis(values: string[]): string[] {
   const licenses = [...new Set(values.map(plainLicense))];
   // The provider's partial name search does not promise our whitespace/dot/code normalization.
@@ -32,13 +46,13 @@ function safeLicenseAxis(values: string[]): string[] {
 
 /** Push only one OR axis. The complete saved rule is always evaluated locally. */
 export function planCustomNoticeSearch(input: CustomNoticeQuery): { query: CustomNoticeQuery; sources: CustomNoticeSource[] } {
-  const periodError = dateRangeError(input.from, input.to, 31);
+  const periodError = dateRangeError(input.from, input.to, CUSTOM_NOTICE_MAX_DAYS);
   if (periodError) throw new Error(periodError);
   // Disabling notifications does not disable a deliberate, read-only search.
   const settings = normalizeAlertSettings({ ...input.settings, enabled: false });
   const query: CustomNoticeQuery = { settings, profile: input.profile ? structuredClone(input.profile) : null, from: input.from, to: input.to };
   const filter = settings.filter;
-  const common = { from: query.from, to: query.to, keyword: '', ...(!filter.includeUnknown ? {
+  const common = { keyword: '', ...(!filter.includeUnknown ? {
     excludeClosed: true as const, ...(filter.minAmount !== null ? { minAmount: filter.minAmount } : {}),
     ...(filter.maxAmount !== null ? { maxAmount: filter.maxAmount } : {}),
   } : {}) };
@@ -56,7 +70,8 @@ export function planCustomNoticeSearch(input: CustomNoticeQuery): { query: Custo
     axis.push(...filter.keywords.map(keyword => ({ keyword })), ...filter.keywords.map(agency => ({ agency })),
       ...filter.keywords.map(demandAgency => ({ demandAgency })));
   } else axis.push({});
-  const sources = axis.flatMap(part => filter.types.map(type => ({ ...common, ...part, type })));
+  const sources = publicationWindows(query.from, query.to).flatMap(window =>
+    axis.flatMap(part => filter.types.map(type => ({ ...common, ...window, ...part, type }))));
   return { query, sources: [...new Map(sources.map(source => [JSON.stringify(source), source])).values()] };
 }
 
