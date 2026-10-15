@@ -2,18 +2,11 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Bell, BellRing, CheckCheck, ChevronRight, CircleAlert, Clock3, RefreshCw, Save, Settings2 } from 'lucide-react';
 import { CATEGORIES, type Category, type CompanyProfile } from '../types';
 import { formatDateTime, formatPrice } from '../domain';
-import { DEFAULT_ALERT_SETTINGS, type AlertFilter, type AlertInboxItem, type AlertNotice, type AlertSettings } from './types';
+import { DEFAULT_ALERT_SETTINGS, type AlertFilter, type AlertNotice, type AlertSettings } from './types';
 import type { AlertsAccess } from './useAlerts';
 import { BrowserPushControls } from './BrowserPushControls';
 import { matchAlertNotice, normalizeAlertSettings } from './domain';
 import './alerts.css';
-
-export function AlertBell({ unreadCount, onOpen, disabled = false }: { unreadCount: number; onOpen: () => void; disabled?: boolean }) {
-  const count = Math.max(0, unreadCount);
-  return <button type="button" className="alerts-bell" onClick={onOpen} disabled={disabled} aria-label={count ? `알림, 읽지 않은 알림 ${count}개` : '알림'} title={disabled ? '예시 모드에서는 알림을 사용할 수 없습니다.' : '내 알림'}>
-    <Bell size={21} aria-hidden="true" />{count > 0 && <span className="alerts-unread-badge" aria-hidden="true">{count > 99 ? '99+' : count}</span>}
-  </button>;
-}
 
 interface AlertForm {
   enabled: boolean; notifyChanges: boolean; keywords: string; excludeKeywords: string;
@@ -32,13 +25,12 @@ function formFromSettings(settings: AlertSettings): AlertForm {
 }
 const splitValues = (text: string) => [...new Set(text.split(/[,\n]+/).map(value => value.trim()).filter(Boolean))];
 const timeLabel = (value: string | null) => value ? formatDateTime(value) : '아직 확인 전';
-const eventLabels: Record<AlertInboxItem['kind'], string> = { initial: '첫 알림', new: '새 공고', changed: '주요 변경', cancelled: '취소', test: '테스트' };
 function noticeHref(notice: AlertNotice): string {
   return `/notice-detail.html?${new URLSearchParams({ number: notice.number, revision: notice.revision, type: notice.type })}`;
 }
 
-export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin = false, demo = false, initialFilter, onInitialFilterConsumed }: {
-  alerts: AlertsAccess; signedIn: boolean; onLogin: () => void; profile?: CompanyProfile | null; isAdmin?: boolean; demo?: boolean; initialFilter?: AlertFilter | null; onInitialFilterConsumed?: () => void;
+export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin = false, demo = false, initialFilter, onInitialFilterConsumed, openExistingRequest = 0 }: {
+  alerts: AlertsAccess; signedIn: boolean; onLogin: () => void; profile?: CompanyProfile | null; isAdmin?: boolean; demo?: boolean; initialFilter?: AlertFilter | null; onInitialFilterConsumed?: () => void; openExistingRequest?: number;
 }) {
   const settings = alerts.overview?.settings ?? DEFAULT_ALERT_SETTINGS;
   const [form, setForm] = useState<AlertForm>(() => formFromSettings(settings));
@@ -81,19 +73,21 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
     // Preserve edits made while the request was in progress.
     if (result && editVersion.current === submittedVersion) { dirtyRef.current = false; setDirty(false); }
   }
-  function openExisting() {
+  useEffect(() => {
+    if (openExistingRequest <= 0 || !signedIn || demo) return;
     setShowExisting(true);
-    window.setTimeout(() => existingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
-  }
-  if (demo) return <section className="alerts-page"><div className="alerts-page-heading"><h1>내 알림</h1></div><div className="alerts-login panel"><Bell size={32} /><h2>실제 공고 알림은 회원 모드에서 이용할 수 있습니다.</h2><p>예시 공고는 서버 알림에 포함되지 않습니다.</p></div></section>;
-  if (!signedIn) return <section className="alerts-page"><div className="alerts-page-heading"><div><div className="eyebrow">내 업체에 맞는 공고</div><h1>내 알림</h1></div></div><div className="alerts-login panel"><BellRing size={34} /><h2>관심 조건을 저장하고 새 공고를 받아보세요.</h2><p>로그인하면 알림 조건과 받은 알림을 기기 간에 이어서 사용할 수 있습니다.</p><button type="button" className="button button-primary" onClick={onLogin}>로그인하고 알림 받기<ChevronRight size={16} /></button></div></section>;
+    const timer = window.setTimeout(() => existingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+    return () => window.clearTimeout(timer);
+  }, [openExistingRequest, alerts.userId, signedIn, demo]);
+  if (demo) return <section className="alerts-page"><div className="alerts-page-heading"><h1>알림 조건</h1></div><div className="alerts-login panel"><Bell size={32} /><h2>실제 공고 알림은 회원 모드에서 이용할 수 있습니다.</h2><p>예시 공고는 서버 알림에 포함되지 않습니다.</p></div></section>;
+  if (!signedIn) return <section className="alerts-page"><div className="alerts-page-heading"><div><div className="eyebrow">내 업체에 맞는 공고</div><h1>알림 조건</h1></div></div><div className="alerts-login panel"><BellRing size={34} /><h2>관심 조건을 저장하고 새 공고를 받아보세요.</h2><p>로그인하면 알림 조건과 받은 알림을 기기 간에 이어서 사용할 수 있습니다.</p><button type="button" className="button button-primary" onClick={onLogin}>로그인하고 알림 받기<ChevronRight size={16} /></button></div></section>;
 
   const overview = alerts.overview;
   const status = overview?.status;
   const busy = alerts.saving || alerts.settingUp;
   const existingCount = overview?.existingMatches.length ?? 0;
   return <section className="alerts-page">
-    <div className="alerts-page-heading"><div><div className="eyebrow">새 공고와 중요한 변경을 한곳에</div><h1>내 알림</h1><p>저장한 조건을 서버에서 약 10분마다 확인합니다.</p></div><button type="button" className="button button-secondary" disabled={alerts.loading || busy} onClick={() => { void alerts.refresh(); }}><RefreshCw size={15} className={alerts.loading ? 'alerts-spinning' : ''} /><span>{alerts.loading ? '확인 중' : '새로고침'}</span></button></div>
+    <div className="alerts-page-heading"><div><div className="eyebrow">내 업체에 맞는 공고를 자동으로</div><h1>알림 조건</h1><p>저장한 조건을 서버에서 약 10분마다 확인합니다. 받은 알림은 상단 종 버튼에서 확인하세요.</p></div><button type="button" className="button button-secondary" disabled={alerts.loading || busy} onClick={() => { void alerts.refresh(); }}><RefreshCw size={15} className={alerts.loading ? 'alerts-spinning' : ''} /><span>{alerts.loading ? '확인 중' : '새로고침'}</span></button></div>
     {alerts.error && <div className="alerts-feedback alerts-feedback-error" role="alert"><CircleAlert size={17} /><span>{alerts.error}</span></div>}
     {alerts.message && !alerts.error && <div className="alerts-feedback" role="status"><CheckCheck size={17} /><span>{alerts.message}</span></div>}
     {!overview && <div className="alerts-loading panel" role="status">{alerts.loading ? '회원의 알림 정보를 불러오고 있습니다.' : '알림 정보를 불러오지 못했습니다. 새로고침으로 다시 확인해 주세요.'}</div>}
@@ -107,18 +101,6 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
     </div>}
     <div className="alerts-layout">
       <div className="alerts-main">
-        <section className="alerts-inbox panel" aria-labelledby="alerts-inbox-heading">
-          <div className="alerts-section-heading"><div><Bell size={19} /><h2 id="alerts-inbox-heading">받은 알림 <span>{overview?.unreadCount ?? 0}</span></h2></div><button className="text-button" type="button" disabled={!overview?.unreadCount || alerts.reading} onClick={() => { void alerts.read({ all: true }); }}><CheckCheck size={15} />모두 읽음</button></div>
-          {overview && overview.notifications.length === 0 && <div className="alerts-empty"><Bell size={28} /><h3>아직 받은 알림이 없습니다.</h3><p>{settings.enabled ? '조건에 맞는 공고가 확인되면 이곳에 표시됩니다.' : '알림 조건을 저장하고 알림 받기를 켜주세요.'}</p></div>}
-          <ol className="alerts-inbox-list">{overview?.notifications.map(item => <li key={item.id} className={`alerts-event${item.readAt ? '' : ' is-unread'}`}>
-            <div className="alerts-event-top"><span className={`alerts-event-kind is-${item.kind}`}>{eventLabels[item.kind]}</span><time dateTime={item.createdAt}>{timeLabel(item.createdAt)}</time>{!item.readAt && <span className="alerts-unread-dot" aria-label="읽지 않음" />}</div>
-            {item.notice && <a className="alerts-event-title" href={noticeHref(item.notice)} target="_blank" rel="noopener noreferrer" onClick={() => { if (!item.readAt) void alerts.read({ id: item.id }); }}>{item.notice.title}</a>}
-            <p>{item.message}</p>
-            {item.changeFields.length > 0 && <div className="alerts-change-fields" aria-label="변경 항목">{item.changeFields.map((field, index) => <span key={`${field}-${index}`}>{field}</span>)}</div>}
-            <div className="alerts-event-actions">{item.kind === 'initial' && <button type="button" className="text-button" onClick={openExisting}>기존 공고 {item.existingCount ?? 0}건 보기<ChevronRight size={14} /></button>}{!item.readAt && <button type="button" className="text-button" disabled={alerts.reading} onClick={() => { void alerts.read({ id: item.id }); }}>읽음으로 표시</button>}</div>
-          </li>)}</ol>
-          {overview?.hasMore && <button type="button" className="button button-secondary alerts-load-more" disabled={alerts.loadingMore || alerts.loading} onClick={() => { void alerts.loadMore(); }}>{alerts.loadingMore ? '불러오는 중' : '이전 알림 더 보기'}</button>}
-        </section>
         <details ref={existingRef} className="alerts-existing panel" open={showExisting} onToggle={event => setShowExisting(event.currentTarget.open)}>
           <summary><div><Clock3 size={18} /><strong>조건에 맞는 기존 공고</strong><span>{existingCount}건{overview?.existingHasMore ? '+' : ''}</span></div><ChevronRight size={17} /></summary>
           <div className="alerts-existing-body"><p className="alerts-help">알림을 켤 때 이미 있던 공고를 함께 확인할 수 있습니다.</p>

@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { AlertsController, alertFilterFromSearch, type AlertRepository } from '../src/alerts/useAlerts';
-import { AlertBell, AlertsPage } from '../src/alerts/AlertsPage';
+import { AlertsPage } from '../src/alerts/AlertsPage';
+import { AlertBell, AlertsPopoverContent, alertPopoverPosition } from '../src/alerts/AlertsPopover';
 import { DEFAULT_ALERT_SETTINGS, type AlertOverview } from '../src/alerts/types';
 import { DEFAULT_FILTERS, NOTICES } from '../src/data';
 import { appViewFromHash, appViewHash, menuIsLocked } from '../src/admin/navigation';
@@ -104,9 +105,10 @@ describe('alert presentation and direct links', () => {
       status: { ...overview().status, paused: true, error: '공공데이터 확인 대기', lastCheckedAt: '2026-10-15T01:00:00Z' } });
     const html = renderToStaticMarkup(<AlertsPage alerts={access(data)} signedIn onLogin={() => {}} isAdmin />);
     for (const field of ['keywords', 'excludeKeywords', 'regions', 'licenses', 'minAmount', 'maxAmount']) expect(html).toContain(`name="${field}"`);
-    expect(html).toContain('기존 공고 5건 보기'); expect(html).toContain('공공데이터 확인 대기'); expect(html).toContain('수집 일시 중지');
-    expect(html).toContain('&lt;script&gt;message&lt;/script&gt;'); expect(html).not.toContain('<script>');
-    expect(html).toContain('/notice-detail.html?number='); expect(html).toContain('마감일'); expect(html).toContain('서버 알림 설정');
+    const inbox = renderToStaticMarkup(<AlertsPopoverContent alerts={access(data)} signedIn headingId="inbox-heading" onLogin={() => {}} onClose={() => {}} onOpenSettings={() => {}} onOpenExisting={() => {}} />);
+    expect(inbox).toContain('기존 공고 5건 보기'); expect(html).toContain('공공데이터 확인 대기'); expect(html).toContain('수집 일시 중지');
+    expect(inbox).toContain('&lt;script&gt;message&lt;/script&gt;'); expect(inbox).not.toContain('<script>');
+    expect(inbox).toContain('/notice-detail.html?number='); expect(inbox).toContain('마감일'); expect(html).toContain('서버 알림 설정');
   });
   it('distinguishes a disabled personal rule from a paused server',()=>{
     const data=overview({status:{...overview().status,configured:true,paused:true}});
@@ -136,5 +138,32 @@ describe('alert presentation and direct links', () => {
     const html = renderToStaticMarkup(<AlertsPage alerts={access(data)} signedIn onLogin={() => {}} />);
     expect(html).toContain('<option value="auto" selected="">업무별 기본</option>');
     expect(html).toMatch(/name="minDaysUntilDeadline"[^>]*value=""/);
+  });
+});
+
+
+describe('compact notification popover', () => {
+  it('keeps the panel inside narrow and wide screens with its arrow pointing to the bell', () => {
+    for (const viewport of [320, 390, 1440]) {
+      const rect = { left: viewport - 140, right: viewport - 98, bottom: 65 };
+      const position = alertPopoverPosition(rect, viewport, 720);
+      expect(position.left).toBeGreaterThanOrEqual(12);
+      expect(position.left + position.width).toBeLessThanOrEqual(viewport - 12);
+      expect(position.left + position.arrow).toBe((rect.left + rect.right) / 2);
+      expect(position.top + position.maxHeight).toBeLessThanOrEqual(708);
+    }
+  });
+  it('does not render a previous member inbox or unread badge for a guest', () => {
+    const data = overview({ unreadCount: 3, notifications: [{ id: 'private', kind: 'test', notice: null, message: '다른 회원의 개인 알림', changeFields: [], createdAt: '', readAt: null }] });
+    const html = renderToStaticMarkup(<AlertsPopoverContent alerts={access(data)} signedIn={false} headingId="heading" onLogin={() => {}} onClose={() => {}} onOpenSettings={() => {}} onOpenExisting={() => {}} />);
+    expect(html).toContain('로그인하고 맞춤 공고');
+    expect(html).not.toContain('다른 회원의 개인 알림');
+    expect(html).not.toContain('모두 읽음');
+  });
+  it('exposes the bell dialog relationship and keeps pagination usable inside the popover', () => {
+    const bell = renderToStaticMarkup(<AlertBell unreadCount={2} expanded controls="notifications" onOpen={() => {}} />);
+    expect(bell).toContain('aria-expanded="true"'); expect(bell).toContain('aria-controls="notifications"');
+    const html = renderToStaticMarkup(<AlertsPopoverContent alerts={access(overview({ hasMore: true }))} signedIn headingId="heading" onLogin={() => {}} onClose={() => {}} onOpenSettings={() => {}} onOpenExisting={() => {}} />);
+    expect(html).toContain('이전 알림 더 보기'); expect(html).toContain('알림 조건 설정');
   });
 });

@@ -1,0 +1,45 @@
+.alerts-bell.is-open{background:#eaf1ff;border-color:#a9c4ed;color:#2665c4}
+.alert-popover{position:fixed;z-index:60;display:flex;flex-direction:column;background:#fff;border:1px solid #dce5f2;border-radius:14px;box-shadow:0 12px 38px #203b6b26;color:#243b60;font-family:inherit;outline:none;isolation:isolate}
+.alert-popover::before{content:"";position:absolute;top:-6px;left:calc(var(--alert-arrow-left) - 6px);width:10px;height:10px;transform:rotate(45deg);background:#fff;border-top:1px solid #dce5f2;border-left:1px solid #dce5f2;z-index:-1}
+.alert-popover button{font-family:inherit;cursor:pointer}
+.alert-popover button:disabled{cursor:default;opacity:.45}
+.alert-popover button:focus-visible,.alert-popover a:focus-visible{outline:2px solid #437fe0;outline-offset:2px}
+.alert-popover-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:13px 14px;border-bottom:1px solid #eaf0f7;flex-shrink:0}
+.alert-popover-heading h2{font-size:15px;margin:0;display:flex;align-items:center;gap:7px;color:#183257}
+.alert-popover-heading h2>span{font-size:11px;padding:2px 5px;border-radius:5px;background:#edf3ff;color:#286bcd}
+.alert-popover-heading>div{display:flex;align-items:center;gap:8px}
+.alert-popover-read-all,.alert-popover-close{display:flex;align-items:center;justify-content:center;gap:4px;background:transparent;border:0;color:#6e83a2;padding:5px 0;font-size:11px}
+.alert-popover-close{width:28px;height:28px;padding:4px;border-radius:6px}
+.alert-popover-close:hover{background:#f1f5fb}
+.alert-popover-body{overflow-y:auto;overscroll-behavior:contain;min-height:0;border-radius:0 0 13px 13px}
+.alert-popover-item{padding:14px 16px;border-bottom:1px solid #edf1f7}
+.alert-popover-item:last-of-type{border-bottom:0}
+.alert-popover-item.is-unread{background:#f7faff}
+.alert-popover-meta{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.alert-popover-kind{display:inline-block;background:#eef2f8;border-radius:5px;padding:3px 6px;font-size:10px;font-weight:700;color:#627794}
+.alert-popover-kind.kind-new{background:#eaf3ff;color:#3171c8}
+.alert-popover-kind.kind-changed{background:#fff1dd;color:#996516}
+.alert-popover-kind.kind-cancelled{background:#fff0f0;color:#b14e54}
+.alert-popover-unread{width:5px;height:5px;border-radius:50%;background:#377ce7}
+.alert-popover-meta time{margin-left:auto;font-size:10px;color:#8a9ab0;white-space:nowrap}
+.alert-popover-title{display:flex;align-items:flex-start;gap:4px;color:#243e65;font-size:13px;font-weight:700;line-height:1.55;text-decoration:none;overflow-wrap:anywhere}
+.alert-popover-title svg{flex-shrink:0;margin-top:3px}
+.alert-popover-title:hover{color:#286bcd}
+.alert-popover-message{font-size:12px;line-height:1.65;color:#6d809f;margin:4px 0 0;overflow-wrap:anywhere}
+.alert-popover-changes{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
+.alert-popover-changes span{font-size:10px;color:#976b2d;background:#fff6e7;border-radius:4px;padding:2px 5px}
+.alert-popover-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:10px}
+.alert-popover-actions button{display:flex;align-items:center;gap:2px;padding:2px 0;border:0;background:transparent;color:#708ab0;font-size:11px}
+.alert-popover-actions button:hover{color:#286bcd}
+.alert-popover-more{display:block;width:100%;border:0;border-top:1px solid #edf1f7;background:#fafcff;color:#6d83a5;padding:12px;font-size:12px}
+.alert-popover-settings{display:flex;align-items:center;gap:6px;border:0;border-top:1px solid #e5edf7;padding:13px 16px;background:#f8fafd;color:#486890;font-size:12px;border-radius:0 0 13px 13px;flex-shrink:0}
+.alert-popover-settings>svg:last-child{margin-left:auto}
+.alert-popover-settings:hover{background:#eff5ff}
+.alert-popover-empty{text-align:center;padding:28px 20px;margin:0;color:#8594ac;font-size:12px;line-height:1.7}
+.alert-popover-empty>svg{color:#a5b7d0}
+.alert-popover-empty p{margin:8px 0}
+.alert-popover-empty small{display:block;font-size:11px}
+.alert-popover-empty .button{margin:12px auto 0;font-size:12px;min-height:34px}
+.alert-popover-error{padding:12px 16px;background:#fff6f4;color:#ab5948;font-size:12px;line-height:1.6}
+.alert-popover-error p{margin:0 0 6px}
+.alert-popover-error button{display:flex;align-items:center;gap:4px;border:0;background:transparent;color:inherit;padding:2px 0;font-size:11px}
