@@ -75,7 +75,7 @@ it('restores only the last valid successful public query on reload', () => {
 it('does not restore invalid date ranges or hidden account fields from a modified cache', () => {
   const storage = store(); writeNoticeCache(query, page(), now, storage);
   const entries = JSON.parse(storage.getItem(NOTICE_CACHE_KEY)!);
-  entries.push({ ...entries[0], key: noticeQueryKey({ ...query, from: '2026-01-01' }) });
+  entries.push({ ...entries[0], key: noticeQueryKey({ ...query, from: '2024-01-01' }) });
   entries.push({ ...entries[0], key: JSON.stringify(['공사', query.from, query.to, '철거', { autoRegion: true }]) });
   storage.setItem(NOTICE_CACHE_KEY, JSON.stringify(entries));
   expect(readLastNoticeQuery(now, storage)).toEqual(query);

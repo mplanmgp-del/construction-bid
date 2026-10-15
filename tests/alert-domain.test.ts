@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_ALERT_SETTINGS, type AlertNotice } from '../src/alerts/types';
-import { meaningfulChanges, noticeContentKey, matchAlertNotice, normalizeAlertSettings, latestAlertNotices } from '../src/alerts/domain';
+import { meaningfulChanges, noticeContentKey, matchAlertNotice, matchAlarmNotice, normalizeAlertSettings, latestAlertNotices } from '../src/alerts/domain';
 import type { CompanyProfile } from '../src/types';
 import { mapNotice } from '../server/g2b';
 const now = Date.parse('2026-10-15T10:00:00+09:00');
@@ -14,6 +14,21 @@ const notice = (patch: Partial<AlertNotice> = {}): AlertNotice => ({
 });
 const settings = () => structuredClone(DEFAULT_ALERT_SETTINGS);
 describe('personalized alert content and matching',()=>{
+  it('limits automatic alarms to seven KST calendar days without narrowing manual condition matching',()=>{
+    const s=settings();s.enabled=true;
+    const future=notice({deadline:'2026-11-20T10:00:00+09:00',openingAt:'2026-11-20T11:00:00+09:00'});
+    expect(matchAlertNotice(future,s,null,now).matched).toBe(true);
+    expect(matchAlarmNotice(future,s,null,now).matched).toBe(false);
+    expect(matchAlarmNotice(notice({deadline:'2026-10-22T23:59:59+09:00',openingAt:'2026-10-23T10:00:00+09:00'}),s,null,now).matched).toBe(true);
+    expect(matchAlarmNotice(notice({deadline:'2026-10-23T00:00:00+09:00',openingAt:'2026-10-23T10:00:00+09:00'}),s,null,now).matched).toBe(false);
+  });
+  it('excludes opened notices and accepts submission-closed notices still waiting for opening',()=>{
+    const s=settings();s.enabled=true;
+    expect(matchAlertNotice(notice({openingAt:'2026-10-15T09:59:59+09:00'}),s,null,now).matched).toBe(false);
+    const waiting=notice({status:'마감',deadline:'2026-10-14T10:00:00+09:00',openingAt:'2026-10-16T11:00:00+09:00'});
+    expect(matchAlertNotice(waiting,s,null,now).matched).toBe(true);
+    expect(matchAlarmNotice(waiting,s,null,now).matched).toBe(true);
+  });
   it('preserves the legacy content fingerprint while reporting a new notice revision',()=>{
     const old=notice({licenses:['A','B'],allowedRegions:['서울','경기']});
     const repeated=notice({revision:'001',id:'other',status:'마감',revised:true,sourceUpdatedAt:'2026-10-15T10:00:00+09:00',licenses:['B','A'],allowedRegions:['경기','서울']});
@@ -41,7 +56,7 @@ describe('personalized alert content and matching',()=>{
     const s=settings();s.enabled=true;s.filter.excludeKeywords=['학교'];
     expect(matchAlertNotice(notice(),s,null,now).matched).toBe(false);
     s.filter.excludeKeywords=[];
-    for(const n of [notice({status:'취소'}),notice({deadline:'2026-10-01T10:00:00+09:00'}),notice({source:'demo'})])expect(matchAlertNotice(n,s,null,now).matched).toBe(false);
+    for(const n of [notice({status:'취소'}),notice({deadline:'2026-10-01T10:00:00+09:00',openingAt:'2026-10-01T11:00:00+09:00'}),notice({source:'demo'})])expect(matchAlertNotice(n,s,null,now).matched).toBe(false);
   });
   it('rejects inverted amounts and refuses unbounded automatic alerts',()=>{
     const s=settings();s.enabled=true;s.filter.minAmount=10;s.filter.maxAmount=1;

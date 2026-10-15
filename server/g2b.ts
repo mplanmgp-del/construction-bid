@@ -111,6 +111,7 @@ export function mapNotice(row: Row, type: G2bBusinessType, now = Date.now()): Bi
     // presmptPrce is the official estimated-price field. Never fall back to budget/base price.
     estimatedPrice: money(row.presmptPrce), plannedAmount: money(row.bdgtAmt), contractMethod: text(row.cntrctCnclsMthdNm) || '미제공', status,
     postedAt: koreanTimestamp(row.bidNtceDt), biddingStartAt: begin, deadline, openingAt: koreanTimestamp(row.opengDt),
+    ...(['개찰완료', '유찰'].includes(text(row.progrsDivCdNm)) ? { openingCompleted: true } : {}),
     registrationDeadline: koreanTimestamp(row.bidQlfctRgstDt), licenses: [], duration: '원문 확인',
     description: text(row.chgNtceRsn) || '나라장터에서 수집한 실제 공고입니다. 세부 공사 범위와 참가조건은 원문 및 첨부파일을 확인해 주세요.',
     requirements: unique([text(row.aplBssCntnts), special ? '공동수급 또는 지사 투찰 관련 조건이 있어 원문 확인이 필요합니다.' : '', '공종 분류는 공고명에서 추정한 참고용 분류입니다.']),
@@ -327,6 +328,14 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       throw new G2bError(502, 'G2B_INCOMPLETE_RESPONSE', '공고의 전체 변경·취소 이력을 확인하지 못했습니다. 최신 상태를 판단할 수 없어 조회를 중단했습니다. 잠시 후 다시 조회해 주세요.');
     }
     const items = result.items.map(row => mapNotice(row, query.type, now())).sort((first, second) => Number(second.revision) - Number(first.revision));
+    const latest = items[0];
+    // A submission-closed notice can still be awaiting its future opening.
+    // Check only that head's small exact result summaries, never participant
+    // pages or a date-wide results scan. History remains available unchanged.
+    if (latest && latest.status !== '취소' && Date.parse(latest.deadline) <= now() && Date.parse(latest.openingAt) > now()) {
+      const completion = await resultSummary(latest.number, latest.revision, latest.type, latest.openingAt);
+      if ((completion.openingComplete ?? completion.complete) && ['개찰완료', '유찰'].includes(completion.result)) latest.openingCompleted = true;
+    }
     return { items, totalCount: items.length, page: 1, pageSize: 999, hasMore: false,
       fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings: [] };
   }

@@ -3,10 +3,11 @@ import type { G2bBusinessType, G2bNoticeDetail, G2bNoticePage } from '../g2b-typ
 import { alertNoticeKey, isOlderAlertNotice, matchAlertNotice, normalizeAlertSettings } from '../alerts/domain';
 import type { AlertNotice, AlertSettings } from '../alerts/types';
 import { ApiError, dateRangeError, fetchApi } from './client';
+import { matchesDeadlineWindow } from '../notice-deadline-window';
 
-export interface CustomNoticeQuery { settings: AlertSettings; profile: CompanyProfile | null; from: string; to: string; basis?: 'opening' }
+export interface CustomNoticeQuery { settings: AlertSettings; profile: CompanyProfile | null; from: string; to: string; basis?: 'opening' | 'deadline'; publicKeyword?: string }
 export interface CustomNoticeSource {
-  type: G2bBusinessType; from: string; to: string; keyword: string; basis?: 'opening';
+  type: G2bBusinessType; from: string; to: string; keyword: string; basis?: 'opening' | 'deadline';
   agency?: string; demandAgency?: string; license?: string;
   minAmount?: number; maxAmount?: number; excludeClosed?: true;
 }
@@ -19,6 +20,7 @@ export interface CustomNoticesSnapshot {
   userId: string | null; items: AlertNotice[]; loading: boolean; error: string; hasMore: boolean;
   candidateCount: number; checkedCount: number; apiRequests: number; fetchedAt: string | null;
   excludedItems?: AlertNotice[];
+  indexCoverage?: { complete: boolean; pending: number; checked: number };
 }
 const empty = (userId: string | null): CustomNoticesSnapshot => ({ userId, items: [], loading: false, error: '', hasMore: false,
   candidateCount: 0, checkedCount: 0, apiRequests: 0, fetchedAt: null, excludedItems: [] });
@@ -27,6 +29,7 @@ const plainLicense = (value: string) => value.normalize('NFKC').trim();
 const comparableLicense = (value: string) => plainLicense(value).toLowerCase().replace(/[ㆍ・ᆞ]/g, '·').replace(/\s+/g, '').replace(/\/\d+$/, '');
 export const CUSTOM_NOTICE_MAX_DAYS = 90;
 export const CUSTOM_ACTIVE_MAX_DAYS = 366;
+export const CUSTOM_DEADLINE_MAX_DAYS = 367;
 const PROVIDER_WINDOW_DAYS = 31;
 const DAY_MS = 86_400_000;
 function publicationWindows(from: string, to: string): Pick<CustomNoticeSource, 'from' | 'to'>[] {
@@ -61,12 +64,17 @@ function safeLicenseAxis(values: string[]): string[] {
 
 /** Push only one OR axis. The complete saved rule is always evaluated locally. */
 export function planCustomNoticeSearch(input: CustomNoticeQuery): { query: CustomNoticeQuery; sources: CustomNoticeSource[] } {
-  const periodError = dateRangeError(input.from, input.to, input.basis === 'opening' ? CUSTOM_ACTIVE_MAX_DAYS : CUSTOM_NOTICE_MAX_DAYS);
+  const periodError = dateRangeError(input.from, input.to, input.basis === 'deadline' ? CUSTOM_DEADLINE_MAX_DAYS : input.basis === 'opening' ? CUSTOM_ACTIVE_MAX_DAYS : CUSTOM_NOTICE_MAX_DAYS);
   if (periodError) throw new Error(periodError);
   // Disabling notifications does not disable a deliberate, read-only search.
   const settings = normalizeAlertSettings({ ...input.settings, enabled: false });
   const query: CustomNoticeQuery = { settings, profile: input.profile ? structuredClone(input.profile) : null, from: input.from, to: input.to,
-    ...(input.basis === 'opening' ? { basis: 'opening' as const } : {}) };
+    ...(input.basis ? { basis: input.basis } : {}), ...(input.publicKeyword ? { publicKeyword: input.publicKeyword.trim() } : {}) };
+  // The shared index is already keyed by the actual submission deadline. Read
+  // only this exact interval; evaluate private member conditions in memory.
+  if (query.basis === 'deadline') return { query, sources: settings.filter.types.map(type => ({
+    type, from: query.from, to: query.to, keyword: query.publicKeyword ?? '', basis: 'deadline' as const,
+  })) };
   const filter = settings.filter;
   const common = { keyword: '', ...(!filter.includeUnknown ? {
     excludeClosed: true as const, ...(filter.minAmount !== null ? { minAmount: filter.minAmount } : {}),
@@ -100,7 +108,7 @@ export const browserCustomNoticeRepository: CustomNoticeRepository = {
       ...(source.demandAgency ? { demandAgency: source.demandAgency } : {}), ...(source.license ? { license: source.license } : {}),
       ...(source.minAmount !== undefined ? { minAmount: String(source.minAmount) } : {}),
       ...(source.maxAmount !== undefined ? { maxAmount: String(source.maxAmount) } : {}),
-      ...(source.basis ? { basis: source.basis } : {}),
+      ...(source.basis === 'deadline' ? { mode: 'deadline' } : source.basis ? { basis: source.basis } : {}),
       ...(source.excludeClosed ? { excludeClosed: '1' } : {}) });
     return fetchApi<G2bNoticePage>(`/api/notices?${params}`, signal);
   },
@@ -118,7 +126,7 @@ const asAlertNotice = (row: BidNotice): AlertNotice => ({ ...row, source: 'live'
   regionComplete: (row as Partial<AlertNotice>).regionComplete === true, licenseComplete: (row as Partial<AlertNotice>).licenseComplete === true });
 // Do not treat enriching a candidate with region/license details as a new list version.
 const sourceVersion = (row: AlertNotice) => JSON.stringify([row.revision, row.sourceUpdatedAt, row.status, row.title, row.agency, row.demandAgency,
-  row.deadline, row.openingAt, row.biddingStartAt, row.estimatedPrice, row.plannedAmount, row.contractMethod, row.category, row.province, row.district, row.noticeKind]);
+  row.deadline, row.openingAt, row.biddingStartAt, row.estimatedPrice, row.plannedAmount, row.contractMethod, row.category, row.province, row.district, row.noticeKind, row.openingCompleted]);
 function completeLatest(page: G2bNoticePage, original: AlertNotice): AlertNotice {
   if (page.quotaExceeded) throw new ApiError('나라장터 호출 한도에 도달했습니다. 잠시 후 다시 조회해 주세요.', 'G2B_QUOTA_EXCEEDED', 429, page.retryAfterSeconds);
   if (!Array.isArray(page.items) || !page.items.length || page.hasMore !== false || !Number.isInteger(page.totalCount)
@@ -198,10 +206,25 @@ export class CustomNoticesController {
     void promise.finally(() => { if (this.running === promise) this.running = null; });
     return promise;
   };
+  applyDetail = (id: string, detail: G2bNoticeDetail) => {
+    const original = [...this.matches.values()].find(notice => notice.id === id);
+    if (!original || detail.number !== original.number || detail.revision !== original.revision
+      || detail.notice && (detail.notice.number !== original.number || detail.notice.revision !== original.revision || detail.notice.type !== original.type)) return;
+    const notice: AlertNotice = { ...original, ...detail.notice, source: 'live', sourceUpdatedAt: original.sourceUpdatedAt,
+      allowedRegions: detail.regionComplete ? detail.allowedRegions : original.allowedRegions,
+      licenses: detail.licenseComplete ? detail.licenses : original.licenses,
+      regionComplete: original.regionComplete || detail.regionComplete,
+      licenseComplete: original.licenseComplete || detail.licenseComplete };
+    const key = alertNoticeKey(notice);
+    this.candidates.set(key, notice); this.finish({ key, notice, verified: true }); this.publish();
+  };
   private finish(candidate: Candidate) {
     if (!this.query || this.candidates.get(candidate.key) !== candidate.notice) return;
-    if (this.query.basis === 'opening' && !candidate.verified) return;
+    if (this.query.basis && !candidate.verified) return;
     this.checked.add(candidate.key);
+    if (this.query.basis === 'deadline' && !matchesDeadlineWindow(candidate.notice, this.query, this.clock())) {
+      this.matches.delete(candidate.key); return;
+    }
     if (this.query.basis === 'opening') {
       const deadline = Date.parse(candidate.notice.deadline);
       if (candidate.notice.status === '취소' || candidate.notice.status === '마감' || Number.isFinite(deadline) && deadline <= this.clock()) {
@@ -218,14 +241,14 @@ export class CustomNoticesController {
     for (const row of page.items) {
       const notice = asAlertNotice(row);
       const key = alertNoticeKey(notice), previous = this.candidates.get(key);
-      if (previous && (isOlderAlertNotice(notice, previous) || (this.query.basis === 'opening'
+      if (previous && (isOlderAlertNotice(notice, previous) || (this.query.basis
         ? sourceVersion(notice) === sourceVersion(previous) : notice.revision === previous.revision))) continue;
       this.candidates.set(key, notice); this.checked.delete(key); this.matches.delete(key); this.excluded.delete(key);
       this.failures.delete(`detail:${key}`); this.failures.delete(`latest:${key}`);
       const candidate = { key, notice };
       // Opening lists may contain an old original whose newer cancellation has a different opening date.
       // Never publish it, or reject it on obsolete facts, until every revision is checked by number.
-      if (this.query.basis === 'opening') { this.pending.push(candidate); continue; }
+      if (this.query.basis) { this.pending.push(candidate); continue; }
       // Missing facts cannot fail this prefilter; known mismatches avoid expensive detail calls.
       if (!matchAlertNotice(notice, relaxed, this.query.profile, this.clock()).matched) this.checked.add(key);
       else {
@@ -234,7 +257,8 @@ export class CustomNoticesController {
       }
     }
     const fetchedAt = !this.snapshot.fetchedAt || Date.parse(page.fetchedAt) < Date.parse(this.snapshot.fetchedAt) ? page.fetchedAt : this.snapshot.fetchedAt;
-    this.publish({ fetchedAt });
+    const coverage = (page as G2bNoticePage & Pick<CustomNoticesSnapshot, 'indexCoverage'>).indexCoverage;
+    this.publish({ fetchedAt, ...(coverage ? { indexCoverage: coverage } : {}) });
   }
   private async runBatch(): Promise<void> {
     const controller = new AbortController(); this.request = controller;
@@ -263,7 +287,7 @@ export class CustomNoticesController {
     };
     const loadDetail = async (candidate: Candidate) => {
       let current = candidate;
-      let latestPending = this.query?.basis === 'opening' && !candidate.verified;
+      let latestPending = !!this.query?.basis && !candidate.verified;
       try {
         if (latestPending) {
           if (!this.repository.lookup) throw new Error('최신 공고 차수 조회를 사용할 수 없습니다.');
@@ -272,16 +296,20 @@ export class CustomNoticesController {
           if (!active() || this.candidates.get(candidate.key) !== candidate.notice || !this.query) return;
           const notice = completeLatest(versions, candidate.notice);
           this.candidates.set(candidate.key, notice); current = { key: candidate.key, notice, verified: true };
+          if (this.query.basis === 'deadline') {
+            this.failures.delete(`latest:${candidate.key}`); latestPending = false;
+            if (!matchesDeadlineWindow(notice, this.query, this.clock())) { this.finish(current); this.publish(); return; }
+          }
           // Closed/cancelled latest revisions are useful evidence even if the provider changed their opening date.
           const deadline = Date.parse(notice.deadline);
-          if (notice.status === '취소' || notice.status === '마감' || Number.isFinite(deadline) && deadline <= this.clock()) {
+          if (this.query.basis !== 'deadline' && (notice.status === '취소' || notice.status === '마감' || Number.isFinite(deadline) && deadline <= this.clock())) {
             latestPending = false; this.failures.delete(`latest:${candidate.key}`); this.finish(current); this.publish(); return;
           }
           const opening = Date.parse(notice.openingAt);
-          if (!Number.isFinite(opening)) throw new Error('최신 공고의 개찰일을 확인하지 못했습니다.');
+          if (this.query.basis !== 'deadline' && !Number.isFinite(opening)) throw new Error('최신 공고의 개찰일을 확인하지 못했습니다.');
           this.failures.delete(`latest:${candidate.key}`); latestPending = false;
-          const openingDay = new Date(opening + 9 * 60 * 60_000).toISOString().slice(0, 10);
-          if (openingDay < this.query.from || openingDay > this.query.to) {
+          const openingDay = Number.isFinite(opening) ? new Date(opening + 9 * 60 * 60_000).toISOString().slice(0, 10) : '';
+          if (this.query.basis !== 'deadline' && (openingDay < this.query.from || openingDay > this.query.to)) {
             this.checked.add(candidate.key); this.matches.delete(candidate.key); this.excluded.delete(candidate.key); this.publish(); return;
           }
           const relaxed = { ...this.query.settings, enabled: true, filter: { ...this.query.settings.filter, includeUnknown: true } };
@@ -328,7 +356,7 @@ export class CustomNoticesController {
           const task = loadSource(cursor).finally(() => { sourceInFlight--; inFlight.delete(task); });
           inFlight.add(task);
         }
-        if (this.query?.basis === 'opening' && this.pending.length > 1) {
+        if (this.query?.basis && this.pending.length > 1) {
           const query = this.query, relaxed = { ...query.settings, enabled: true, filter: { ...query.settings.filter, includeUnknown: true } };
           const now = this.clock();
           // Faster sources must not spend the entire bounded check budget on old closed
@@ -336,7 +364,8 @@ export class CustomNoticesController {
           // for mandatory latest-version validation, including facts which may have changed.
           this.pending = this.pending.map((candidate, index) => {
             const opening = Date.parse(candidate.notice.openingAt);
-            return { candidate, index, rank: matchAlertNotice(candidate.notice, relaxed, query.profile, now).matched ? 0 : 1,
+            const legacyClosed = query.basis === 'opening' && Date.parse(candidate.notice.deadline) <= now;
+            return { candidate, index, rank: !legacyClosed && matchAlertNotice(candidate.notice, relaxed, query.profile, now).matched ? 0 : 1,
               opening: Number.isFinite(opening) ? opening : Infinity };
           }).sort((first, second) => first.rank - second.rank
             || (first.opening === second.opening ? 0 : first.opening - second.opening) || first.index - second.index)

@@ -1,14 +1,19 @@
 import { createHash } from 'node:crypto';
-import { alertNoticeKey,hasOmittedContentDigest,isOlderAlertNotice,matchAlertNotice,meaningfulChanges,noticeContentKey,noticeOmittedContentKey } from '../src/alerts/domain.ts';
+import { alertNoticeKey,hasOmittedContentDigest,isOlderAlertNotice,matchAlertNotice,matchAlarmNotice,meaningfulChanges,noticeContentKey,noticeOmittedContentKey } from '../src/alerts/domain.ts';
 import type { AlertEventKind,AlertNotice,WorkerRule } from '../src/alerts/types.ts';
 export interface Observation { key:string;notice:AlertNotice;fingerprint:string;version:number }
 export interface Membership {userId:string;key:string;lastVersion:number;initial?:boolean}
 export interface AlertCommit {observations:Observation[];events:{userId:string;key:string;version:number;kind:AlertEventKind;message:string;changeFields:string[]}[];existing:{userId:string;key:string;version:number;initial?:boolean}[]}
-export function planAlertChanges(notices:AlertNotice[],previous:Observation[],memberships:Membership[],rules:WorkerRule[],now=Date.now()):AlertCommit {
+export function planAlertChanges(notices:AlertNotice[],previous:Observation[],memberships:Membership[],rules:WorkerRule[],now=Date.now(),batchHeads:AlertNotice[]=notices):AlertCommit {
   const plan:AlertCommit={observations:[],events:[],existing:[]};
   const facts=new Map(previous.map(item=>[item.key,item]));
   const seen=new Map(memberships.map(item=>[`${item.userId}:${item.key}`,item]));
   const ordered=[...notices].sort((a,b)=>alertNoticeKey(a).localeCompare(alertNoticeKey(b))||Number(a.revision)-Number(b.revision)||Date.parse(a.sourceUpdatedAt)-Date.parse(b.sourceUpdatedAt));
+  const heads=new Map(previous.map(item=>[item.key,item.notice]));
+  for(const notice of batchHeads) {
+    const key=alertNoticeKey(notice),head=heads.get(key);
+    if(!head||!isOlderAlertNotice(notice,head))heads.set(key,notice);
+  }
   function remember(item:{userId:string;key:string;version:number},initial=false) {
     const identity=`${item.userId}:${item.key}`,before=seen.get(identity);
     seen.set(identity,{userId:item.userId,key:item.key,lastVersion:Math.max(before?.lastVersion??0,item.version),initial:Boolean(before?.initial||initial)});
@@ -31,8 +36,9 @@ export function planAlertChanges(notices:AlertNotice[],previous:Observation[],me
     for(const rule of rules) {
       if(!rule.settings.enabled) continue;
       const membership=seen.get(`${rule.userId}:${key}`),last=membership?.lastVersion;
-      const comparison=matchAlertNotice(notice,rule.settings,rule.profile,now);
-      const matched=comparison.matched;
+      const comparison=matchAlarmNotice(notice,rule.settings,rule.profile,now);
+      // The current head controls the entire revision batch, including earlier otherwise-active revisions.
+      const matched=comparison.matched&&matchAlarmNotice(heads.get(key)!,rule.settings,rule.profile,now).matched;
       if(!matched&&last===undefined) continue;
       // A retained dedup ledger is not a subscription to an old, now unrelated filter.
       // Compare the previous source facts too, so losing eligibility/cancellation is still reported.
@@ -46,7 +52,7 @@ export function planAlertChanges(notices:AlertNotice[],previous:Observation[],me
         const activation=Date.parse(rule.settings.activatedAt||new Date(now).toISOString());
         const sourceTime=Math.max(Date.parse(notice.postedAt)||0,Date.parse(notice.sourceUpdatedAt)||0);
         if(sourceTime<activation) existing({userId:rule.userId,key,version,...(!matched?{initial:false}:{})});
-        else if(changed&&rule.settings.notifyChanges) event({userId:rule.userId,key,version,kind:notice.status==='취소'?'cancelled':'changed',message:notice.status==='취소'?'관심 공고가 취소되었습니다.':`관심 공고의 ${fields.join(' · ')} 항목이 변경되었습니다.`,changeFields:fields});
+        else if(matched&&changed&&rule.settings.notifyChanges) event({userId:rule.userId,key,version,kind:'changed',message:`관심 공고의 ${fields.join(' · ')} 항목이 변경되었습니다.`,changeFields:fields});
         else existing({userId:rule.userId,key,version,initial:false});
       } else if(matched) {
         const activation=Date.parse(rule.settings.activatedAt||new Date(now).toISOString());

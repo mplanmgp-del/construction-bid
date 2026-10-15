@@ -81,7 +81,7 @@ describe('personal alert account lifecycle', () => {
 
 describe('alert presentation and direct links', () => {
   it('shows saved-condition comparison reasons and missing data on existing notice cards',()=>{
-    const notice={...NOTICES[0],source:'live' as const,status:'접수중' as const,deadline:'2099-10-20T10:00:00+09:00',sourceUpdatedAt:'',regionComplete:true,licenseComplete:true,province:'',district:''};
+    const notice={...NOTICES[0],source:'live' as const,status:'접수중' as const,deadline:new Date(Date.now()+2*86400000).toISOString(),openingAt:new Date(Date.now()+3*86400000).toISOString(),sourceUpdatedAt:'',regionComplete:true,licenseComplete:true,province:'',district:''};
     const settings=structuredClone(DEFAULT_ALERT_SETTINGS);settings.enabled=true;settings.filter.keywords=[];settings.filter.regions=['경기'];settings.filter.regionBasis='site';
     const html=renderToStaticMarkup(<AlertsPage alerts={access(overview({settings,existingMatches:[{...notice,status:'접수중'}]}))} signedIn onLogin={()=>{}} />);
     expect(html).toContain('조건 확인 필요');expect(html).toContain('현장·수행 위치 확인 필요');expect(html).toContain('현재 저장한 조건');

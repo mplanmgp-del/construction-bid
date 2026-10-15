@@ -1,8 +1,14 @@
 import type { G2bBusinessType, G2bNoticePage } from '../g2b-types';
 import { ApiError, fetchApi, mergeById } from './client';
 import { startSearchWindows } from './start-range';
+import type { SearchFilters } from '../types';
 
 export interface NoticeQuery { type: G2bBusinessType | '공사·용역'; from: string; to: string; keyword: string }
+
+/** An indexed search's authoritative deadline window is its API query. */
+export function filtersForIndexedSearch(filters: SearchFilters, indexed: boolean): SearchFilters {
+  return indexed ? { ...filters, deadlineFrom: '', deadlineTo: '' } : filters;
+}
 
 export async function fetchStartedNotices(query: NoticeQuery, signal: AbortSignal, progress: (done: number, total: number) => void, options: { force?: boolean } = {}): Promise<G2bNoticePage> {
   if (!query.keyword.trim()) throw new ApiError('검색할 공고명을 입력해 주세요.', 'KEYWORD_REQUIRED', 400);
@@ -44,7 +50,7 @@ export async function fetchNoticePage(query: NoticeQuery, page: number, signal?:
   const types: G2bBusinessType[] = query.type === '공사·용역' ? ['공사', '용역'] : [query.type];
   // Fail visibly if either source fails, rather than presenting a partial total as complete.
   const results = await Promise.all(types.map(async type => {
-    const params = new URLSearchParams({ ...query, type, page: String(page), pageSize: '100' });
+    const params = new URLSearchParams({ ...query, mode: 'deadline', type, page: String(page), pageSize: '100' });
     try { return await fetchApi<G2bNoticePage>(`/api/notices?${params}`, signal); }
     catch (cause) { throw new Error(`${type} 조회 실패: ${cause instanceof Error ? cause.message : '다시 조회해 주세요.'}`); }
   }));

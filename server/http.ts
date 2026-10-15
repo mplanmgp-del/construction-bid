@@ -9,6 +9,8 @@ import { validateCompanyAwardQuery } from './company-awards.ts';
 import type { CompanyAwardQuery } from '../src/company-award-types.ts';
 import type { G2bApiError } from '../src/g2b-types.ts';
 import { authorizeMenuRequest, menuForApi } from './menu-access.ts';
+import { readDeadlineCatalog } from './active-catalog-store.ts';
+import { AlertError } from './alert-store.ts';
 
 type Client = ReturnType<typeof createG2bClient>;
 let currentKey: string | undefined;
@@ -94,6 +96,14 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
       return { status: 200, body, ...(body.retryAfterSeconds ? { retryAfterSeconds: body.retryAfterSeconds } : {}) };
     }
     if (path === '/api/notices') {
+      if (params.get('mode') === 'deadline') {
+        // The provider has no submission-deadline range operation. This route
+        // reads only the shared deadline index; it never scans posting years.
+        const normalized = new URLSearchParams(params);
+        normalized.set('basis', 'posted');
+        const { type, from, to, keyword, page, pageSize } = parseSearch(normalized, 367);
+        return { status: 200, body: await readDeadlineCatalog({ type, from, to, keyword, page, pageSize }) };
+      }
       if (params.get('mode') === 'number') {
         const query = parseNoticeNumberQuery(params);
         return { status: 200, body: await api.lookupNotices(query.type, query.number) };
@@ -128,7 +138,7 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
     }
     return { status: 404, body: { error: { code: 'NOT_FOUND', message: '존재하지 않는 API입니다.' } } };
   } catch (error) {
-    const known = error instanceof G2bError || error instanceof ProviderQuotaError || error instanceof CompanyLookupError || error instanceof OpeningResultsError ? error : new G2bError(500, 'INTERNAL_ERROR', '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    const known = error instanceof G2bError || error instanceof ProviderQuotaError || error instanceof CompanyLookupError || error instanceof OpeningResultsError || error instanceof AlertError ? error : new G2bError(500, 'INTERNAL_ERROR', '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     const retryAfterSeconds = known instanceof ProviderQuotaError ? known.retryAfterSeconds : undefined;
     const body: G2bApiError = { error: { code: known.code, message: known.message, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) } };
     return { status: known.status, body, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) };

@@ -14,6 +14,7 @@ interface Props {
   onCollapse: () => void;
   mobileOpen: boolean;
   onMobileClose: () => void;
+  showDeadlineRange?: boolean;
 }
 
 function Group({ label, summary, children, open = false }: { label: string; summary: string; children: React.ReactNode; open?: boolean }) {
@@ -84,7 +85,7 @@ function AmountInput({ value, placeholder, onChange }: { value: string; placehol
     value={formatAmountInput(value)} onChange={event => applyInput(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length)} onKeyDown={handleKeyDown} />;
 }
 
-export function FilterPanel({ filters, onChange, onReset, onCollapse, mobileOpen, onMobileClose }: Props) {
+export function FilterPanel({ filters, onChange, onReset, onCollapse, mobileOpen, onMobileClose, showDeadlineRange = true }: Props) {
   const amountError = getPriceRangeError(filters.minAmount, filters.maxAmount);
   const regions = selectedRegions(filters);
   const statuses = selectedStatuses(filters);
@@ -122,7 +123,7 @@ export function FilterPanel({ filters, onChange, onReset, onCollapse, mobileOpen
       <Group label="추정가격" summary={filters.minAmount || filters.maxAmount ? '범위 선택' : '전체'} open><div className="amount-fields"><label><span className="sr-only">최소 추정가격</span><AmountInput placeholder="최소 금액" value={filters.minAmount} onChange={value => onChange('minAmount', value)} /><span className="amount-unit">원</span></label><span>~</span><label><span className="sr-only">최대 추정가격</span><AmountInput placeholder="최대 금액" value={filters.maxAmount} onChange={value => onChange('maxAmount', value)} /><span className="amount-unit">원</span></label></div><div className="price-presets"><button onClick={() => { onChange('minAmount', ''); onChange('maxAmount', '100000000'); }}>1억 이하</button><button onClick={() => { onChange('minAmount', '100000000'); onChange('maxAmount', '500000000'); }}>1억 ~ 5억</button></div>{amountError && <p className="field-error" role="alert">{amountError}</p>}</Group>
       <Group label="진행 상태" summary={!statuses.length ? '전체' : statuses.join(' · ')}><StatusFilter values={statuses} onChange={values => onChange('statuses', values)} /><p id="notice-status-help" className="filter-description">개찰 완료는 공고의 개찰일시 기준이며, 마감 임박은 제출 마감 전 24시간 이내입니다.</p></Group>
       <Group label="계약방법" summary={filters.contractMethod}><label className="sr-only" htmlFor="contract-filter">계약방법</label><select id="contract-filter" className="field" value={filters.contractMethod} onChange={event => onChange('contractMethod', event.target.value)}>{['전체', '제한경쟁', '일반경쟁', '수의계약'].map(method => <option key={method}>{method}</option>)}</select></Group>
-      <Group label="제출 마감일" summary={filters.deadlineFrom || filters.deadlineTo ? '기간 선택' : '전체'}><label className="date-field"><span>시작일</span><input className="field" type="date" value={filters.deadlineFrom} onChange={event => onChange('deadlineFrom', event.target.value)} /></label><label className="date-field"><span>종료일</span><input className="field" type="date" value={filters.deadlineTo} onChange={event => onChange('deadlineTo', event.target.value)} /></label></Group>
+      {showDeadlineRange ? <Group label="제출 마감일" summary={filters.deadlineFrom || filters.deadlineTo ? '기간 선택' : '전체'}><label className="date-field"><span>시작일</span><input className="field" type="date" value={filters.deadlineFrom} onChange={event => onChange('deadlineFrom', event.target.value)} /></label><label className="date-field"><span>종료일</span><input className="field" type="date" value={filters.deadlineTo} onChange={event => onChange('deadlineTo', event.target.value)} /></label></Group> : <p className="filter-description">제출마감 기간은 상단 공고 검색에서 변경합니다.</p>}
       <Group label="제외 검색어" summary={filters.excludeKeyword || '없음'}><label className="sr-only" htmlFor="exclude-keyword">제외 검색어</label><input className="field" id="exclude-keyword" placeholder="예: 설계, 감리" value={filters.excludeKeyword} onChange={event => onChange('excludeKeyword', event.target.value)} /><p className="filter-description">쉼표로 여러 검색어를 구분할 수 있습니다.</p></Group>
       <div className="filter-source"><span>공고 출처</span><strong><span className="source-dot" />나라장터</strong></div>
       <div className="filter-footnote">선택 조건은 패널을 접어도 유지됩니다.</div>

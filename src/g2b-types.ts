@@ -104,6 +104,8 @@ export interface G2bOpeningResult {
 export type G2bResultPage = G2bPage<G2bOpeningResult>;
 
 export interface G2bResultSummary {
+  /** Completeness of the opening states, independent of the winner list. */
+  openingComplete?: boolean;
   number: string; revision: string; type: G2bBusinessType;
   firstCompanies: string[]; winnerCompanies: string[]; result: string;
   complete: boolean; fetchedAt: string;

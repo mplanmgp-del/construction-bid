@@ -4,7 +4,7 @@ import type { BidNotice } from '../types';
 import { dateRangeError } from './client';
 
 // Provider notices only. Account profiles and eligibility decisions stay outside this cache.
-export const NOTICE_CACHE_KEY = 'construction-bid:public-start-notices:v1';
+export const NOTICE_CACHE_KEY = 'construction-bid:public-deadline-notices:v2';
 export const NOTICE_CACHE_FRESH_MS = 5 * 60_000;
 export const NOTICE_CACHE_MAX_AGE_MS = 24 * 60 * 60_000;
 const MAX_ENTRIES = 6;
@@ -18,7 +18,7 @@ export function normalizedNoticeQuery(query: NoticeQuery): NoticeQuery {
 
 export function noticeQueryKey(query: NoticeQuery): string {
   const value = normalizedNoticeQuery(query);
-  return JSON.stringify([value.type, value.from, value.to, value.keyword]);
+  return JSON.stringify(['deadline-v2', value.type, value.from, value.to, value.keyword]);
 }
 
 function browserStorage(): CacheStorage | undefined {
@@ -34,6 +34,7 @@ function publicNotice(bid: BidNotice): BidNotice {
     demandAgency: bid.demandAgency, noticeKind: bid.noticeKind, contractMethod: bid.contractMethod,
     status: bid.status, postedAt: bid.postedAt, deadline: bid.deadline, openingAt: bid.openingAt,
     registrationDeadline: bid.registrationDeadline, biddingStartAt: bid.biddingStartAt,
+    ...(bid.openingCompleted !== undefined ? { openingCompleted: bid.openingCompleted } : {}),
     licenses: bid.licenses, duration: bid.duration, description: bid.description, requirements: bid.requirements,
     documents: bid.documents.map(doc => ({ name: doc.name, size: doc.size, url: doc.url })),
     revised: bid.revised, source: 'live', detailUrl: bid.detailUrl, specialRegionCondition: bid.specialRegionCondition,
@@ -88,10 +89,10 @@ export function readLastNoticeQuery(now = Date.now(), storage = browserStorage()
     for (const entry of readEntries(storage, now).reverse()) {
       try {
         const parts: unknown = JSON.parse(entry.key);
-        if (!Array.isArray(parts) || parts.length !== 4) continue;
-        const [type, from, to, keyword] = parts;
+        if (!Array.isArray(parts) || parts.length !== 5 || parts[0] !== 'deadline-v2') continue;
+        const [, type, from, to, keyword] = parts;
         if (!['공사', '용역', '공사·용역'].includes(type) || typeof from !== 'string' || typeof to !== 'string'
-          || typeof keyword !== 'string' || keyword.length > 100 || /[\u0000-\u001f]/.test(keyword) || dateRangeError(from, to, 31)) continue;
+          || typeof keyword !== 'string' || keyword.length > 100 || /[\u0000-\u001f]/.test(keyword) || dateRangeError(from, to, 367)) continue;
         return { type, from, to, keyword };
       } catch { /* Skip malformed entries without changing account preferences. */ }
     }

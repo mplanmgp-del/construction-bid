@@ -11,7 +11,8 @@ function time(value?: string): number {
 
 /** Display and filter the same schedule-based phase, without changing cached API data. */
 export function noticeState(bid: BidNotice, now = Date.now()): NoticeState {
-  if (bid.status === '취소') return { label: '-', tone: 'unknown', description: '취소된 공고입니다.' };
+  if (bid.status === '취소' || /취소/.test(bid.noticeKind ?? '')) return { label: '-', tone: 'unknown', description: '취소된 공고입니다.' };
+  if (bid.openingCompleted) return { label: '개찰 완료', tone: 'opened', description: '공식 개찰 결과에서 완료된 공고입니다.' };
   const opening = time(bid.openingAt);
   const start = time(bid.biddingStartAt);
   const deadline = time(bid.deadline);

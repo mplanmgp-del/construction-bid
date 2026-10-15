@@ -34,13 +34,41 @@ describe('durable alert event planning',()=>{
     const plan=planAlertChanges([notice({postedAt:'2026-10-14T10:00:00+09:00'})],[],[],[rule],now);
     expect(plan.events).toEqual([]);expect(plan.existing).toHaveLength(1);
   });
-  it('notifies existing recipients of cancellation or losing eligibility',()=>{
+  it('updates the dedup ledger without alerting cancelled notices',()=>{
     const fact=planAlertChanges([notice()],[],[],[rule],now).observations[0];
     const cancelled=planAlertChanges([notice({status:'취소'})],[fact],member(fact),[rule],now);
-    expect(cancelled.events[0].kind).toBe('cancelled');
+    expect(cancelled.events).toEqual([]);
+    expect(cancelled.observations[0]).toMatchObject({version:2,notice:{status:'취소'}});
+    expect(cancelled.existing[0]).toMatchObject({version:2,initial:false});
     const disabled=structuredClone(rule);disabled.settings.notifyChanges=false;
     const muted=planAlertChanges([notice({estimatedPrice:200})],[fact],member(fact),[disabled],now);
     expect(muted.events).toEqual([]);expect(muted.existing[0]).toMatchObject({version:2,initial:false});
+  });
+  it.each([
+    ['outside the future alarm window',{deadline:'2026-10-23T10:00:00+09:00',openingAt:'2026-10-23T11:00:00+09:00'}],
+    ['outside the past alarm window',{deadline:'2026-10-07T10:00:00+09:00',openingAt:'2026-10-16T11:00:00+09:00'}],
+    ['already opened',{openingAt:'2026-10-15T09:00:00+09:00'}],
+    ['without a submission deadline',{deadline:''}],
+  ] as const)('keeps observed changes without notifying %s',(_reason,patch)=>{
+    const before=planAlertChanges([notice()],[],[],[rule],now).observations[0];
+    const incoming=notice({...patch,estimatedPrice:200,sourceUpdatedAt:'2026-10-15T10:01:00+09:00'});
+    const plan=planAlertChanges([incoming],[before],member(before),[rule],now);
+    expect(plan.events).toEqual([]);
+    expect(plan.observations[0].version).toBe(2);
+    expect(plan.existing[0]).toMatchObject({version:2,initial:false});
+    expect(planAlertChanges([incoming],plan.observations,member(plan.observations[0]),[rule],now).events).toEqual([]);
+  });
+  it('does not notify an earlier active revision when the same batch ends in cancellation',()=>{
+    const plan=planAlertChanges([notice(),notice({revision:'001',status:'취소'})],[],[],[rule],now);
+    expect(plan.events).toEqual([]);
+  });
+  it('uses full-batch latest heads when an event-planning chunk contains only older revisions',()=>{
+    const rows=[notice(),notice({revision:'001',status:'취소'})];
+    expect(planAlertChanges([rows[0]],[],[],[rule],now,rows).events).toEqual([]);
+  });
+  it('keeps an unopened notice whose submission deadline passed within the previous seven days',()=>{
+    const plan=planAlertChanges([notice({status:'마감',deadline:'2026-10-14T10:00:00+09:00',openingAt:'2026-10-16T11:00:00+09:00'})],[],[],[rule],now);
+    expect(plan.events).toEqual([expect.objectContaining({kind:'new'})]);
   });
   it('ignores old revisions but alerts once for a higher revision with identical content',()=>{
     const fact=planAlertChanges([notice({revision:'002'})],[],[],[rule],now).observations[0];

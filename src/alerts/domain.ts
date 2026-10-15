@@ -2,6 +2,7 @@ import { CATEGORIES, type CompanyProfile, type RegionAssessment } from '../types
 import { assessRegion, assessSearchRegions } from '../domain.ts';
 import { canonicalProvince, canonicalSearchProvince } from '../search-filters.ts';
 import { DEFAULT_ALERT_SETTINGS, type AlertNotice, type AlertSettings, type AlertMatch, type AlertRegionBasis } from './types.ts';
+import { isAlarmEligible, isOngoingNotice, noticeTimestamp } from '../notice-deadline-window.ts';
 
 const clean = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ');
 const canonical = (value: string) => clean(value).toLowerCase();
@@ -115,9 +116,12 @@ export function normalizeAlertSettings(input: unknown): AlertSettings {
 export function matchAlertNotice(notice: AlertNotice, settings: AlertSettings, profile: CompanyProfile|null, now=Date.now()): AlertMatch {
   const reasons:string[]=[], missing:string[]=[];
   const no=():AlertMatch=>({matched:false,reasons:[],needsReview:false});
-  if(!settings.enabled||notice.source!=='live'||notice.status==='취소')return no();
-  const deadline=Date.parse(notice.deadline);
-  if(Number.isFinite(deadline)&&deadline<=now)return no();
+  if(!settings.enabled||notice.source!=='live'||notice.status==='취소'||/취소/.test(notice.noticeKind??'')||notice.openingCompleted)return no();
+  const deadline=noticeTimestamp(notice.deadline);
+  const opening=noticeTimestamp(notice.openingAt);
+  if(Number.isFinite(opening)&&opening<=now)return no();
+  // Missing schedules remain reviewable for manual matching; alarms require an exact deadline below.
+  if(Number.isFinite(deadline)&&!isOngoingNotice(notice,now))return no();
   if(!Number.isFinite(deadline))missing.push('마감일 확인 필요');
   const filter=settings.filter, text=canonical(`${notice.title} ${notice.agency} ${notice.demandAgency||''}`);
   if(filter.keywords.length&&!filter.keywords.some(keyword=>text.includes(canonical(keyword))))return no();
@@ -178,4 +182,9 @@ export function matchAlertNotice(notice: AlertNotice, settings: AlertSettings, p
   }
   if(missing.length&&!filter.includeUnknown)return no();
   return {matched:true,reasons:[...reasons,...missing],needsReview:missing.length>0};
+}
+
+/** Automatic delivery has a fixed rolling deadline window; manual searches keep their chosen range. */
+export function matchAlarmNotice(notice:AlertNotice,settings:AlertSettings,profile:CompanyProfile|null,now=Date.now()):AlertMatch {
+  return isAlarmEligible(notice,now)?matchAlertNotice(notice,settings,profile,now):{matched:false,reasons:[],needsReview:false};
 }

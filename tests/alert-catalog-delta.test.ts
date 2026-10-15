@@ -8,7 +8,7 @@ const now = Date.parse('2026-10-15T10:00:00+09:00');
 const rule: WorkerRule = { userId: 'owner', profile: null, settings: { ...structuredClone(DEFAULT_ALERT_SETTINGS), enabled: true, activatedAt: '2026-10-15T09:00:00+09:00',
   filter: { ...structuredClone(DEFAULT_ALERT_SETTINGS.filter), categories: [], keywords: [], regions: [] } } };
 const notice = (number: string): AlertNotice => ({ id: `g2b:공사:${number}:000`, number, revision: '000', title: '철거 공사', agency: '교육청', type: '공사', category: '철거·해체', province: '서울', district: '',
-  allowedRegions: [], estimatedPrice: 100, contractMethod: '', status: '접수중', postedAt: '2026-10-15T09:55:00+09:00', deadline: '2099-10-20T10:00:00+09:00', openingAt: '2099-10-20T11:00:00+09:00',
+  allowedRegions: [], estimatedPrice: 100, contractMethod: '', status: '접수중', postedAt: '2026-10-15T09:55:00+09:00', deadline: '2026-10-20T10:00:00+09:00', openingAt: '2026-10-20T11:00:00+09:00',
   registrationDeadline: '', licenses: [], duration: '', description: '', requirements: [], documents: [], revised: false, source: 'live', sourceUpdatedAt: '2026-10-15T09:55:00+09:00', regionComplete: true, licenseComplete: true });
 const group = (number: string) => ({ key: `공사:${number}`, type: '공사' as const, number, latest: notice(number), versions: [notice(number)], verifiedAt: new Date(now).toISOString() });
 const status = { groupCount: 6000, activeCount: 6000, pendingSources: 1, pendingVerification: 0, completedSources: 0, coverageFrom: '1995-10-01', bootstrapComplete: false, lastCheckedAt: null, error: null, storageBytes: 1, storageCeiling: 33554432 };

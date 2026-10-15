@@ -86,7 +86,7 @@ function firstCompany(row: Row): string {
 }
 function summary(q: OpeningResultsQuery, opening: Collected, winners: Collected, now: () => number): G2bResultSummary {
   const states = unique(opening.rows.map(row => text(row.progrsDivCdNm)));
-  return { ...q, fetchedAt: new Date(now()).toISOString(), complete: opening.complete && winners.complete,
+  return { ...q, fetchedAt: new Date(now()).toISOString(), complete: opening.complete && winners.complete, openingComplete: opening.complete,
     firstCompanies: unique(opening.rows.map(firstCompany)), winnerCompanies: unique(winners.rows.map(row => text(row.bidwinnrNm))),
     result: states.length === 1 ? states[0] : '' };
 }

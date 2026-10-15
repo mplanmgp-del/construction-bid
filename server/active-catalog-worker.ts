@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { koreanTimestamp, mapNotice, readProviderPayload } from './g2b.ts';
 import { ProviderQuotaError, providerRetryAfter } from './provider-quota.ts';
-import { matchAlertNotice, noticeOmittedContentKey } from '../src/alerts/domain.ts';
+import { matchAlarmNotice, noticeOmittedContentKey } from '../src/alerts/domain.ts';
+import { isOngoingNotice } from '../src/notice-deadline-window.ts';
 import type { ActiveCatalogStore } from './active-catalog-store.ts';
 import type { ActiveCatalogCommit, ActiveCatalogIdentity, ActiveCatalogSourceJob } from '../src/live/active-catalog-types.ts';
 import type { AlertNotice, WorkerRule } from '../src/alerts/types.ts';
@@ -93,7 +94,7 @@ async function parallel<T>(items: T[], work: (item: T) => Promise<void>) {
 
 /** Unknown participant facts remain candidates until the exact conditions are fetched. */
 function potentialRules(notice: AlertNotice, rules: WorkerRule[], now: number) {
-  return rules.filter(rule => matchAlertNotice(notice,
+  return rules.filter(rule => matchAlarmNotice(notice,
     { ...rule.settings, filter: { ...rule.settings.filter, includeUnknown: true } }, rule.profile, now).matched);
 }
 
@@ -171,22 +172,26 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   try {
     if (!claim.scopeVersion) throw new Error('공고 알림 조건의 수집 범위를 확인하지 못했습니다.');
     const failedSources: NonNullable<ActiveCatalogCommit['failedSources']> = [];
-    const jobs = rules.length ? [...claim.sources].sort((a, b) => Number(a.kind === 'history') - Number(b.kind === 'history')) : [];
+    // The public deadline index is shared across search and alerts. Its source
+    // coverage must never depend on whether an individual has enabled alerts.
+    const jobs = [...claim.sources].sort((a, b) => Number(a.kind === 'history') - Number(b.kind === 'history'));
     await parallel(jobs, async (job: ActiveCatalogSourceJob) => {
       try {
         const suffix = job.type === '공사' ? 'Cnstwk' : 'Servc';
         const params: Record<string, string> = {
           inqryDiv: job.kind === 'modified' ? '3' : '1', inqryBgnDt: minuteKst(job.from), inqryEndDt: minuteKst(job.to),
-          pageNo: String(job.page), numOfRows: String(job.pageSize), ...(job.kind === 'history' ? { bidClseExcpYn: 'Y' } : {}),
+          pageNo: String(job.page), numOfRows: String(job.pageSize),
         };
         const response = await request(`getBidPblancListInfo${suffix}${job.kind === 'history' ? 'PPSSrch' : ''}`, params);
         if (job.totalCount !== null && job.totalCount !== response.totalCount) throw new SourceSnapshotChanged('조회 도중 전체 건수가 바뀌어 확인 범위를 다시 수집합니다.');
         validPage(response.items, response.totalCount, job.page, job.pageSize);
         const ids = new Set<string>(), observed = new Map<string, ActiveCatalogIdentity>(), items: AlertNotice[] = [];
+        const indexFacts: AlertNotice[] = [];
         for (const row of response.items) {
           const notice = fact(row, job.type, now);
           if (ids.has(notice.id)) throw new SourceSnapshotChanged('공고 목록의 차수가 중복되어 확인 범위를 다시 수집합니다.');
           ids.add(notice.id);
+          indexFacts.push(notice);
           const key = `${notice.type}:${notice.number}`, previous = observed.get(key);
           if (!previous || Number(notice.revision) > Number(previous.revision)
             || notice.revision === previous.revision && Date.parse(notice.sourceUpdatedAt) > Date.parse(previous.sourceUpdatedAt!)) {
@@ -194,7 +199,25 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
           }
           if (potentialRules(notice, rules, now).length) items.push(notice);
         }
-        // Only compact potential matches persist. observed IDs are transient input used to refresh already kept groups.
+        // Store the small common index in bounded batches before acknowledging
+        // the raw page. Closed/cancelled bodies are discarded; their minimal
+        // identities can invalidate a previously indexed candidate.
+        const batches = Math.max(1, Math.ceil(indexFacts.length / 200));
+        for (let batch = 0; batch < batches; batch++) {
+          if (clock() > deadline - 9_000) throw new WorkerBudgetExhausted('공고 색인 저장 시간이 부족하여 같은 구간에서 이어서 확인합니다.');
+          const slice = indexFacts.slice(batch * 200, (batch + 1) * 200);
+          const result = await store.indexUpsert(leaseId, { scopeVersion: claim.scopeVersion, sourceId: job.id, page: job.page,
+            batch, batches, notices: slice.filter(notice => isOngoingNotice(notice, now)),
+            removed: slice.filter(notice => !isOngoingNotice(notice, now)).map(notice => ({ type: notice.type,
+              number: notice.number, revision: notice.revision, sourceUpdatedAt: notice.sourceUpdatedAt })) });
+          if (result.storageFull) {
+            storageFailure = new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
+            throw storageFailure;
+          }
+          if (!result.ok) throw new Error('공고 색인 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
+        }
+        // Only personal potential matches persist in the revision-verification
+        // queue. The independent public index already contains all candidates.
         const completed = { id: job.id, page: job.page, totalCount: response.totalCount,
           receivedCount: response.items.length, observed: [...observed.values()], items,
           complete: (job.page - 1) * job.pageSize + response.items.length === response.totalCount };
@@ -238,7 +261,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
         }
         const potential = potentialRules(latest, rules, now);
         const checked = potential.length ? await participantConditions(latest, potential, request) : latest;
-        const matched = potential.some(rule => matchAlertNotice(checked, rule.settings, rule.profile, now).matched);
+        const matched = potential.some(rule => matchAlarmNotice(checked, rule.settings, rule.profile, now).matched);
         if (matched || identity.tracked) {
           all[all.length - 1] = checked;
           await commit({ scopeVersion: claim.scopeVersion, groups: [all] });

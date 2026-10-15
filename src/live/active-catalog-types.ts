@@ -1,5 +1,5 @@
 import type { AlertNotice, WorkerRule } from '../alerts/types';
-import type { G2bBusinessType } from '../g2b-types';
+import type { G2bBusinessType, G2bNoticePage } from '../g2b-types';
 
 export interface ActiveCatalogIdentity {
   type: G2bBusinessType; number: string; tracked?: boolean;
@@ -38,4 +38,16 @@ export interface ActiveCatalogCommit {
 export interface ActiveCatalogPageQuery {
   cursor?: string | null; limit?: number; types?: G2bBusinessType[];
   changedSince?: string; changedThrough?: string; includeInactive?: boolean;
+  includeIndex?: boolean; deadlineFrom?: string; deadlineTo?: string;
+}
+
+export interface DeadlineCatalogQuery {
+  from: string; to: string; type: G2bBusinessType; keyword?: string; page?: number; pageSize?: number; now?: number;
+}
+export type DeadlineCatalogPage = G2bNoticePage & {
+  indexCoverage: { complete: boolean; pending: number; checked: number };
+};
+export interface DeadlineIndexBatch {
+  scopeVersion: string; sourceId: string; page: number; batch: number; batches: number;
+  notices: AlertNotice[]; removed: ActiveCatalogIdentity[];
 }

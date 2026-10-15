@@ -47,13 +47,20 @@ describe('custom lookup result integrity', () => {
     expect(html).toContain('학교 철거 공사');
     expect(html).toContain('맞춤 조건 일치');
     expect(html).toContain('즐겨찾기 해제');
-    expect(html).toContain('게시 기간의 조회를 마쳤습니다');
+    expect(html).toContain('제출마감 기간의 조회를 마쳤습니다');
   });
   it('labels a partial range and keeps a next-range control', () => {
     const html = results({ hasMore: true });
     expect(html).toContain('현재 확인한 범위의 결과');
     expect(html).toContain('공고 더 조회');
-    expect(html).not.toContain('게시 기간의 조회를 마쳤습니다');
+    expect(html).not.toContain('제출마감 기간의 조회를 마쳤습니다');
+  });
+  it('describes global bootstrap progress without claiming the selected query has those pending ranges', () => {
+    const html = results({ indexCoverage: { complete: false, pending: 746, checked: 0 } });
+    expect(html).toContain('공통 색인 최초 수집 중');
+    expect(html).toContain('화면은 선택한 제출마감 구간만 조회합니다');
+    expect(html).not.toContain('선택 기간 색인 확인 중');
+    expect(html).not.toContain('선택한 제출마감 기간의 조회를 마쳤습니다');
   });
   it('keeps confirmed rows visible alongside a failed-range warning', () => {
     const html = results({ error: '상세 조회 실패', hasMore: true });
@@ -72,7 +79,7 @@ describe('custom lookup result integrity', () => {
   it('does not represent a failed empty lookup as a completed zero result', () => {
     const html = results({ items: [], error: '연결 실패', hasMore: true });
     expect(html).toContain('공고 조회를 완료하지 못했습니다');
-    expect(html).not.toContain('게시 기간의 조회를 마쳤습니다');
+    expect(html).not.toContain('제출마감 기간의 조회를 마쳤습니다');
   });
   it('explains login and settings failures without issuing a query during rendering', () => {
     const base = { settings: null, profile: DEMO_PROFILES[0], profileReady: true, bookmarks: [], onBookmark: () => {}, onOpen: () => {}, onEditConditions: () => {}, onGeneralSearch: () => {}, onLogin: () => {} };
@@ -80,10 +87,9 @@ describe('custom lookup result integrity', () => {
     const html = renderToStaticMarkup(<CustomNoticeSearch {...base} userId="a" settingsError="조건 연결 실패" onRetrySettings={() => {}} />);
     expect(html).toContain('조건 연결 실패');
     expect(html).toContain('조건 다시 불러오기');
-    expect(html).toContain('진행 공고 찾기');
-    expect(html).toContain('게시 기간으로 찾기');
-    expect(html).toContain('게시일과 관계없이');
-    expect(html).toContain('개찰 예정일 시작');
-    expect(html).toContain('앞으로 1년');
+    expect(html).not.toContain('게시 기간으로 찾기');
+    expect(html).toContain('입찰서 제출마감 기준');
+    expect(html).toContain('제출마감 시작일');
+    for (const months of [1, 3, 6]) expect(html).toContain(`전후 ${months}개월`);
   });
 });

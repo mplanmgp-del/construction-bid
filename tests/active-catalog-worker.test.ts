@@ -7,22 +7,25 @@ import { DEFAULT_ALERT_SETTINGS, type WorkerRule } from '../src/alerts/types';
 import { ProviderQuotaError } from '../server/provider-quota';
 
 const now = Date.parse('2026-10-15T15:30:00+09:00');
-const row = (patch: Record<string, unknown> = {}) => ({ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', bsnsDivNm: '공사', bidNtceNm: '구조물 철거공사', bidNtceDt: '1995-10-02 00:00:00', rgstDt: '1995-10-02 00:00:00', bidBeginDt: '2026-02-27 10:00:00', bidClseDt: '2099-03-04 10:00:00', ...patch });
+const row = (patch: Record<string, unknown> = {}) => ({ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', bsnsDivNm: '공사', bidNtceNm: '구조물 철거공사', bidNtceDt: '1995-10-02 00:00:00', rgstDt: '1995-10-02 00:00:00', bidBeginDt: '2026-02-27 10:00:00', bidClseDt: '2026-10-20 10:00:00', ...patch });
 const rule = (filter: Partial<WorkerRule['settings']['filter']> = {}): WorkerRule => ({ userId: 'member-one', profile: null, settings: { ...structuredClone(DEFAULT_ALERT_SETTINGS), enabled: true, filter: { ...structuredClone(DEFAULT_ALERT_SETTINGS.filter), keywords: ['철거'], ...filter } } });
 const source = (patch: Partial<ActiveCatalogSourceJob> = {}): ActiveCatalogSourceJob => ({ id: 'history-construction', type: '공사', kind: 'history', from: '1995-10-01T00:00:00+09:00', to: '1995-10-31T23:59:00+09:00', page: 1, pageSize: 999, totalCount: null, ...patch });
 function store(sources: ActiveCatalogSourceJob[] = [], verify: ActiveCatalogClaim['verify'] = [], rules: WorkerRule[] = [rule()]) {
   const commit = vi.fn(async (_leaseId: string, _payload: ActiveCatalogCommit) => ({ ok: true }));
   const finish = vi.fn(async (_leaseId: string, _payload: { error?: string }) => ({ ok: true }));
-  return { claim: vi.fn(async () => ({ leaseId: 'lease', sources, verify, rules, scopeVersion: 'enabled-rules-v1' })), commit, finish } as unknown as ActiveCatalogStore & { commit: typeof commit; finish: typeof finish };
+  const indexUpsert = vi.fn<ActiveCatalogStore['indexUpsert']>(async () => ({ ok: true }));
+  return { claim: vi.fn(async () => ({ leaseId: 'lease', sources, verify, rules, scopeVersion: 'enabled-rules-v1' })), commit, finish, indexUpsert } as unknown as ActiveCatalogStore & { commit: typeof commit; finish: typeof finish; indexUpsert: typeof indexUpsert };
 }
 
 describe('all-age active catalog collection', () => {
   it('discovers a 1995-posted active notice with a 2099 deadline and no opening date', async () => {
-    const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row()], totalCount: 1 }));
+    const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row({ bidClseDt: '2099-03-04 10:00:00' })], totalCount: 1 }));
     const db = store([source()]);
     const result = await runActiveCatalogWorker(db, { provider, now });
-    expect(provider).toHaveBeenCalledWith('getBidPblancListInfoCnstwkPPSSrch', expect.objectContaining({ inqryDiv: '1', inqryBgnDt: '199510010000', inqryEndDt: '199510312359', bidClseExcpYn: 'Y', pageNo: '1', numOfRows: '999' }));
-    expect(db.commit).toHaveBeenCalledWith('lease', expect.objectContaining({ sources: [expect.objectContaining({ id: 'history-construction', complete: true, items: [expect.objectContaining({ postedAt: '1995-10-02T00:00:00+09:00', deadline: '2099-03-04T10:00:00+09:00', openingAt: '', regionComplete: false, licenseComplete: false })] })] }));
+    expect(provider).toHaveBeenCalledWith('getBidPblancListInfoCnstwkPPSSrch', expect.objectContaining({ inqryDiv: '1', inqryBgnDt: '199510010000', inqryEndDt: '199510312359', pageNo: '1', numOfRows: '999' }));
+    expect(provider.mock.calls[0][1]).not.toHaveProperty('bidClseExcpYn');
+    expect(db.indexUpsert).toHaveBeenCalledWith('lease', expect.objectContaining({ notices: [expect.objectContaining({ postedAt: '1995-10-02T00:00:00+09:00', deadline: '2099-03-04T10:00:00+09:00', openingAt: '' })] }));
+    expect(db.commit.mock.calls[0][1].sources?.[0].items).toEqual([]);
     expect(result).toMatchObject({ ok: true, sources: 1, requests: 1 });
   });
 
@@ -80,7 +83,7 @@ describe('all-age active catalog collection', () => {
   });
 
   it('commits successful live work even when an independent historical request fails', async () => {
-    const provider: ActiveCatalogProvider = async (_operation, params) => { if (params.bidClseExcpYn === 'Y') throw new Error('secret-provider-url'); return { items: [row()], totalCount: 1 }; };
+    const provider: ActiveCatalogProvider = async (operation) => { if (operation.endsWith('PPSSrch')) throw new Error('secret-provider-url'); return { items: [row()], totalCount: 1 }; };
     const db = store([source(), source({ id: 'registered', kind: 'registered' })]);
     const result = await runActiveCatalogWorker(db, { provider, now });
     expect(result.ok).toBe(false);
@@ -168,14 +171,47 @@ describe('all-age active catalog collection', () => {
       items: [expect.objectContaining({ revision: '000' })], observed: [{ type: '공사', number: 'R26BK01359594', revision: '001', sourceUpdatedAt: '1995-10-02T00:00:00+09:00' }] });
   });
 
-  it('does not read source pages when no enabled rules remain', async () => {
+  it('continues the shared public index when no enabled alarm rules remain', async () => {
     const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row()], totalCount: 1 }));
     const db = store([source()], [], [{ ...rule(), settings: { ...rule().settings, enabled: false } }]);
     const result = await runActiveCatalogWorker(db, { provider, now });
-    expect(result).toMatchObject({ ok: true, sources: 0, requests: 0 });
-    expect(provider).not.toHaveBeenCalled();
-    expect(db.commit).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, sources: 1, requests: 1 });
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(db.indexUpsert).toHaveBeenCalledWith('lease', expect.objectContaining({ notices: [expect.objectContaining({ number: 'R26BK01359594' })] }));
+    expect(db.commit.mock.calls[0][1].sources?.[0].items).toEqual([]);
     expect(db.finish).toHaveBeenCalledWith('lease', {});
+  });
+
+  it('writes all 999 common candidates in five chunks before advancing the source, independently of member keywords', async () => {
+    const rows = Array.from({ length: 999 }, (_, index) => row({ bidNtceNo: `R26BK${String(index).padStart(8, '0')}`, bidNtceNm: '전산 유지보수' }));
+    const db = store([source()]);
+    await runActiveCatalogWorker(db, { provider: async () => ({ items: rows, totalCount: 999 }), now });
+    expect(db.indexUpsert).toHaveBeenCalledTimes(5);
+    expect(db.indexUpsert.mock.calls.map(([, batch]) => batch.notices.length)).toEqual([200, 200, 200, 200, 199]);
+    expect(db.indexUpsert.mock.invocationCallOrder.at(-1)).toBeLessThan(db.commit.mock.invocationCallOrder[0]);
+    expect(db.commit.mock.calls[0][1].sources?.[0]).toMatchObject({ receivedCount: 999, items: [], complete: true });
+  });
+
+  it('keeps passed-deadline future-opening candidates and sends only identities for cancelled and opened rows', async () => {
+    const db = store([source()]);
+    await runActiveCatalogWorker(db, { provider: async () => ({ totalCount: 3, items: [
+      row({ bidNtceNo: 'R26WAIT00001', bidClseDt: '2026-10-14 10:00:00', opengDt: '2026-10-16 11:00:00' }),
+      row({ bidNtceNo: 'R26DONE00001', opengDt: '2026-10-14 11:00:00' }),
+      row({ bidNtceNo: 'R26CANCEL001', ntceKindNm: '취소공고' }),
+    ] }), now });
+    expect(db.indexUpsert.mock.calls[0][1].notices).toEqual([expect.objectContaining({ number: 'R26WAIT00001', status: '마감' })]);
+    const removed = db.indexUpsert.mock.calls[0][1].removed;
+    expect(removed.map(item => item.number)).toEqual(['R26DONE00001', 'R26CANCEL001']);
+    expect(removed.every(item => !('title' in item) && !('documents' in item))).toBe(true);
+  });
+
+  it('never checkpoints a source after any common index chunk hits the fixed storage cap', async () => {
+    const db = store([source()]);
+    db.indexUpsert.mockResolvedValueOnce({ ok: false, storageFull: true });
+    const result = await runActiveCatalogWorker(db, { provider: async () => ({ items: [row()], totalCount: 1 }), now });
+    expect(result.ok).toBe(false);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
+    expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.stringContaining('저장 한도') });
   });
 
   it('discards a candidate when its verified latest revision no longer matches any rule', async () => {
