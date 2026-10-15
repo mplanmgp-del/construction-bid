@@ -83,7 +83,7 @@ export function NoticeNumberLookup({ userId, bookmarks, onBookmark, onOpen }: {
     if (controller.getSnapshot().userId === userId) controller.clear();
   }
   return <section className="notice-number-panel panel" aria-label="공고번호 조회">
-    <div className="notice-number-heading"><h2>공고번호 조회</h2><p>게시일·맞춤 조건에 관계없이 최신 차수와 이전 공고를 확인합니다.</p></div>
+    <div className="notice-number-heading"><h2>공고번호 조회</h2><p>검색 기간·상세 조건에 관계없이 최신 차수와 이전 공고를 확인합니다.</p></div>
     <form className="notice-number-form" role="search" aria-label="공고번호 직접 조회" onSubmit={event => {
       event.preventDefault(); if (controller.getSnapshot().userId === userId) void controller.search(input, type);
     }}>
