@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Bell, BellRing, CheckCheck, ChevronRight, CircleAlert, Clock3, RefreshCw, Save, Settings2 } from 'lucide-react';
+import { Bell, BellRing, CheckCheck, ChevronRight, CircleAlert, Clock3, Save, Settings2 } from 'lucide-react';
 import { CATEGORIES, type Category, type CompanyProfile } from '../types';
 import { formatDateTime, formatPrice } from '../domain';
 import { DEFAULT_ALERT_SETTINGS, type AlertFilter, type AlertNotice, type AlertSettings } from './types';
 import type { AlertsAccess } from './useAlerts';
 import { BrowserPushControls } from './BrowserPushControls';
+import { BookmarkButton } from '../components/BookmarkButton';
 import { matchAlertNotice, normalizeAlertSettings } from './domain';
 import './alerts.css';
 
@@ -29,8 +30,8 @@ function noticeHref(notice: AlertNotice): string {
   return `/notice-detail.html?${new URLSearchParams({ number: notice.number, revision: notice.revision, type: notice.type })}`;
 }
 
-export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin = false, demo = false, initialFilter, onInitialFilterConsumed, openExistingRequest = 0 }: {
-  alerts: AlertsAccess; signedIn: boolean; onLogin: () => void; profile?: CompanyProfile | null; isAdmin?: boolean; demo?: boolean; initialFilter?: AlertFilter | null; onInitialFilterConsumed?: () => void; openExistingRequest?: number;
+export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin = false, demo = false, initialFilter, onInitialFilterConsumed, openExistingRequest = 0, bookmarks = [], onBookmark }: {
+  alerts: AlertsAccess; signedIn: boolean; onLogin: () => void; profile?: CompanyProfile | null; isAdmin?: boolean; demo?: boolean; initialFilter?: AlertFilter | null; onInitialFilterConsumed?: () => void; openExistingRequest?: number; bookmarks?: string[]; onBookmark?: (notice: AlertNotice) => void;
 }) {
   const settings = alerts.overview?.settings ?? DEFAULT_ALERT_SETTINGS;
   const [form, setForm] = useState<AlertForm>(() => formFromSettings(settings));
@@ -42,6 +43,7 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
   const existingRef = useRef<HTMLDetailsElement>(null);
   const firstInput = useRef<HTMLInputElement>(null);
   const incomingKey = JSON.stringify(formFromSettings(settings));
+  useEffect(() => { if (signedIn && !demo) void alerts.refresh(); }, [alerts.userId, alerts.refresh, signedIn, demo]);
   useEffect(() => {
     if (!dirtyRef.current) setForm(formFromSettings(settings));
   }, [incomingKey]);
@@ -87,10 +89,10 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
   const busy = alerts.saving || alerts.settingUp;
   const existingCount = overview?.existingMatches.length ?? 0;
   return <section className="alerts-page">
-    <div className="alerts-page-heading"><div><div className="eyebrow">내 업체에 맞는 공고를 자동으로</div><h1>알림 조건</h1><p>저장한 조건을 서버에서 약 10분마다 확인합니다. 받은 알림은 상단 종 버튼에서 확인하세요.</p></div><button type="button" className="button button-secondary" disabled={alerts.loading || busy} onClick={() => { void alerts.refresh(); }}><RefreshCw size={15} className={alerts.loading ? 'alerts-spinning' : ''} /><span>{alerts.loading ? '확인 중' : '새로고침'}</span></button></div>
+    <div className="alerts-page-heading"><div><div className="eyebrow">내 업체에 맞는 공고를 자동으로</div><h1>알림 조건</h1><p>저장한 조건을 서버에서 약 10분마다 확인합니다. 화면을 열면 최신 알림을 자동으로 조회합니다.</p></div></div>
     {alerts.error && <div className="alerts-feedback alerts-feedback-error" role="alert"><CircleAlert size={17} /><span>{alerts.error}</span></div>}
     {alerts.message && !alerts.error && <div className="alerts-feedback" role="status"><CheckCheck size={17} /><span>{alerts.message}</span></div>}
-    {!overview && <div className="alerts-loading panel" role="status">{alerts.loading ? '회원의 알림 정보를 불러오고 있습니다.' : '알림 정보를 불러오지 못했습니다. 새로고침으로 다시 확인해 주세요.'}</div>}
+    {!overview && <div className="alerts-loading panel" role="status">{alerts.loading ? '회원의 알림 정보를 불러오고 있습니다.' : '알림 정보를 불러오지 못했습니다. 잠시 후 자동으로 다시 확인합니다.'}</div>}
     {status && <div className={`alerts-service-status panel${status.paused || status.error || !status.configured ? ' alerts-service-attention' : ''}`}>
       <div><span className={`alerts-status-dot${status.configured && settings.enabled && !status.paused && !status.error ? ' is-active' : ''}`} /><strong>{!status.configured ? '서버 알림 설정 필요' : !settings.enabled ? '내 알림 꺼짐' : status.paused ? '수집 일시 중지' : status.error ? '공고 확인 지연' : !status.lastCheckedAt ? '첫 공고 확인 대기' : '서버에서 공고 확인 중'}</strong></div>
       <dl><div><dt>마지막 확인</dt><dd>{timeLabel(status.lastCheckedAt)}</dd></div><div><dt>확인 범위</dt><dd>{status.coverageFrom ? `${timeLabel(status.coverageFrom)} 이후` : '수집 시작 대기'}</dd></div></dl>
@@ -109,6 +111,7 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
               const comparison=matchAlertNotice(notice,settings,profile);
               return <article key={notice.id} className="alerts-existing-notice"><span>{notice.type} · {notice.number}-{notice.revision}</span><a href={noticeHref(notice)} target="_blank" rel="noopener noreferrer">{notice.title}<ChevronRight size={15} /></a><p>{notice.agency}</p><div><span>{notice.province} {notice.district}</span><strong>{formatPrice(notice.estimatedPrice)}</strong><span>마감 {timeLabel(notice.deadline)}</span></div>
                 <div className={`alerts-comparison${comparison.needsReview?' needs-review':''}`} aria-label="현재 저장한 조건 비교"><strong>{comparison.matched?comparison.needsReview?'조건 확인 필요':'저장 조건 일치':'현재 저장한 조건과 다름'}</strong>{comparison.matched&&<p>{comparison.reasons.join(' · ')}</p>}</div>
+                {onBookmark && <div className="alerts-existing-actions"><BookmarkButton noticeTitle={notice.title} saved={bookmarks.includes(notice.id)} onToggle={() => onBookmark(notice)} /></div>}
               </article>;
             })}
             {overview?.existingHasMore && <button type="button" className="button button-secondary alerts-load-more" disabled={alerts.loadingExisting || alerts.loading} onClick={() => { void alerts.loadExisting(); }}>{alerts.loadingExisting ? '불러오는 중' : '기존 공고 더 보기'}</button>}

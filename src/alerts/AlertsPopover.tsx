@@ -2,7 +2,8 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 import { createPortal } from 'react-dom';
 import { Bell, CheckCheck, ChevronRight, RefreshCw, Settings2, X } from 'lucide-react';
 import { formatDateTime } from '../domain';
-import type { AlertInboxItem } from './types';
+import type { AlertInboxItem, AlertNotice } from './types';
+import { BookmarkButton } from '../components/BookmarkButton';
 import type { AlertsAccess } from './useAlerts';
 import './alerts-popover.css';
 
@@ -20,9 +21,10 @@ const eventLabels: Record<AlertInboxItem['kind'], string> = { initial: '첫 알�
 interface ContentProps {
   alerts: AlertsAccess; signedIn: boolean; onLogin: () => void; onClose: () => void;
   onOpenSettings: () => void; onOpenExisting: () => void; headingId: string;
+  bookmarks?: string[]; onBookmark?: (notice: AlertNotice) => void;
 }
 
-export function AlertsPopoverContent({ alerts, signedIn, onLogin, onClose, onOpenSettings, onOpenExisting, headingId }: ContentProps) {
+export function AlertsPopoverContent({ alerts, signedIn, onLogin, onClose, onOpenSettings, onOpenExisting, headingId, bookmarks = [], onBookmark }: ContentProps) {
   const overview = signedIn ? alerts.overview : null;
   const notifications = overview?.notifications ?? [];
   function openExisting(item: AlertInboxItem) {
@@ -44,6 +46,7 @@ export function AlertsPopoverContent({ alerts, signedIn, onLogin, onClose, onOpe
           {item.notice ? <a className="alert-popover-title" href={`/notice-detail.html?${new URLSearchParams({ number: item.notice.number, revision: item.notice.revision, type: item.notice.type })}`} target="_blank" rel="noopener noreferrer" onClick={() => { if (!item.readAt) void alerts.read({ id: item.id }); onClose(); }}>{item.notice.title}<ChevronRight size={14} /></a> : null}
           {item.message && <p className="alert-popover-message">{item.message}</p>}
           {item.changeFields.length > 0 && <div className="alert-popover-changes">{item.changeFields.map(field => <span key={field}>{field}</span>)}</div>}
+          {item.notice && onBookmark && <div className="alert-popover-bookmark"><BookmarkButton noticeTitle={item.notice.title} saved={bookmarks.includes(item.notice.id)} onToggle={() => onBookmark(item.notice!)} /></div>}
           {(item.kind === 'initial' || !item.readAt) && <div className="alert-popover-actions">
             {item.kind === 'initial' && <button type="button" onClick={() => openExisting(item)}>기존 공고 {item.existingCount ?? 0}건 보기<ChevronRight size={13} /></button>}
             {!item.readAt && <button type="button" disabled={alerts.reading} onClick={() => { void alerts.read({ id: item.id }); }}>읽음</button>}
@@ -63,7 +66,7 @@ export function alertPopoverPosition(rect: Pick<DOMRect, 'left' | 'right' | 'bot
   return { width, left, top, maxHeight: Math.min(480, Math.max(120, viewportHeight - top - 12)), arrow: Math.max(18, Math.min(width - 18, (rect.left + rect.right) / 2 - left)) };
 }
 
-export function AlertMenu({ alerts, signedIn, disabled = false, contextKey, onLogin, onOpenSettings, onOpenExisting }: Omit<ContentProps, 'onClose' | 'headingId'> & { disabled?: boolean; contextKey: string }) {
+export function AlertMenu({ alerts, signedIn, disabled = false, contextKey, onLogin, onOpenSettings, onOpenExisting, bookmarks, onBookmark }: Omit<ContentProps, 'onClose' | 'headingId'> & { disabled?: boolean; contextKey: string }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<ReturnType<typeof alertPopoverPosition> | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -107,7 +110,7 @@ export function AlertMenu({ alerts, signedIn, disabled = false, contextKey, onLo
   return <>
     <AlertBell buttonRef={trigger} unreadCount={signedIn ? alerts.overview?.unreadCount ?? 0 : 0} onOpen={toggle} disabled={disabled} expanded={open} controls={dialogId} />
     {open && createPortal(<div ref={panel} id={dialogId} role="dialog" aria-labelledby={headingId} tabIndex={-1} className="alert-popover" style={style}>
-      <AlertsPopoverContent alerts={alerts} signedIn={signedIn} headingId={headingId} onClose={() => close(true)} onLogin={act(onLogin)} onOpenSettings={act(onOpenSettings)} onOpenExisting={act(onOpenExisting)} />
+      <AlertsPopoverContent alerts={alerts} signedIn={signedIn} headingId={headingId} onClose={() => close(true)} onLogin={act(onLogin)} onOpenSettings={act(onOpenSettings)} onOpenExisting={act(onOpenExisting)} bookmarks={bookmarks} onBookmark={onBookmark} />
     </div>, document.body)}
   </>;
 }

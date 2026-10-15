@@ -7,7 +7,10 @@ import { currentNotice, fetchApi, safeG2bUrl } from './client';
 import { CompleteNoticeDetails, type CompleteNoticeDetailsHandle } from './CompleteNoticeDetails';
 import { noticeState } from '../notice-status';
 import { OpeningResultsPanel } from './OpeningResultsPanel';
-import { useMemberWorkspace } from '../member/useMemberWorkspace';
+import { useMemberWorkspace, type MemberWorkspaceAccess } from '../member/useMemberWorkspace';
+import type { MemberWorkspace } from '../member/workspace';
+import { toggleNoticeBookmark } from '../member/bookmarks';
+import { BookmarkButton } from '../components/BookmarkButton';
 import { FloatingQuickLinks } from '../components/FloatingQuickLinks';
 import { useMenuAccess } from '../admin/useMenuAccess';
 import { LockedMenu } from '../admin/AdminPage';
@@ -23,6 +26,39 @@ function queryNotice() {
 
 function emptyNotice(detail: G2bNoticeDetail, type: string): BidNotice {
   return { id: `${detail.number}-${detail.revision}`, number: detail.number, revision: detail.revision, title: '', agency: '', type: type === '용역' ? '용역' : '공사', category: '기타', province: '', district: '', allowedRegions: detail.allowedRegions, estimatedPrice: null, contractMethod: '', status: '확인필요', postedAt: '', deadline: '', openingAt: '', registrationDeadline: '', licenses: detail.licenses, duration: '', description: '', requirements: [], documents: [], revised: false, source: 'live', detailUrl: detail.sourceUrl };
+}
+
+export function toggleDetailBookmark(current: MemberWorkspace, bid: BidNotice, userId: string): MemberWorkspace {
+  if (current.profile.id !== userId || !bid.title.trim()) return current;
+  return toggleNoticeBookmark(current, bid);
+}
+
+type DetailBookmarkMember = Pick<MemberWorkspaceAccess, 'user' | 'workspace' | 'ready' | 'loading' | 'saveStatus' | 'error' | 'updateWorkspace' | 'retrySave' | 'retryLoad'>;
+
+export function NoticeDetailBookmark({ bid, member, available = true }: { bid: BidNotice; member: DetailBookmarkMember; available?: boolean }) {
+  const userId = member.user?.id;
+  const workspace = userId && member.workspace?.profile.id === userId ? member.workspace : null;
+  const saved = Boolean(workspace?.bookmarks.includes(bid.id));
+  const unavailable = !available || !bid.title.trim();
+  const disabled = unavailable || member.loading || Boolean(userId && (!member.ready || !workspace || member.saveStatus === 'saving'));
+
+  function toggle() {
+    if (!userId) { window.location.assign('/#account'); return; }
+    if (disabled) return;
+    member.updateWorkspace(current => toggleDetailBookmark(current, bid, userId));
+  }
+
+  return <div className="fnd-bookmark-tools">
+    <div className="fnd-bookmark-actions"><BookmarkButton noticeTitle={bid.title || '이 공고'} saved={saved} onToggle={toggle} disabled={disabled} className="fnd-bookmark-button" />{userId && <a href="/#bookmarks">관심공고 모아보기 <ChevronRight size={15} /></a>}</div>
+    {unavailable ? <p role="status">공고 기본정보를 확인한 뒤 즐겨찾기에 저장할 수 있습니다.</p>
+      : !userId ? <p role="status">{member.loading ? '로그인 상태를 확인 중입니다.' : <><a href="/#account">로그인</a>하면 투찰할 공고를 관심공고에 모아둘 수 있습니다.</>}</p>
+      : member.error ? <div className="fnd-bookmark-feedback" role="alert"><span>{member.error}</span>{member.ready && member.saveStatus === 'error' ? <button type="button" onClick={() => void member.retrySave()}>다시 저장</button> : !workspace ? <button type="button" onClick={() => void member.retryLoad()}>다시 불러오기</button> : <a href="/#account">계정에서 확인</a>}</div>
+      : !member.ready || !workspace ? <p role="status">관심공고를 불러오는 중입니다.</p>
+      : member.saveStatus === 'saving' ? <p role="status">관심공고를 계정에 저장 중입니다.</p>
+      : saved && member.saveStatus === 'saved' ? <p role="status">클라우드 저장 완료 · 관심공고에서 투찰할 공고를 비교해 보세요.</p>
+      : member.saveStatus === 'recovery' ? <p role="status">미저장 변경이 있습니다. <a href="/#account">계정에서 저장 상태 확인</a></p>
+      : <p>투찰을 검토할 공고를 즐겨찾기에 저장하세요.</p>}
+  </div>;
 }
 
 export function NoticeDetailPage() {
@@ -81,6 +117,7 @@ export function NoticeDetailPage() {
           <div className="fnd-hero-top"><div className="fnd-badges"><span className={`fnd-status is-${state?.tone}`} title={state?.description}>{state?.label}</span><span>{bid.type}</span>{bid.contractMethod && <span>{bid.contractMethod}</span>}</div><div className="fnd-hero-actions"><button type="button" onClick={copyNumber} aria-label="공고번호 복사" title="공고번호 복사"><Copy size={18} /></button><button type="button" onClick={() => printRef.current?.openPrint()} aria-label="공고 상세 인쇄" title="인쇄용 PDF 만들기"><Printer size={18} /></button></div></div>
           <h1 id="fnd-notice-title">{bid.title || '-'}</h1>
           <div className="fnd-hero-meta"><span><Building2 size={16} />{bid.agency || '-'}</span><span className="fnd-notice-number">{bid.number}-{bid.revision}</span></div>
+          <NoticeDetailBookmark bid={bid} member={member} available={Boolean(detail.notice)} />
           <div className="fnd-hero-bottom"><div><MapPin size={16} /><span><b>참가 가능 지역</b> {detail.allowedRegions?.join(' · ') || '-'}</span></div><div><FileText size={16} /><span><b>업종</b> {detail.licenses.join(' · ') || '-'}</span></div></div>
         </section>
         {detail.warnings.length > 0 && <aside className="fnd-data-warning"><Info size={18} /><div><strong>일부 상세 항목은 확인이 필요합니다</strong><ul>{detail.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div></aside>}

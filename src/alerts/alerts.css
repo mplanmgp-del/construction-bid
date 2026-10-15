@@ -12,3 +12,5 @@
 @media(prefers-reduced-motion:reduce){.alerts-spinning,.alert-push-actions .spin{animation:none}}
 .alerts-field select{box-sizing:border-box;min-width:0;max-width:100%;width:100%;color:inherit;font:inherit;line-height:1.7}
 @media(min-width:481px) and (max-width:760px){.alerts-settings .alerts-field{grid-column:1/-1}}
+
+.alerts-existing-notice>.alerts-existing-actions{justify-content:flex-end;margin-top:12px}

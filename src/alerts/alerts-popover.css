@@ -43,3 +43,5 @@
 .alert-popover-error{padding:12px 16px;background:#fff6f4;color:#ab5948;font-size:12px;line-height:1.6}
 .alert-popover-error p{margin:0 0 6px}
 .alert-popover-error button{display:flex;align-items:center;gap:4px;border:0;background:transparent;color:inherit;padding:2px 0;font-size:11px}
+
+.alert-popover-bookmark{display:flex;justify-content:flex-end;margin-top:9px}.alert-popover-bookmark .notice-bookmark{min-height:29px;padding:5px 8px;font-size:11px}

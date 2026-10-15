@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { CalendarClock, Check, Download, ExternalLink, FileText, Info, MapPin, ShieldCheck, Star, X } from 'lucide-react';
+import { CalendarClock, Check, Download, ExternalLink, FileText, Info, MapPin, ShieldCheck, X } from 'lucide-react';
+import { BookmarkButton } from './BookmarkButton';
 import { assessRegion, daysUntil, formatDateTime, formatPrice } from '../domain';
 import type { BidNotice, CompanyProfile, RegionAssessment } from '../types';
 import type { G2bNoticeDetail } from '../g2b-types';
@@ -180,10 +181,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
           </div>
           <div className="detail-title-row">
             <h2 id={`${id}-title`}>{bid.title}</h2>
-            <button className={`icon-button detail-bookmark ${isBookmarked ? 'detail-bookmark-active' : ''}`}
-              onClick={onToggleBookmark} aria-label={isBookmarked ? '관심공고 해제' : '관심공고 등록'} aria-pressed={isBookmarked}>
-              <Star size={22} fill={isBookmarked ? 'currentColor' : 'none'} aria-hidden="true" />
-            </button>
+            <BookmarkButton noticeTitle={bid.title} saved={isBookmarked} onToggle={onToggleBookmark} />
           </div>
           <p className="detail-agency">{bid.agency}</p>
           <p className="detail-notice-number">공고번호 <strong>{bid.number}</strong><span>차수 {bid.revision}</span></p>

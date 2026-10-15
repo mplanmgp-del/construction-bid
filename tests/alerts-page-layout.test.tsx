@@ -20,6 +20,7 @@ function access(): AlertsAccess {
 describe('alert settings page after inbox moves to the bell', () => {
   it('removes the large inbox panel and its notification content from the page', () => {
     const html = renderToStaticMarkup(<AlertsPage alerts={access()} signedIn onLogin={() => {}} />);
+    expect(html).not.toContain('새로고침');
     expect(html).not.toContain('alerts-inbox');
     expect(html).not.toContain('이 내용은 종 버튼 알림창에만 표시합니다.');
     expect(html).toContain('<h1>알림 조건</h1>');

@@ -70,6 +70,10 @@ export class AlertsController {
     this.readingRequest = null; this.writingRequest = null;
     this.publish(empty(userId || null));
   }
+  refreshIfIdle = (): Promise<boolean> => {
+    if (this.readingRequest || this.writingRequest) return Promise.resolve(false);
+    return this.refresh();
+  };
   async refresh(mode: 'refresh' | 'more' | 'existing' = 'refresh', replace = false): Promise<boolean> {
     if (!this.snapshot.userId || (mode !== 'refresh' && this.snapshot.loading)) return false;
     this.readingRequest?.abort();
@@ -127,6 +131,20 @@ export class AlertsController {
   dispose() { this.setUser(); this.listeners.clear(); }
 }
 
+export function startAlertAutoRefresh(refresh: () => Promise<boolean>, browserWindow: EventTarget = window, browserDocument: EventTarget & { visibilityState: string } = document) {
+  const refreshVisible = () => { if (browserDocument.visibilityState !== 'hidden') void refresh(); };
+  const timer = setInterval(refreshVisible, 60_000);
+  browserWindow.addEventListener('focus', refreshVisible);
+  browserWindow.addEventListener('online', refreshVisible);
+  browserDocument.addEventListener('visibilitychange', refreshVisible);
+  return () => {
+    clearInterval(timer);
+    browserWindow.removeEventListener('focus', refreshVisible);
+    browserWindow.removeEventListener('online', refreshVisible);
+    browserDocument.removeEventListener('visibilitychange', refreshVisible);
+  };
+}
+
 export function useAlerts(userId?: string, enabled = true): AlertsAccess {
   const controllerRef = useRef<AlertsController | null>(null);
   if (!controllerRef.current) controllerRef.current = new AlertsController();
@@ -139,10 +157,10 @@ export function useAlerts(userId?: string, enabled = true): AlertsAccess {
     if (!activeUserId) return () => { unsubscribe(); controller.setUser(); };
     void controller.refresh();
     // This only refreshes the inbox. Collection runs on the server independently.
-    const timer = window.setInterval(() => { const current = controller.getSnapshot(); if (!current.saving && !current.reading && !current.settingUp && !current.loading && !current.loadingMore && !current.loadingExisting) void controller.refresh(); }, 60_000);
-    return () => { window.clearInterval(timer); unsubscribe(); controller.setUser(); };
+    const stopAutoRefresh = startAlertAutoRefresh(controller.refreshIfIdle);
+    return () => { stopAutoRefresh(); unsubscribe(); controller.setUser(); };
   }, [controller, activeUserId]);
-  const refresh = useCallback(() => controller.refresh(), [controller]);
+  const refresh = useCallback(() => controller.refreshIfIdle(), [controller]);
   const visible = snapshot.userId === (activeUserId || null) ? snapshot : empty(activeUserId || null);
   return { ...visible, refresh, save: controller.save, read: controller.read, setup: controller.setup, loadMore: controller.loadMore, loadExisting: controller.loadExisting };
 }
