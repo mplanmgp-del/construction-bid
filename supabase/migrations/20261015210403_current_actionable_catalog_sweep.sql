@@ -188,7 +188,7 @@ begin
      where not exists(select 1 from bid_active_catalog_private.sources s where s.id=scope_value||':current:demolition-title-v1:'||t.type||':'||to_char(m,'YYYY-MM'));
    select count(*) into focused_count from bid_active_catalog_private.deadline_index d where initial_sweep
      and bid_active_catalog_private.current_focus(d.notice) and d.deadline>stamp
-     and bid_active_catalog_private.phase(d.notice,stamp) in ('마감 임박','진행중')
+     and bid_active_catalog_private.phase(d.notice,stamp) in ('마감 임박','진행중','예정')
      and not exists(select 1 from bid_active_catalog_private.verification v where v.type=d.type and v.number=d.number);
    cost:=missing_count*1024+focused_count*1536+65536;
    if bid_active_catalog_private.storage_bytes()+cost>=cfg.storage_ceiling or bid_alert_private.storage_bytes()+cost>=33554432 then
@@ -204,7 +204,7 @@ begin
    insert into bid_active_catalog_private.verification(type,number,revision,source_updated_at,scope_version,source_version)
    select d.type,d.number,d.revision,d.source_updated_at,scope_value,d.source_version
    from bid_active_catalog_private.deadline_index d where initial_sweep and bid_active_catalog_private.current_focus(d.notice)
-     and d.deadline>stamp and bid_active_catalog_private.phase(d.notice,stamp) in ('마감 임박','진행중')
+     and d.deadline>stamp and bid_active_catalog_private.phase(d.notice,stamp) in ('마감 임박','진행중','예정')
    on conflict(type,number) do nothing;
    if bid_active_catalog_private.storage_bytes()+65536>=cfg.storage_ceiling or bid_alert_private.storage_bytes()+65536>=33554432 then
      raise exception using errcode='54000',message='Current source coverage capacity reached';end if;

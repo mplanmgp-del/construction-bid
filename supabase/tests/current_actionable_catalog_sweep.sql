@@ -26,11 +26,16 @@ do $$declare c jsonb;again jsonb;before_sources bigint;failed boolean:=false;cut
  n:=pg_temp.sweep_notice('R26PREVIOUSLYVERIFIED')||'{"regionComplete":true,"licenseComplete":true}'::jsonb;
  insert into bid_active_catalog_private.deadline_index(type,number,revision,notice,source_updated_at,deadline,opening_at,verified_at,source_version,verified_version)
  values('공사',n->>'number',0,n,(n->>'sourceUpdatedAt')::timestamptz,(n->>'deadline')::timestamptz,null,now(),bid_active_catalog_private.source_version(n),bid_active_catalog_private.source_version(n));
+ n:=pg_temp.sweep_notice('R26PREVIOUSLYSCHEDULED')||jsonb_build_object('regionComplete',true,'licenseComplete',true,'biddingStartAt',now()+interval '2 days','deadline',now()+interval '3 days');
+ insert into bid_active_catalog_private.deadline_index(type,number,revision,notice,source_updated_at,deadline,opening_at,verified_at,source_version,verified_version)
+ values('공사',n->>'number',0,n,(n->>'sourceUpdatedAt')::timestamptz,(n->>'deadline')::timestamptz,null,now(),bid_active_catalog_private.source_version(n),bid_active_catalog_private.source_version(n));
  c:=public.bid_active_catalog_worker(repeat('a',64),'claim','{}');
  assert c->>'leaseId' is not null,'existing token-authorized claim acquires shared lease';
  cutoff:=(c#>>'{status,currentCoverage,cutoff}')::timestamptz;
  assert cutoff is not null and cutoff<=clock_timestamp(),'current sweep has explicit fixed cutoff';
  assert exists(select 1 from bid_active_catalog_private.verification where number='R26PREVIOUSLYVERIFIED'),'current sweep rechecks an old verified focus head even if filtered provider lists omit its cancellation';
+ assert exists(select 1 from bid_active_catalog_private.verification where number='R26PREVIOUSLYSCHEDULED'),'an old verified scheduled head is queued before it can activate with a missed cancellation';
+ assert bid_active_catalog_private.current_coverage()->>'verificationPending'='1','scheduled recertification stays behind actionable focus work and does not count as currently actionable';
  assert (select count(*)=2*((extract(year from cutoff at time zone 'Asia/Seoul')::int-1995)*12+extract(month from cutoff at time zone 'Asia/Seoul')::int-10+1) from bid_active_catalog_private.sources where kind='current'),'every supported posting month has its own current-only source';
  assert (select min(from_at)='1995-10-01T00:00:00+09:00' from bid_active_catalog_private.sources where kind='current'),'old posting age is not a current-notice cutoff';
  assert (select bool_and(to_at<=cutoff) from bid_active_catalog_private.sources where kind='current'),'all current source endpoints stop at the fixed cutoff';
@@ -62,8 +67,8 @@ do $$declare c jsonb;again jsonb;before_sources bigint;failed boolean:=false;cut
  assert not exists(select 1 from jsonb_array_elements(c->'sources') s where s->>'kind' in ('current','history')),'current backoff does not permit history to jump ahead';
  assert (select bool_and(failures=4 and next_attempt>now()) from bid_active_catalog_private.sources where kind='current' and completed_at is null),'claim preserves every current source retry delay';
  perform public.bid_active_catalog_worker(repeat('a',64),'finish',jsonb_build_object('leaseId',c->>'leaseId'));
- delete from bid_active_catalog_private.verification where number='R26PREVIOUSLYVERIFIED';
- delete from bid_active_catalog_private.deadline_index where number='R26PREVIOUSLYVERIFIED';
+ delete from bid_active_catalog_private.verification where number in ('R26PREVIOUSLYVERIFIED','R26PREVIOUSLYSCHEDULED');
+ delete from bid_active_catalog_private.deadline_index where number in ('R26PREVIOUSLYVERIFIED','R26PREVIOUSLYSCHEDULED');
 end $$;
 
 do $$declare c jsonb;r jsonb;raw_ids jsonb;failed boolean:=false;begin
