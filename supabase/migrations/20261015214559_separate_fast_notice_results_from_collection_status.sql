@@ -6,6 +6,8 @@ do $$declare source_body text;fast_body text;status_body text;prefix text;from_c
  anchor text;replacement text;definition text;
 begin
  select p.prosrc into strict source_body from pg_proc p where p.oid='bid_active_catalog_private.search_page(jsonb)'::regprocedure;
+ -- A browser-pasted Windows function keeps CRLF in pg_proc.prosrc.
+ source_body:=replace(source_body,E'\r\n',E'\n');
  ranged_at:=position(' with ranged as materialized (' in source_body);
  counts_at:=position(' ),counts as (' in source_body);
  page_at:=position(' ),page_rows as materialized (' in source_body);
