@@ -9,6 +9,8 @@ import { PublicResults } from '../live/PublicResults';
 import { CompleteNoticeDetails } from '../live/CompleteNoticeDetails';
 import { PendingNoticeDetails } from '../live/NoticeSummary';
 import { noticeState } from '../notice-status';
+import { noticeSubmissionMessage } from './notice-schedule';
+import './detail-remake.css';
 
 interface BidDetailProps {
   bid: BidNotice;
@@ -73,6 +75,20 @@ function downloadSampleDocument(bid: BidNotice, documentName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function KnownNoticeFallback({ bid }: { bid: BidNotice }) {
+  if (!bid.licenses.length && !bid.requirements.length && !bid.documents.length) return null;
+  return <details className="detail-section" open>
+    <summary><strong>현재 확인된 참가조건·첨부</strong></summary>
+    <p className="detail-help">목록과 저장된 공고에서 확인한 정보입니다. 최신 참가조건과 첨부서류는 나라장터 원문을 확인해 주세요.</p>
+    {bid.licenses.length > 0 && <div className="detail-license-list">{bid.licenses.map(license => <span className="detail-license" key={license}>{license}</span>)}</div>}
+    {bid.requirements.length > 0 && <ul className="detail-requirements">{bid.requirements.map((requirement, index) => <li key={index}>{requirement}</li>)}</ul>}
+    {bid.documents.length > 0 && <div className="detail-document-list">{bid.documents.map((document, index) => {
+      const url = safeG2bUrl(document.url);
+      return <div className="detail-document" key={`${document.name}-${index}`}><span className="detail-document-icon"><FileText size={21} aria-hidden="true" /></span><div className="detail-document-name"><strong>{document.name}</strong>{document.size && <span>{document.size}</span>}</div>{url ? <a className="button button-secondary detail-download" href={url} target="_blank" rel="noopener noreferrer" aria-label={`${document.name} 원본 열기`}><ExternalLink size={16} /><span>원본 열기</span></a> : <span className="detail-help">원문에서 확인</span>}</div>;
+    })}</div>}
+  </details>;
+}
+
 export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment, isBookmarked, onClose, onToggleBookmark, onEnriched, preparation, now = Date.now() }: BidDetailProps) {
   const id = useId();
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
@@ -82,7 +98,9 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
   closeAction.current = onClose;
   const enrichAction = useRef(onEnriched); enrichAction.current = onEnriched;
   const isLive = inputBid.source === 'live';
-  const tabs = isLive ? [...TABS.map(tab => tab.id === 'overview' ? { ...tab, label: '전체 상세' } : tab), { id: 'results' as const, label: '공개 결과' }, { id: 'preparation' as const, label: '투찰 준비' }] : TABS;
+  const tabs: { id: DetailTab; label: string }[] = isLive ? [
+    { id: 'overview', label: '공고' }, { id: 'results', label: '공개 결과' }, { id: 'preparation', label: '투찰 준비' },
+  ] : TABS;
   const [detailStatus, setDetailStatus] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
   const [failedRequest, setFailedRequest] = useState('');
@@ -154,6 +172,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
   const latestRevisionLabel = historical ? historical.latestStatus === '취소' || historical.latestNoticeKind?.includes('취소')
     ? '취소공고' : historical.latestNoticeKind || historical.latestStatus : '';
   const state = historical ? { label: `이전 ${bid.revision}차수`, tone: 'unknown', description: `최신 ${historical.latestRevision}차수 · ${latestRevisionLabel}` } : noticeState(bid, now);
+  const submission = historical ? '' : noticeSubmissionMessage(bid, now);
   const deadlineLabel = bid.status === '취소' ? '취소된 공고' : bid.status === '마감' || days < 0 ? '제출 마감'
     : !Number.isFinite(days) ? '마감일 확인 필요' : days === 0 ? '오늘 마감' : `마감 D-${days}`;
   const regionStatusLabel = assessment.status === 'matched' ? '지역 일치' : assessment.status === 'excluded' ? '지역 제외' : '확인 필요';
@@ -191,6 +210,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
           </div>
           <p className="detail-agency">{bid.agency}</p>
           <p className="detail-notice-number">공고번호 <strong>{bid.number}</strong><span>차수 {bid.revision}</span></p>
+          {submission && <p className="detail-submission-status">{submission}</p>}
           {historical && <div className="detail-warning" role="note" aria-label="이전 차수 공고 안내"><Info size={19} aria-hidden="true" /><div><strong>이전 {bid.revision}차수 · 최신 {historical.latestRevision}차수 · {latestRevisionLabel}</strong><p>이 화면의 일정과 참가조건은 이전 차수의 기록입니다. 현재 공고 상태는 최신 {historical.latestRevision}차수를 기준으로 확인해 주세요.</p></div></div>}
           <div className={`detail-region-assessment detail-region-${assessment.status}`}>
             {assessment.status === 'matched' ? <Check size={19} aria-hidden="true" /> : <Info size={19} aria-hidden="true" />}
@@ -212,7 +232,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
           {isLive && activeTab === 'results' && <PublicResults bid={bid} />}
           {isLive && activeTab === 'preparation' && preparation}
           {isLive && activeTab === 'overview' && <div className="detail-live-status"><p role="status">{detailStatus}</p><div><button className="text-button" onClick={() => setDetailRetry(value => value + 1)}>새로 조회</button><a href={`/notice-detail.html?${new URLSearchParams({ number: bid.number, revision: historical?.latestRevision ?? bid.revision, type: bid.type })}`} target="_blank" rel="noopener noreferrer">{historical ? '최신 차수 넓은 화면으로 보기' : '넓은 화면으로 보기'}<ExternalLink size={14} /></a></div></div>}
-          {activeTab === 'overview' && (isLive ? detailData ? <CompleteNoticeDetails detail={detailData} bid={bid} /> : <PendingNoticeDetails bid={bid} failed={failedRequest === requestKey} /> : <>
+          {activeTab === 'overview' && (isLive ? detailData ? <CompleteNoticeDetails detail={detailData} bid={bid} /> : <><PendingNoticeDetails bid={bid} failed={failedRequest === requestKey} /><KnownNoticeFallback bid={bid} /></> : <>
             <div className="detail-price-block"><span>추정가격</span><strong>{formatPrice(bid.estimatedPrice)}</strong><p>{bid.estimatedPrice === null ? '이 공고에는 추정가격이 제공되지 않았습니다.' : '금액 검색 및 정렬에 사용하는 추정가격입니다.'}</p></div>
             <section className="detail-section" aria-labelledby={`${id}-base-info`}>
               <h3 id={`${id}-base-info`}>기본정보</h3>

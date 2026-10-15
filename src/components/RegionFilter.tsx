@@ -32,6 +32,6 @@ export function RegionFilter({ values, onChange }: { values: SearchRegion[]; onC
     <button type="button" className={`region-filter-add${selected ? ' is-selected' : ''}`} disabled={!province} onClick={() => onChange(toggleSearchRegion(values, candidate))}>{selected ? <X size={14} /> : <Plus size={14} />}<span>{selected ? '선택 지역 해제' : replacesParent ? '세부 지역으로 변경' : '선택 지역 추가'}</span></button>
     {province && <p className="region-filter-candidate">{regionLabel(candidate)}{!locality ? ' 전체' : ''}</p>}
     {values.length > 0 ? <div className="region-filter-selected"><div className="region-filter-selected-heading"><span>선택 지역 {values.length}개</span><button type="button" onClick={() => onChange([])}>모두 해제</button></div><div className="region-filter-tags">{values.map(value => <button type="button" key={regionKey(value)} title={`${regionLabel(value)} 선택 해제`} aria-label={`${regionLabel(value)} 선택 해제`} onClick={() => onChange(values.filter(item => regionKey(item) !== regionKey(value)))}><span>{regionLabel(value)}</span><X size={12} aria-hidden="true" /></button>)}</div></div> : <p className="region-filter-empty">전국 모든 지역을 표시합니다.</p>}
-    <p className="filter-description">여러 지역을 추가할 수 있습니다. 시·도 또는 시·군·구 전체를 선택하면 하위 지역을 포함합니다. 세부 지역으로 변경하면 해당 상위 지역의 전체 선택은 해제됩니다.</p>
+    <details className="region-selection-help"><summary>지역 선택 안내</summary><p className="filter-description">여러 지역을 추가할 수 있습니다. 시·도 또는 시·군·구 전체를 선택하면 하위 지역을 포함합니다. 세부 지역으로 변경하면 해당 상위 지역의 전체 선택은 해제됩니다.</p></details>
   </div>;
 }

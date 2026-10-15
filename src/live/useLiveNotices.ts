@@ -12,8 +12,8 @@ export function canRetainNoticePage(page: G2bNoticePage | null | undefined, now 
 }
 
 /** Public index facts arrive already filtered, sorted and verified in one call. */
-export function useLiveNotices(enabled: boolean, filters?: SearchFilters, profile?: Pick<CompanyProfile, 'province' | 'district'>) {
-  const [query, setQuery] = useState<NoticeQuery>(() => ({ type: '공사·용역', ...deadlineMonthWindow(6), keyword: '' }));
+export function useLiveNotices(enabled: boolean, filters?: SearchFilters, profile?: Pick<CompanyProfile, 'province' | 'district'>, initialQuery?: NoticeQuery) {
+  const [query, setQuery] = useState<NoticeQuery>(() => initialQuery ?? ({ type: '공사·용역', ...deadlineMonthWindow(6), keyword: '' }));
   const [version, setVersion] = useState(0);
   const controllerRef = useRef<IndexedNoticesController | null>(null);
   if (!controllerRef.current) controllerRef.current = new IndexedNoticesController();

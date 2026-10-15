@@ -34,20 +34,22 @@ describe('notice list presentation', () => {
     expect(noticeState(bid, Date.parse('2026-10-13T11:00:00+09:00')).label).toBe('개찰 완료');
     expect(noticeState({ ...bid, status: '취소' }, Date.parse('2026-10-13T11:00:00+09:00')).label).toBe('-');
   });
-  it('renders schedule-based completion immediately while result companies have not loaded', () => {
+  it('renders schedule-based completion immediately without fetching result companies in the list', () => {
     const bid = { ...NOTICES[0], source: 'live' as const, status: '접수중' as const, openingAt: '2026-10-13T11:00:00+09:00' };
     const html = renderToStaticMarkup(<NoticeList bids={[bid]} now={Date.parse('2026-10-13T11:00:00+09:00')} keyword="" profile={DEMO_PROFILES[0]} bookmarks={[]} selected={[]} onSelect={() => {}} onOpen={() => {}} onBookmark={() => {}} />);
     expect(html).toContain('>개찰 완료</span>');
     expect(html).toContain('공고에 기재된 개찰일시 기준입니다.');
-    expect(html).toMatch(/data-label="1순위 업체"[^>]*>-<\/td>/);
-    expect(html).toMatch(/data-label="낙찰업체"[^>]*>-<\/td>/);
+    expect(html).toContain('개찰·낙찰 결과');
+    expect(html).toContain('#results');
+    expect(html).not.toContain('공개 결과 조회 중');
   });
-  it('shows reference columns, revision and demand agency, with missing companies as dashes', () => {
+  it('shows the revision and demand agency alongside the actual deadline instead of empty result columns', () => {
     const bid = { ...NOTICES[0], source: 'demo' as const, demandAgency: '실제 수요기관', noticeKind: '등록공고', revision: '002' };
     const html = renderToStaticMarkup(<NoticeList bids={[bid]} keyword="철거" profile={DEMO_PROFILES[0]} bookmarks={[]} selected={[]} onSelect={() => {}} onOpen={() => {}} onBookmark={() => {}} />);
-    expect(html).toContain('1순위 업체'); expect(html).toContain('낙찰업체');
+    expect(html).toContain('제출 마감');
+    expect(html).not.toContain('nl-company');
     expect(html).toContain('실제 수요기관'); expect(html).toContain(`${bid.number}-002`);
     expect(html).toContain('현재 페이지 공고 전체 선택');
-    expect(html).toContain('자료 기준">-</td>');
+    expect(html).toContain('data-label="제출 마감"');
   });
 });

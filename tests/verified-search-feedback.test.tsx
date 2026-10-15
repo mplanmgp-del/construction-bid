@@ -30,5 +30,5 @@ it('announces global totals and a 50-item cursor page rather than local 30-item 
 });
 it('disables per-notice public result hydration in the ordinary server index list', () => {
   renderToStaticMarkup(<NoticeList bids={[NOTICES[0]]} keyword="" profile={DEMO_PROFILES[0]} bookmarks={[]} selected={[]} onSelect={() => {}} onOpen={() => {}} onBookmark={() => {}} fetchPublicResults={false} />);
-  expect(summary).toHaveBeenLastCalledWith([NOTICES[0]], false);
+  expect(summary).not.toHaveBeenCalled();
 });

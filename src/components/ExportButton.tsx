@@ -4,7 +4,7 @@ import './ExportButton.css';
 
 export type ExportFormat = 'xlsx' | 'csv';
 
-export function ExportButton({ onExport }: { onExport: (format: ExportFormat) => Promise<void> }) {
+export function ExportButton({ onExport, disabled = false }: { onExport: (format: ExportFormat) => Promise<void>; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<ExportFormat | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -12,6 +12,10 @@ export function ExportButton({ onExport }: { onExport: (format: ExportFormat) =>
   const main = useRef<HTMLButtonElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef<'main' | 'toggle' | null>(null);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   useEffect(() => {
     if (busy || !returnFocus.current) return;
@@ -42,7 +46,7 @@ export function ExportButton({ onExport }: { onExport: (format: ExportFormat) =>
   }, [open]);
 
   async function download(format: ExportFormat) {
-    if (busy) return;
+    if (busy || disabled) return;
     returnFocus.current = menu.current?.contains(document.activeElement) ? 'toggle' : 'main';
     setOpen(false);
     setBusy(format);
@@ -64,12 +68,12 @@ export function ExportButton({ onExport }: { onExport: (format: ExportFormat) =>
     if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
   }}>
     <button ref={main} className="export-main" aria-label={busy ? '다운로드 파일 만드는 중' : '현재 목록 엑셀 다운로드'}
-      title="현재 목록 엑셀 다운로드" disabled={busy !== null} onClick={() => void download('xlsx')}>
+      title={disabled ? '표시된 공고가 있을 때 다운로드할 수 있습니다.' : '현재 목록 엑셀 다운로드'} disabled={busy !== null || disabled} onClick={() => void download('xlsx')}>
       {busy ? <LoaderCircle size={16} className="export-spinner" /> : <ArrowDownToLine size={16} />}
       <span>{busy ? '준비 중' : '엑셀 다운로드'}</span>
     </button>
     <button ref={toggle} className="export-format-toggle" aria-label="다운로드 형식 선택" title="다운로드 형식 선택"
-      aria-haspopup="menu" aria-expanded={open} disabled={busy !== null} onClick={() => setOpen(value => !value)}
+      aria-haspopup="menu" aria-expanded={open} disabled={busy !== null || disabled} onClick={() => setOpen(value => !value)}
       onKeyDown={event => { if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); } }}>
       <ChevronDown size={14} />
     </button>
