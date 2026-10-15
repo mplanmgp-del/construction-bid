@@ -87,17 +87,17 @@ export function AlertsPage({ alerts, signedIn, onLogin, isAdmin = false, demo = 
   const busy = alerts.saving || alerts.settingUp;
   const existingCount = overview?.existingMatches.length ?? 0;
   return <section className="alerts-page">
-    <div className="alerts-page-heading"><div><div className="eyebrow">새 공고와 중요한 변경을 한곳에</div><h1>내 알림</h1><p>저장한 조건을 서버에서 약 10분마다 확인합니다.</p></div><button type="button" className="button button-secondary" disabled={alerts.loading || busy} onClick={() => { void alerts.refresh(); }}><RefreshCw size={15} className={alerts.loading ? 'alerts-spinning' : ''} />{alerts.loading ? '확인 중' : '새로고침'}</button></div>
+    <div className="alerts-page-heading"><div><div className="eyebrow">새 공고와 중요한 변경을 한곳에</div><h1>내 알림</h1><p>저장한 조건을 서버에서 약 10분마다 확인합니다.</p></div><button type="button" className="button button-secondary" disabled={alerts.loading || busy} onClick={() => { void alerts.refresh(); }}><RefreshCw size={15} className={alerts.loading ? 'alerts-spinning' : ''} /><span>{alerts.loading ? '확인 중' : '새로고침'}</span></button></div>
     {alerts.error && <div className="alerts-feedback alerts-feedback-error" role="alert"><CircleAlert size={17} /><span>{alerts.error}</span></div>}
     {alerts.message && !alerts.error && <div className="alerts-feedback" role="status"><CheckCheck size={17} /><span>{alerts.message}</span></div>}
     {!overview && <div className="alerts-loading panel" role="status">{alerts.loading ? '회원의 알림 정보를 불러오고 있습니다.' : '알림 정보를 불러오지 못했습니다. 새로고침으로 다시 확인해 주세요.'}</div>}
     {status && <div className={`alerts-service-status panel${status.paused || status.error || !status.configured ? ' alerts-service-attention' : ''}`}>
-      <div><span className={`alerts-status-dot${status.configured && settings.enabled && !status.paused && !status.error ? ' is-active' : ''}`} /><strong>{!status.configured ? '서버 알림 설정 필요' : status.paused ? '수집 일시 중지' : status.error ? '공고 확인 지연' : !settings.enabled ? '내 알림 꺼짐' : !status.lastCheckedAt ? '첫 공고 확인 대기' : '서버에서 공고 확인 중'}</strong></div>
+      <div><span className={`alerts-status-dot${status.configured && settings.enabled && !status.paused && !status.error ? ' is-active' : ''}`} /><strong>{!status.configured ? '서버 알림 설정 필요' : !settings.enabled ? '내 알림 꺼짐' : status.paused ? '수집 일시 중지' : status.error ? '공고 확인 지연' : !status.lastCheckedAt ? '첫 공고 확인 대기' : '서버에서 공고 확인 중'}</strong></div>
       <dl><div><dt>마지막 확인</dt><dd>{timeLabel(status.lastCheckedAt)}</dd></div><div><dt>확인 범위</dt><dd>{status.coverageFrom ? `${timeLabel(status.coverageFrom)} 이후` : '수집 시작 대기'}</dd></div></dl>
       {status.backfillPending && <p>기존 공고를 확인하고 있습니다. 확인이 끝난 공고부터 표시됩니다.</p>}
       {status.error && <p role="status">{status.error}</p>}
       {!status.configured && <p>서버 연결을 완료해야 브라우저가 닫혀 있어도 공고를 확인할 수 있습니다.</p>}
-      {isAdmin && <button type="button" className="button button-secondary" disabled={busy} onClick={() => { void alerts.setup(); }}><Settings2 size={15} />{alerts.settingUp ? '서버 설정 중' : '서버 알림 설정'}</button>}
+      {isAdmin && <button type="button" className="button button-secondary" disabled={busy} onClick={() => { void alerts.setup(); }}><Settings2 size={15} /><span>{alerts.settingUp ? '서버 설정 중' : '서버 알림 설정'}</span></button>}
     </div>}
     <div className="alerts-layout">
       <div className="alerts-main">
@@ -140,7 +140,7 @@ export function AlertsPage({ alerts, signedIn, onLogin, isAdmin = false, demo = 
             <label className="alerts-checkbox"><input type="checkbox" checked={form.notifyChanges} onChange={event => update('notifyChanges', event.target.checked)} /><span>정정·취소 등 중요한 변경도 알림 받기</span></label>
             <p className="alerts-help">관심 검색어·분야·지역·면허·가격 중 조건을 하나 이상 정해 주세요. 최종 참가 자격과 제출 일정은 공고 원문을 확인해 주세요.</p>
             {formError && <p className="alerts-form-error" role="alert">{formError}</p>}
-            <button type="submit" className="button button-primary alerts-save"><Save size={16} />{alerts.saving ? '저장 중' : '알림 조건 저장'}</button>
+            <button type="submit" className="button button-primary alerts-save"><Save size={16} /><span>{alerts.saving ? '저장 중' : '알림 조건 저장'}</span></button>
           </fieldset>
         </form>
         {overview && <div className="alerts-push panel"><BrowserPushControls publicKey={overview.publicKey} configured={overview.status.pushConfigured} enabled={overview.settings.enabled} onChanged={async () => { await alerts.refresh(); }} disabled={busy} /></div>}
