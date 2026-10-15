@@ -54,5 +54,4 @@ Edge에서 검증 중 연결이 종료되어 Chrome으로 이어서 확인했다
 - 구현 계획: docs/superpowers/plans/2026-10-15-ui-ux-remake.md
 - 로컬 미리보기: http://127.0.0.1:5282/
 - 예시 검증 화면은 outputs/ui-qa.html이며 제품 빌드/Git에서 제외.
-- 화면 증거: outputs/ui-1440.png, ui-768.png, ui-390.png. 운영 배포·외부 공유 없음.
-
+- 화면 증거: outputs/ui-ux-remake-20261015/ui-1440.png, ui-768.png, ui-390.png. 운영 배포·외부 공유 없음.

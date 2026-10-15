@@ -263,4 +263,3 @@ input::placeholder,textarea::placeholder { color:#6b7982; }
   .toast { font-size:13px;padding:12px 16px; }
 }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important;transition:none!important;animation:none!important; } }
-

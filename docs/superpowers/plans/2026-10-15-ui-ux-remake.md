@@ -50,4 +50,3 @@ Files: 기능별 CSS 및 src/ui/supporting-workspaces.css.
 - [x] 코드 검토 및 관찰된 문제 수정, 증거 문서.
 - [ ] 원래 폴더에 안전하게 통합, 운영배포 없음.
 - [ ] 자동작업 PAUSED와 결과 안내.
-
