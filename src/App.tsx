@@ -27,6 +27,9 @@ import { useMenuAccess } from './admin/useMenuAccess';
 import { AdminPage, LockedMenu } from './admin/AdminPage';
 import { APP_MENUS, type MenuKey } from './admin/types';
 import { appViewFromHash, appViewHash, menuIsLocked, type AppView } from './admin/navigation';
+import { AlertBell, AlertsPage } from './alerts/AlertsPage';
+import { alertFilterFromSearch, useAlerts } from './alerts/useAlerts';
+import type { AlertFilter } from './alerts/types';
 
 type View = AppView;
 const PAGE_SIZE = 30;
@@ -41,6 +44,7 @@ function saveDownload(blob: Blob, filename: string) {
 export default function App() {
   const [mode, setMode] = useState<'live' | 'demo'>('live');
   const member = useMemberWorkspace();
+  const alerts = useAlerts(member.user?.id, mode === 'live');
   const access = useMenuAccess(member.user?.id);
   const [view, setView] = useState<View>(() => appViewFromHash(window.location.hash));
   const menuDisabled = mode === 'live' && menuIsLocked(view, access.ready, access.isAdmin, access.settings);
@@ -58,6 +62,7 @@ export default function App() {
   const [mobileFilters, setMobileFilters] = useState(false);
   const [selectedBid, setSelectedBid] = useState<BidNotice | null>(null);
   const [toast, setToast] = useState('');
+  const [alertSeed, setAlertSeed] = useState<{ userId: string; filter: AlertFilter } | null>(null);
   const [statusNow, setStatusNow] = useState(() => Date.now());
   const noticeFiltersRef = useRef(filters);
   const bookmarks = mode === 'live' ? member.workspace?.bookmarks ?? [] : state.bookmarks[profile.id] ?? [];
@@ -128,6 +133,13 @@ export default function App() {
     persist({ ...state, activeProfileId: id }); setSelectedBid(null); setPage(1);
     setFilters(previous => ({ ...previous, autoRegion: false, regionView: 'all' }));
     setToast('테스트 업체를 전환했습니다. 업체 정보와 관심공고를 각각 확인해 보세요.');
+  }
+
+  function prepareCurrentSearchAlert() {
+    if (mode !== 'live') return;
+    if (!member.user) { navigate('account'); setToast('로그인 후 검색 조건을 알림으로 저장할 수 있습니다.'); return; }
+    setAlertSeed({ userId: member.user.id, filter: alertFilterFromSearch(filters, live.query) });
+    navigate('alerts');
   }
 
   function toggleBookmark(id: string) {
@@ -234,13 +246,13 @@ export default function App() {
         const Icon = menu.key === 'notices' ? ClipboardList : menu.key === 'bookmarks' ? Bookmark : menu.key === 'profile' ? UserRound : FileSearch;
         return <button key={menu.key} className={view === menu.key ? 'active' : ''} onClick={() => navigate(menu.key)} title={locked ? access.isAdmin ? '잠금 중 · 관리자 열람 가능' : '현재 점검 중인 메뉴입니다.' : undefined}><Icon size={17} /><span>{menu.label}</span>{locked && <LockKeyhole className="menu-lock-icon" size={12} aria-label="잠금" />}{menu.key === 'bookmarks' && bookmarks.length > 0 && <span className="nav-count">{bookmarks.length}</span>}</button>;
       })}{mode === 'live' && access.ready && access.isAdmin && <button className={view === 'admin' ? 'active' : ''} onClick={() => navigate('admin')}><ShieldCheck size={17} /><span>관리자</span></button>}</nav>
-      <div className="header-account">{mode === 'live' ? <button className="button button-secondary" onClick={() => navigate('account')}>{member.user ? '내 계정' : '로그인'}</button> : <div className="account-select"><span className="account-avatar">{profile.companyName[0] || '업'}</span><label className="sr-only" htmlFor="demo-profile-switch">테스트 업체 전환</label><select id="demo-profile-switch" value={profile.id} onChange={event => switchProfile(event.target.value)}>{state.profiles.map(item => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select><ChevronDown size={15} /></div>}</div>
+      <div className="header-account"><AlertBell unreadCount={alerts.overview?.unreadCount ?? 0} onOpen={() => navigate('alerts')} disabled={mode === 'demo'} />{mode === 'live' ? <button className="button button-secondary" onClick={() => navigate('account')}>{member.user ? '내 계정' : '로그인'}</button> : <div className="account-select"><span className="account-avatar">{profile.companyName[0] || '업'}</span><label className="sr-only" htmlFor="demo-profile-switch">테스트 업체 전환</label><select id="demo-profile-switch" value={profile.id} onChange={event => switchProfile(event.target.value)}>{state.profiles.map(item => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select><ChevronDown size={15} /></div>}</div>
     </div></header>
 
     <main className="main-container">
       {mode === 'demo' && storageWarning && <div className="storage-warning" role="status"><Info size={16} />{storageWarning}<button className="icon-button" onClick={() => setStorageWarning(null)} aria-label="안내 닫기"><X size={15} /></button></div>}
       {mode === 'live' && <div className="live-member-status" role="status">{member.user ? `회원 저장: ${member.saveStatus === 'saved' ? '클라우드 저장 완료' : member.saveStatus === 'saving' ? '저장 중' : member.saveStatus === 'error' ? '저장 실패 — 내 정보에서 재시도' : member.loading ? '불러오는 중' : '준비'}` : '로그인하면 내 업체·관심공고·투찰 준비 기록을 기기 간에 이어서 사용할 수 있습니다.'}</div>}
-      {view === 'admin' ? <AdminPage access={access} onLogin={() => navigate('account')} /> : view === 'account' ? <MemberAccess member={member} /> : menuDisabled ? <LockedMenu menu={view as MenuKey} setting={access.settings.find(setting => setting.menu_key === view)} loading={!access.ready && !access.error} onLogin={() => navigate('account')} onRetry={() => { void access.refresh(); }} /> : view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
+      {view === 'admin' ? <AdminPage access={access} onLogin={() => navigate('account')} /> : view === 'account' ? <MemberAccess member={member} /> : view === 'alerts' ? <AlertsPage key={member.user?.id ?? 'guest'} alerts={alerts} signedIn={Boolean(member.user)} onLogin={() => navigate('account')} isAdmin={access.isAdmin} demo={mode === 'demo'} initialFilter={alertSeed?.userId === member.user?.id ? alertSeed?.filter : null} onInitialFilterConsumed={() => setAlertSeed(null)} /> : menuDisabled ? <LockedMenu menu={view as MenuKey} setting={access.settings.find(setting => setting.menu_key === view)} loading={!access.ready && !access.error} onLogin={() => navigate('account')} onRetry={() => { void access.refresh(); }} /> : view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
         <section className="search-intro"><div><div className="eyebrow"><span className="eyebrow-line" />공공입찰을 더 명확하게</div><h1>{view === 'bookmarks' ? '관심공고' : '철거·공사 입찰공고'}</h1><p>{view === 'bookmarks' ? '저장한 공고를 모아보고, 다음 입찰을 준비하세요.' : '우리 업체의 지역조건에 맞는 공고를 한곳에서 확인하세요.'}</p></div><div className="intro-note"><span className="small-dot" />{mode === 'live' ? '나라장터 공공데이터 연동' : '나라장터 공고 · 예시 데이터'}<span className="intro-date">{mode === 'live' ? `한국시간 ${koreanToday().replaceAll('-', '.')}` : `예시 기준일 ${DEMO_TODAY.replaceAll('-', '.')}`}</span></div></section>
 
         <section className="company-strip" aria-label="내 업체 지역 자동필터"><div className="company-strip-info"><span className="company-icon"><Building2 size={20} /></span><div><div className="company-name">{profile.companyName || '업체 정보 미등록'}<span>내 업체</span></div><div className="company-address"><MapPin size={12} />본점 {profile.province} {profile.district}</div></div><button className="company-edit" aria-label="업체 정보 수정" onClick={() => navigate('profile')}><Settings2 size={14} /><span>업체 정보 수정</span></button></div><div className="auto-filter-control"><div><label className="switch-label"><input type="checkbox" checked={filters.autoRegion} onChange={event => { updateFilter('autoRegion', event.target.checked); updateFilter('regionView', 'all'); }} /><span className="switch-track" /><strong>내 지역 조건에 맞는 공고</strong></label><p>{filters.autoRegion ? '내 업체 지역과 일치하거나 전국인 공고만 표시합니다. 미확인 공고는 자동필터를 끄고 원문을 확인해 주세요.' : '지역조건에 관계없이 모든 공고를 표시하고 있습니다.'}</p></div><span className="filter-state">{filters.autoRegion ? '자동필터 ON' : '자동필터 OFF'}</span></div></section>
@@ -256,7 +268,7 @@ export default function App() {
 
             </div>
             {mode === 'live' && view === 'notices' && <div className="live-scope">{live.loading && <p role="status">전체 공고를 자동 조회 중입니다. ({live.progress.done}/{live.progress.total}구간 완료)</p>}{live.refreshing && <p role="status">저장된 전체 결과를 먼저 표시하고 최신 공고를 확인 중입니다.</p>}{live.error && <p className="live-error" role="alert">{live.error}</p>}{live.meta?.warnings?.map(warning => <p className="live-warning" key={warning}>{warning}</p>)}</div>}{mode === 'live' && view === 'bookmarks' && <p className="live-scope">저장 시점의 공고와 현재 조회 자료를 표시합니다. 정정·취소와 최신 참가조건은 나라장터 원문에서 확인하세요.</p>}
-            <div className="results-toolbar"><div className="results-heading-group"><button className="button button-secondary show-filter-button" aria-label="상세 검색 열기" onClick={() => { if (window.matchMedia('(max-width: 1000px)').matches) setMobileFilters(true); else setSidebarCollapsed(false); }}><PanelLeftOpen size={16} /><span>상세 검색</span></button><h2>{view === 'bookmarks' ? '저장한 공고' : '검색 결과'} <strong>{filtered.length}</strong><span>건</span></h2></div><div className="results-actions"><ExportButton onExport={exportResults} /><label className="sr-only" htmlFor="sort-order">공고 정렬</label><select id="sort-order" className="sort-select" value={filters.sort} onChange={event => updateFilter('sort', event.target.value as SearchFilters['sort'])}><option value="deadline">마감 임박순</option><option value="newest">최신 공고순</option><option value="amountDesc">추정가격 높은순</option><option value="amountAsc">추정가격 낮은순</option></select></div></div>
+            <div className="results-toolbar"><div className="results-heading-group"><button className="button button-secondary show-filter-button" aria-label="상세 검색 열기" onClick={() => { if (window.matchMedia('(max-width: 1000px)').matches) setMobileFilters(true); else setSidebarCollapsed(false); }}><PanelLeftOpen size={16} /><span>상세 검색</span></button><h2>{view === 'bookmarks' ? '저장한 공고' : '검색 결과'} <strong>{filtered.length}</strong><span>건</span></h2></div><div className="results-actions">{mode === 'live' && view === 'notices' && <button type="button" className="button button-secondary alerts-save-search" disabled={!live.query.keyword.trim()} onClick={prepareCurrentSearchAlert}>이 조건으로 알림 받기</button>}<ExportButton onExport={exportResults} /><label className="sr-only" htmlFor="sort-order">공고 정렬</label><select id="sort-order" className="sort-select" value={filters.sort} onChange={event => updateFilter('sort', event.target.value as SearchFilters['sort'])}><option value="deadline">마감 임박순</option><option value="newest">최신 공고순</option><option value="amountDesc">추정가격 높은순</option><option value="amountAsc">추정가격 낮은순</option></select></div></div>
             <div className="result-filter-line"><div className="result-state-tabs" aria-label="지역 판정 필터"><button className={filters.regionView === 'all' ? 'active' : ''} onClick={() => updateFilter('regionView', 'all')}>전체 <span>{allCount}</span></button></div><button className={`excluded-button ${filters.regionView === 'excluded' ? 'active' : ''}`} onClick={() => updateFilter('regionView', filters.regionView === 'excluded' ? 'all' : 'excluded')}>{filters.regionView === 'excluded' ? '기본 목록으로 돌아가기' : `지역 제외 ${counts.excluded}건 보기`}<ChevronRight size={13} /></button></div>
             <div className="chips-line"><div className="filter-chips">{chips.map(chip => <button key={chip.label} onClick={chip.remove}>{chip.label}<X size={12} /></button>)}{filters.autoRegion && <span className="automatic-chip"><ShieldCheck size={13} />내 지역 자동필터</span>}{chips.length === 0 && !filters.autoRegion && <span className="muted">모든 조건의 공고를 표시합니다.</span>}</div><button className="text-button reset-results" onClick={resetFilters}>조건 초기화</button></div>
             {filters.regionView === 'excluded' && <div className="excluded-notice"><Info size={15} />등록한 업체 소재지와 지역조건이 맞지 않는 공고입니다. 공고 상세에서 제외 사유를 확인할 수 있습니다.</div>}

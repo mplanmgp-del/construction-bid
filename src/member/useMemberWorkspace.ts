@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { createWorkspaceRepository, getMemberClient } from './client';
+import { detachBrowserPushOnLogout } from '../alerts/push-client';
 import { MemberWorkspaceController, type DraftStorage, type MemberWorkspace, type WorkspaceSnapshot } from './workspace';
 
 const EMPTY: WorkspaceSnapshot = { data: null, status: 'loading', error: null, ready: false };
@@ -96,6 +97,7 @@ export function useMemberWorkspace() {
         setAuthFailure('변경 내용을 저장하지 못해 로그아웃하지 않았습니다. 먼저 다시 저장하거나 임시저장 파일을 내려받아 주세요.');
         return false;
       }
+      await detachBrowserPushOnLogout();
       return accountRequest(() => client!.auth.signOut({ scope: 'local' }));
     },
     updateWorkspace: (updater: (current: MemberWorkspace) => MemberWorkspace) => controllerRef.current?.update(updater),

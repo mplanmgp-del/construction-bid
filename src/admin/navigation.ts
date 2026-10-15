@@ -1,14 +1,14 @@
 import type { MenuKey, MenuSetting } from './types';
 
-export type AppView = MenuKey | 'admin' | 'account';
+export type AppView = MenuKey | 'admin' | 'account' | 'alerts';
 const hashes: Record<AppView, string> = {
-  notices: '', bookmarks: '#bookmarks', profile: '#profile', results: '#my-bids', admin: '#admin', account: '#account',
+  notices: '', bookmarks: '#bookmarks', profile: '#profile', results: '#my-bids', admin: '#admin', account: '#account', alerts: '#alerts',
 };
 export function appViewFromHash(hash: string): AppView {
   return (Object.keys(hashes) as AppView[]).find(key => hashes[key] === hash) ?? 'notices';
 }
 export function appViewHash(view: AppView): string { return hashes[view]; }
 export function menuIsLocked(view: AppView, ready: boolean, isAdmin: boolean, settings: MenuSetting[]): boolean {
-  if (view === 'admin' || view === 'account') return false;
+  if (view === 'admin' || view === 'account' || view === 'alerts') return false;
   return !ready || (!isAdmin && settings.find(setting => setting.menu_key === view)?.locked !== false);
 }
