@@ -159,7 +159,6 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   const leaseId = claim.leaseId;
   const rules = (claim.rules ?? []).filter(rule => rule.settings.enabled);
   let quotaFailure: ProviderQuotaError | undefined;
-  let storageFailure: unknown;
   let restartRequired = false;
   let activeRequests = 0;
   const requestWaiters: (() => void)[] = [];
@@ -175,7 +174,6 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
     await acquireRequest();
     try {
       // Opening summaries fan out into two requests; all work shares this global cap.
-      if (storageFailure) throw storageFailure;
       if (quotaFailure) throw quotaFailure;
       if (restartRequired || clock() > deadline - 10_000 || requests >= maximum) throw new WorkerBudgetExhausted('나라장터 조회 시간 또는 호출 예산에 도달하여 다음 확인 때 이어서 수집합니다.');
       requests++;
@@ -185,22 +183,22 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   };
   const openingSummary = createOpeningSummaryLoader((_base, operation, params) => request(operation, params, { service: 'opening' }), clock);
   const commit = async (payload: ActiveCatalogCommit) => {
-    if (storageFailure) throw storageFailure;
-    try {
-      if (Buffer.byteLength(JSON.stringify(payload)) > 2_800_000) throw new Error('공고 한 구간의 저장 응답이 너무 커서 확인 범위를 유지합니다.');
-      const result = await store.commit(leaseId, payload);
-      if (result.storageFull) throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
-      if (!result.ok) throw new Error('전체 공고 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
-      if (result.restartRequired) restartRequired = true;
-      return result;
-    } catch (error) { storageFailure = error; throw error; }
+    if (Buffer.byteLength(JSON.stringify(payload)) > 2_800_000) throw new Error('공고 한 구간의 저장 응답이 너무 커서 확인 범위를 유지합니다.');
+    const result = await store.commit(leaseId, payload);
+    if (result.storageFull) throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
+    if (!result.ok) throw new Error('전체 공고 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
+    if (result.restartRequired) restartRequired = true;
+    return result;
   };
   const groupPayload: ActiveCatalogCommit = { scopeVersion: claim.scopeVersion, groups: [], rejectedGroups: [], failedGroups: [] };
   const flushGroups = async () => {
     if (!groupPayload.failedGroups!.length && !groupPayload.rejectedGroups!.length) return;
-    await commit({ ...groupPayload, failedGroups: [...groupPayload.failedGroups!], rejectedGroups: [...groupPayload.rejectedGroups!] });
-    warnings.push(...groupPayload.failedGroups!.map(item => item.error));
+    const payload = { ...groupPayload, failedGroups: [...groupPayload.failedGroups!], rejectedGroups: [...groupPayload.rejectedGroups!] };
     groupPayload.failedGroups = []; groupPayload.rejectedGroups = [];
+    warnings.push(...payload.failedGroups.map(item => item.error));
+    // Failed retry/acknowledgment writes leave these identities queued. Other
+    // claimed identities still get their own checked, bounded storage requests.
+    try { await commit(payload); } catch (error) { warnings.push(safeError(error)); }
   };
   const verifyIdentity = async (identity: ActiveCatalogIdentity) => {
     try {
@@ -240,15 +238,12 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       all[all.length - 1] = checked;
       // Public publication never keeps historical bodies or consumes the private queue.
       // Only after it succeeds may private retention acknowledge the verification job.
-      try {
-        if (storageFailure) throw storageFailure;
-        const payload = { scopeVersion: claim.scopeVersion, groups: [all] };
-        if (Buffer.byteLength(JSON.stringify(payload)) > 2_800_000) throw new Error('공고 차수의 저장 응답이 너무 커서 확인 범위를 유지합니다.');
-        const published = await store.publishSearchVerified(leaseId, payload);
-        if (published.storageFull) throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
-        if (!published.ok) throw new Error('공고 검색 색인 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
-        searchGroups++;
-      } catch (error) { storageFailure = error; throw error; }
+      const payload = { scopeVersion: claim.scopeVersion, groups: [all] };
+      if (Buffer.byteLength(JSON.stringify(payload)) > 2_800_000) throw new Error('공고 차수의 저장 응답이 너무 커서 확인 범위를 유지합니다.');
+      const published = await store.publishSearchVerified(leaseId, payload);
+      if (published.storageFull) throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
+      if (!published.ok) throw new Error('공고 검색 색인 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
+      searchGroups++;
       const matched = potentialRules(checked, rules, now).some(rule => matchAlarmNotice(checked, rule.settings, rule.profile, now).matched);
       if (matched || identity.tracked) {
         await commit({ scopeVersion: claim.scopeVersion, groups: [all] });
@@ -304,8 +299,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
             removed: slice.filter(notice => !isOngoingNotice(notice, now)).map(notice => ({ type: notice.type,
               number: notice.number, revision: notice.revision, sourceUpdatedAt: notice.sourceUpdatedAt })) });
           if (result.storageFull) {
-            storageFailure = new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
-            throw storageFailure;
+            throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
           }
           if (!result.ok) throw new Error('공고 색인 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
         }
@@ -321,7 +315,10 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
     });
     if (failedSources.length) {
       warnings.push(...failedSources.map(item => item.error));
-      await commit({ scopeVersion: claim.scopeVersion, sources: [], failedSources });
+      // Discovery failure cannot acknowledge its source page or prevent an
+      // unrelated verified head from fitting within the unchanged storage caps.
+      try { await commit({ scopeVersion: claim.scopeVersion, sources: [], failedSources }); }
+      catch (error) { warnings.push(safeError(error)); }
     }
 
     // Unstarted jobs remain pending and the lease is released by finish.

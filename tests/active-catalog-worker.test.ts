@@ -117,6 +117,72 @@ describe('all-age active catalog collection', () => {
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? [])).toEqual([]);
   });
 
+  it.each(['unavailable', 'capacity'])('continues claimed verification after an independent source index %s failure', async failure => {
+    const identities = Array.from({ length: 8 }, (_, index) => ({ type: '공사' as const, number: `R26ISOLATE${index}` }));
+    const db = store([source()], identities, []);
+    if (failure === 'capacity') db.indexUpsert.mockResolvedValueOnce({ ok: false, storageFull: true });
+    else db.indexUpsert.mockRejectedValueOnce(new Error('private storage URL'));
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: [row({ bidNtceNo: params.bidNtceNo ?? 'R26SOURCE001' })], totalCount: 1 });
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: false, sources: 0, searchGroups: 8, requests: 25 });
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(8);
+    expect(db.publishSearchVerified.mock.invocationCallOrder[3]).toBeLessThan(db.indexUpsert.mock.invocationCallOrder[0]);
+    expect(db.indexUpsert.mock.invocationCallOrder[0]).toBeLessThan(db.publishSearchVerified.mock.invocationCallOrder[4]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedSources ?? [])).toEqual([
+      { id: 'history-construction', error: expect.any(String) },
+    ]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? [])).toHaveLength(8);
+    expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String) });
+    expect(JSON.stringify(result)).not.toContain('private storage URL');
+  });
+
+  it.each(['unavailable', 'capacity'])('isolates one %s publication and retry metadata failure from other checked identities', async failure => {
+    const identities = Array.from({ length: 8 }, (_, index) => ({ type: '공사' as const, number: `R26PUBFAIL${index}` }));
+    const db = store([], identities, []);
+    db.publishSearchVerified.mockImplementation(async (_lease, batch) => {
+      if (batch.groups[0][0].number === 'R26PUBFAIL0') {
+        if (failure === 'capacity') return { ok: false, storageFull: true };
+        throw new Error('private publication URL');
+      }
+      return { ok: true };
+    });
+    db.commit.mockImplementation(async (_lease, payload) => {
+      if (payload.failedGroups?.length) throw new Error('private retry URL');
+      return { ok: true };
+    });
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: [row({ bidNtceNo: params.bidNtceNo })], totalCount: 1 });
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: false, searchGroups: 7, requests: 24 });
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(8);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedGroups ?? [])).toEqual([
+      { type: '공사', number: 'R26PUBFAIL0', error: expect.any(String) },
+    ]);
+    const accepted = db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? []);
+    expect(accepted.map(item => item.number)).not.toContain('R26PUBFAIL0');
+    expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String) });
+    expect(JSON.stringify(result)).not.toContain('private');
+  });
+
+  it('continues later verification when failed source retry metadata cannot be stored', async () => {
+    const identities = Array.from({ length: 8 }, (_, index) => ({ type: '공사' as const, number: `R26RETRY${index}` }));
+    const db = store([source()], identities, []);
+    db.indexUpsert.mockRejectedValueOnce(new Error('source unavailable'));
+    db.commit.mockImplementation(async (_lease, payload) => {
+      if (payload.failedSources?.length) throw new Error('retry metadata unavailable');
+      return { ok: true };
+    });
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: [row({ bidNtceNo: params.bidNtceNo ?? 'R26SOURCE001' })], totalCount: 1 });
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: false, sources: 0, searchGroups: 8, requests: 25 });
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(8);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
+    expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String) });
+  });
+
   it('publishes a cancellation tombstone from complete history without fetching inactive participant conditions', async () => {
     const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
     const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row(), row({ bidNtceOrd: '001', ntceKindNm: '취소공고' })], totalCount: 2 }));
