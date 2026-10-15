@@ -143,7 +143,7 @@ function reuseParticipantConditions(notice: AlertNotice, cached?: AlertNotice): 
   };
 }
 
-/** Discover live changes first, then share the remaining bounded work with verification and history. */
+/** Discover live and current notices, drain their verification, and defer historical backlog. */
 export async function runActiveCatalogWorker(store: ActiveCatalogStore, options: {
   provider?: ActiveCatalogProvider; now?: number; maxRequests?: number; budgetMs?: number; clock?: () => number;
 } = {}) {
@@ -256,7 +256,9 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
     const failedSources: NonNullable<ActiveCatalogCommit['failedSources']> = [];
     // The public deadline index is shared across search and alerts. Its source
     // coverage must never depend on whether an individual has enabled alerts.
-    const liveSources = claim.sources.filter(job => job.kind !== 'history');
+    const liveSources = claim.sources.filter(job => job.kind === 'registered' || job.kind === 'modified');
+    const currentSources = claim.sources.filter(job => job.kind === 'current')
+      .sort((a, b) => Date.parse(b.from) - Date.parse(a.from));
     const historySources = claim.sources.filter(job => job.kind === 'history')
       .sort((a, b) => Date.parse(b.from) - Date.parse(a.from));
     const discoverSources = async (jobs: ActiveCatalogSourceJob[]) => parallel(jobs, async (job: ActiveCatalogSourceJob) => {
@@ -265,8 +267,9 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
         const params: Record<string, string> = {
           inqryDiv: job.kind === 'modified' ? '3' : '1', inqryBgnDt: minuteKst(job.from), inqryEndDt: minuteKst(job.to),
           pageNo: String(job.page), numOfRows: String(job.pageSize),
+          ...(job.kind === 'current' ? { bidClseExcpYn: 'Y' } : {}),
         };
-        const response = await request(`getBidPblancListInfo${suffix}${job.kind === 'history' ? 'PPSSrch' : ''}`, params);
+        const response = await request(`getBidPblancListInfo${suffix}${job.kind === 'history' || job.kind === 'current' ? 'PPSSrch' : ''}`, params);
         if (job.totalCount !== null && job.totalCount !== response.totalCount) throw new SourceSnapshotChanged('조회 도중 전체 건수가 바뀌어 확인 범위를 다시 수집합니다.');
         validPage(response.items, response.totalCount, job.page, job.pageSize);
         const ids = new Set<string>(), observed = new Map<string, ActiveCatalogIdentity>(), items: AlertNotice[] = [];
@@ -311,11 +314,20 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
     });
     // Every due live registration/modification window precedes the backlog.
     await discoverSources(liveSources);
-    // Ready verification cannot be starved by a slow historical source response.
+    // Give urgent identities a first pass, then discover current candidates
+    // before draining the rest. Both stages share the same request/time cap.
     await parallel(claim.verify.slice(0, 4), verifyIdentity);
     await flushGroups();
-    // Historical discovery uses at most two recent windows, with the same clock and request budget.
-    await discoverSources(historySources.slice(0, 2));
+    await discoverSources(currentSources);
+    await parallel(claim.verify.slice(4), verifyIdentity);
+    await flushGroups();
+    // A finished claim is only a bounded slice of the pending queue. Do not
+    // infer current completeness from it or start historical work while any
+    // current sweep, live catch-up, or current verification is unfinished.
+    const currentCoverage = claim.status?.currentCoverage;
+    if (claim.verify.length === 0 && currentSources.length === 0 && (!currentCoverage || currentCoverage.complete)) {
+      await discoverSources(historySources.slice(0, 2));
+    }
     if (failedSources.length) {
       warnings.push(...failedSources.map(item => item.error));
       // Discovery failure cannot acknowledge its source page or prevent an
@@ -323,11 +335,6 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       try { await commit({ scopeVersion: claim.scopeVersion, sources: [], failedSources }); }
       catch (error) { warnings.push(safeError(error)); }
     }
-
-    // Unstarted jobs remain pending and the lease is released by finish.
-    const verify = !restartRequired && clock() <= deadline - 10_000 ? claim.verify.slice(4) : [];
-    await parallel(verify, verifyIdentity);
-    await flushGroups();
   } catch (error) { warnings.push(safeError(error)); }
   const uniqueWarnings = [...new Set(warnings)];
   try { await store.finish(leaseId, { ...(uniqueWarnings.length ? { error: uniqueWarnings[0] } : {}),

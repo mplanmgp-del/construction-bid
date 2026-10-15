@@ -10,12 +10,12 @@ const now = Date.parse('2026-10-15T15:30:00+09:00');
 const row = (patch: Record<string, unknown> = {}) => ({ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', bsnsDivNm: '공사', bidNtceNm: '구조물 철거공사', bidNtceDt: '1995-10-02 00:00:00', rgstDt: '1995-10-02 00:00:00', bidBeginDt: '2026-02-27 10:00:00', bidClseDt: '2026-10-20 10:00:00', ...patch });
 const rule = (filter: Partial<WorkerRule['settings']['filter']> = {}): WorkerRule => ({ userId: 'member-one', profile: null, settings: { ...structuredClone(DEFAULT_ALERT_SETTINGS), enabled: true, filter: { ...structuredClone(DEFAULT_ALERT_SETTINGS.filter), keywords: ['철거'], ...filter } } });
 const source = (patch: Partial<ActiveCatalogSourceJob> = {}): ActiveCatalogSourceJob => ({ id: 'history-construction', type: '공사', kind: 'history', from: '1995-10-01T00:00:00+09:00', to: '1995-10-31T23:59:00+09:00', page: 1, pageSize: 999, totalCount: null, ...patch });
-function store(sources: ActiveCatalogSourceJob[] = [], verify: ActiveCatalogClaim['verify'] = [], rules: WorkerRule[] = [rule()]) {
+function store(sources: ActiveCatalogSourceJob[] = [], verify: ActiveCatalogClaim['verify'] = [], rules: WorkerRule[] = [rule()], currentCoverage?: ActiveCatalogClaim['status']['currentCoverage']) {
   const commit = vi.fn(async (_leaseId: string, _payload: ActiveCatalogCommit) => ({ ok: true }));
   const finish = vi.fn(async (_leaseId: string, _payload: { error?: string }) => ({ ok: true }));
   const indexUpsert = vi.fn<ActiveCatalogStore['indexUpsert']>(async () => ({ ok: true }));
   const publishSearchVerified = vi.fn<ActiveCatalogStore['publishSearchVerified']>(async () => ({ ok: true }));
-  return { claim: vi.fn(async () => ({ leaseId: 'lease', sources, verify, rules, scopeVersion: 'enabled-rules-v1' })), commit, finish, indexUpsert, publishSearchVerified } as unknown as ActiveCatalogStore & { commit: typeof commit; finish: typeof finish; indexUpsert: typeof indexUpsert; publishSearchVerified: typeof publishSearchVerified };
+  return { claim: vi.fn(async () => ({ leaseId: 'lease', sources, verify, rules, scopeVersion: 'enabled-rules-v1', status: { currentCoverage } })), commit, finish, indexUpsert, publishSearchVerified } as unknown as ActiveCatalogStore & { commit: typeof commit; finish: typeof finish; indexUpsert: typeof indexUpsert; publishSearchVerified: typeof publishSearchVerified };
 }
 
 describe('all-age active catalog collection', () => {
@@ -119,7 +119,7 @@ describe('all-age active catalog collection', () => {
 
   it.each(['unavailable', 'capacity'])('continues claimed verification after an independent source index %s failure', async failure => {
     const identities = Array.from({ length: 8 }, (_, index) => ({ type: '공사' as const, number: `R26ISOLATE${index}` }));
-    const db = store([source()], identities, []);
+    const db = store([source({ id: 'registered-construction', kind: 'registered' })], identities, []);
     if (failure === 'capacity') db.indexUpsert.mockResolvedValueOnce({ ok: false, storageFull: true });
     else db.indexUpsert.mockRejectedValueOnce(new Error('private storage URL'));
     const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
@@ -127,11 +127,10 @@ describe('all-age active catalog collection', () => {
     const result = await runActiveCatalogWorker(db, { provider, now });
     expect(result).toMatchObject({ ok: false, sources: 0, searchGroups: 8, requests: 25 });
     expect(db.publishSearchVerified).toHaveBeenCalledTimes(8);
-    expect(db.publishSearchVerified.mock.invocationCallOrder[3]).toBeLessThan(db.indexUpsert.mock.invocationCallOrder[0]);
-    expect(db.indexUpsert.mock.invocationCallOrder[0]).toBeLessThan(db.publishSearchVerified.mock.invocationCallOrder[4]);
+    expect(db.indexUpsert.mock.invocationCallOrder[0]).toBeLessThan(db.publishSearchVerified.mock.invocationCallOrder[0]);
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedSources ?? [])).toEqual([
-      { id: 'history-construction', error: expect.any(String) },
+      { id: 'registered-construction', error: expect.any(String) },
     ]);
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? [])).toHaveLength(8);
     expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String) });
@@ -168,7 +167,7 @@ describe('all-age active catalog collection', () => {
 
   it('continues later verification when failed source retry metadata cannot be stored', async () => {
     const identities = Array.from({ length: 8 }, (_, index) => ({ type: '공사' as const, number: `R26RETRY${index}` }));
-    const db = store([source()], identities, []);
+    const db = store([source({ id: 'registered-construction', kind: 'registered' })], identities, []);
     db.indexUpsert.mockRejectedValueOnce(new Error('source unavailable'));
     db.commit.mockImplementation(async (_lease, payload) => {
       if (payload.failedSources?.length) throw new Error('retry metadata unavailable');
@@ -192,7 +191,7 @@ describe('all-age active catalog collection', () => {
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.groups ?? [])).toEqual([]);
   });
 
-  it('finishes ready verification before a slow source page can exhaust the invocation', async () => {
+  it('defers a slow historical source throughout the current verification pass', async () => {
     let elapsed = 0;
     const db = store([source()], [{ type: '공사', number: 'R26BK01359594' }], []);
     const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => {
@@ -200,10 +199,12 @@ describe('all-age active catalog collection', () => {
       elapsed += 100;
       return /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation) ? { items: [], totalCount: 0 } : { items: [row()], totalCount: 1 };
     });
-    await runActiveCatalogWorker(db, { provider, now, clock: () => elapsed, budgetMs: 43_000 });
+    const result = await runActiveCatalogWorker(db, { provider, now, clock: () => elapsed, budgetMs: 43_000 });
+    expect(result).toMatchObject({ ok: true, searchGroups: 1, sources: 0, requests: 3 });
     expect(db.publishSearchVerified).toHaveBeenCalledTimes(1);
     expect(provider.mock.calls[0][1]).toMatchObject({ inqryDiv: '2', bidNtceNo: 'R26BK01359594' });
-    expect(db.publishSearchVerified.mock.invocationCallOrder[0]).toBeLessThan(db.indexUpsert.mock.invocationCallOrder[0]);
+    expect(db.indexUpsert).not.toHaveBeenCalled();
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
   });
 
   it('keeps verification unfinished after the 40-call cap without treating budget exhaustion as a failed notice', async () => {
@@ -215,6 +216,33 @@ describe('all-age active catalog collection', () => {
     expect(result).toMatchObject({ ok: true, requests: 40, searchGroups: 12 });
     expect(db.publishSearchVerified).toHaveBeenCalledTimes(12);
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? [])).toHaveLength(12);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedGroups ?? [])).toEqual([]);
+    expect(db.finish).toHaveBeenCalledWith('lease', {});
+  });
+
+  it('uses the current verification pass for every claimed urgent notice before considering history', async () => {
+    const identities = Array.from({ length: 8 }, (_, index) => ({ type: '공사' as const, number: `R26URGENT${index}` }));
+    const db = store([source()], identities, []);
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: [row({ bidNtceNo: params.bidNtceNo ?? 'R26HISTORY001', bidClseDt: '2026-10-16 10:00:00' })], totalCount: 1 });
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: true, sources: 0, searchGroups: 8, requests: 24 });
+    expect(provider.mock.calls.some(([operation]) => operation.endsWith('PPSSrch'))).toBe(false);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? []).map(item => item.number))
+      .toEqual(identities.map(item => item.number));
+    expect(db.finish).toHaveBeenCalledWith('lease', {});
+  });
+
+  it('spends the 40-call cap on current verification without starting an old source page', async () => {
+    const identities = Array.from({ length: 16 }, (_, index) => ({ type: '공사' as const, number: `R26CURRENT${index}` }));
+    const db = store([source()], identities, []);
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: [row({ bidNtceNo: params.bidNtceNo ?? 'R26HISTORY001' })], totalCount: 1 });
+    const result = await runActiveCatalogWorker(db, { provider, now, maxRequests: 40 });
+    expect(result).toMatchObject({ ok: true, sources: 0, requests: 40, searchGroups: 12 });
+    expect(provider.mock.calls.some(([operation]) => operation.endsWith('PPSSrch'))).toBe(false);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedGroups ?? [])).toEqual([]);
     expect(db.finish).toHaveBeenCalledWith('lease', {});
   });
@@ -248,7 +276,7 @@ describe('all-age active catalog collection', () => {
     ]);
   });
 
-  it('discovers all live windows before prioritized verification and the two newest historical windows', async () => {
+  it('discovers all live windows before the full verification claim and leaves history pending', async () => {
     const identities = Array.from({ length: 6 }, (_, index) => ({ type: '공사' as const, number: `R26STAGE${index}` }));
     const db = store([
       source({ id: 'old-history' }),
@@ -272,12 +300,121 @@ describe('all-age active catalog collection', () => {
       'getBidPblancListInfoCnstwk:1', 'getBidPblancListInfoCnstwk:3',
       'getBidPblancListInfoServc:1', 'getBidPblancListInfoServc:3',
       'verify:R26STAGE0', 'verify:R26STAGE1', 'verify:R26STAGE2', 'verify:R26STAGE3',
-      'history:202610010000', 'history:202609010000', 'verify:R26STAGE4', 'verify:R26STAGE5',
+      'verify:R26STAGE4', 'verify:R26STAGE5',
     ]);
-    expect(result).toMatchObject({ ok: true, sources: 6, searchGroups: 6, requests: 12 });
+    expect(result).toMatchObject({ ok: true, sources: 4, searchGroups: 6, requests: 10 });
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id)).toEqual([
-      'registered-construction', 'modified-construction', 'registered-service', 'modified-service', 'october-history', 'september-history',
+      'registered-construction', 'modified-construction', 'registered-service', 'modified-service',
     ]);
+  });
+
+  it('uses only the two newest historical windows when no verification is ready', async () => {
+    const db = store([
+      source({ id: 'old-history' }),
+      source({ id: 'september-history', from: '2026-09-01T00:00:00+09:00', to: '2026-09-30T23:59:00+09:00' }),
+      source({ id: 'october-history', from: '2026-10-01T00:00:00+09:00', to: '2026-10-15T15:30:00+09:00' }),
+    ], [], []);
+    const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [], totalCount: 0 }));
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: true, sources: 2, searchGroups: 0, requests: 2 });
+    expect(provider.mock.calls.map(([, params]) => params.inqryBgnDt)).toEqual(['202610010000', '202609010000']);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id))
+      .toEqual(['october-history', 'september-history']);
+  });
+
+  it('discovers current candidates between urgent verification and the rest of the claim without reading history', async () => {
+    const identities = Array.from({ length: 6 }, (_, index) => ({ type: '공사' as const, number: `R26CURRENTSTAGE${index}` }));
+    const db = store([
+      source({ id: 'old-history' }),
+      source({ id: 'september-current', kind: 'current', from: '2026-09-01T00:00:00+09:00', to: '2026-09-30T23:59:00+09:00' }),
+      source({ id: 'registered-construction', kind: 'registered' }),
+      source({ id: 'october-current', kind: 'current', from: '2026-10-01T00:00:00+09:00', to: '2026-10-15T15:30:00+09:00' }),
+    ], identities, []);
+    const calls: string[] = [];
+    const provider: ActiveCatalogProvider = async (operation, params) => {
+      calls.push(params.inqryDiv === '2' ? `verify:${params.bidNtceNo}`
+        : operation.endsWith('PPSSrch') ? `current:${params.inqryBgnDt}:${params.bidClseExcpYn ?? ''}` : 'registered');
+      return params.inqryDiv === '2'
+        ? { items: [row({ bidNtceNo: params.bidNtceNo, ntceKindNm: '취소공고' })], totalCount: 1 }
+        : { items: [], totalCount: 0 };
+    };
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(calls).toEqual([
+      'registered',
+      'verify:R26CURRENTSTAGE0', 'verify:R26CURRENTSTAGE1', 'verify:R26CURRENTSTAGE2', 'verify:R26CURRENTSTAGE3',
+      'current:202610010000:Y', 'current:202609010000:Y',
+      'verify:R26CURRENTSTAGE4', 'verify:R26CURRENTSTAGE5',
+    ]);
+    expect(result).toMatchObject({ ok: true, sources: 3, searchGroups: 6, requests: 9 });
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id))
+      .toEqual(['registered-construction', 'october-current', 'september-current']);
+  });
+
+  it('retains current-only source progress for an old posting with a future deadline and no opening date', async () => {
+    const db = store([source({ id: 'current-construction', kind: 'current' })], [], []);
+    const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row({ bidClseDt: '2099-03-04 10:00:00' })], totalCount: 1 }));
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(provider).toHaveBeenCalledWith('getBidPblancListInfoCnstwkPPSSrch', expect.objectContaining({
+      inqryDiv: '1', inqryBgnDt: '199510010000', inqryEndDt: '199510312359', bidClseExcpYn: 'Y',
+    }));
+    expect(result).toMatchObject({ ok: true, sources: 1, requests: 1 });
+    expect(db.indexUpsert).toHaveBeenCalledWith('lease', expect.objectContaining({
+      sourceId: 'current-construction', notices: [expect.objectContaining({ postedAt: '1995-10-02T00:00:00+09:00', deadline: '2099-03-04T10:00:00+09:00', openingAt: '' })],
+    }));
+  });
+
+  it('leaves unstarted current pages and remaining verification queued at the shared request cap', async () => {
+    const identities = Array.from({ length: 6 }, (_, index) => ({ type: '공사' as const, number: `R26CURRENTLIMIT${index}` }));
+    const db = store([
+      source({ id: 'old-history' }),
+      ...Array.from({ length: 4 }, (_, index) => source({ id: `current-${index}`, kind: 'current' })),
+    ], identities, []);
+    const provider = vi.fn<ActiveCatalogProvider>(async (_operation, params) => params.inqryDiv === '2'
+      ? { items: [row({ bidNtceNo: params.bidNtceNo, ntceKindNm: '취소공고' })], totalCount: 1 }
+      : { items: [], totalCount: 0 });
+    const result = await runActiveCatalogWorker(db, { provider, now, maxRequests: 6 });
+    expect(result).toMatchObject({ ok: true, sources: 2, searchGroups: 4, requests: 6 });
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id)).toEqual(['current-0', 'current-1']);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedSources ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedGroups ?? [])).toEqual([]);
+    expect(db.finish).toHaveBeenCalledWith('lease', {});
+  });
+
+  it('retains a failed current page while later independent verification can still publish', async () => {
+    const identities = Array.from({ length: 6 }, (_, index) => ({ type: '공사' as const, number: `R26CURRENTFAIL${index}` }));
+    const db = store([source({ id: 'current-construction', kind: 'current' })], identities, []);
+    db.indexUpsert.mockResolvedValueOnce({ ok: false, storageFull: true });
+    const provider: ActiveCatalogProvider = async (_operation, params) => params.inqryDiv === '2'
+      ? { items: [row({ bidNtceNo: params.bidNtceNo, ntceKindNm: '취소공고' })], totalCount: 1 }
+      : { items: [], totalCount: 0 };
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: false, sources: 0, searchGroups: 6, requests: 7 });
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedSources ?? []))
+      .toEqual([{ id: 'current-construction', error: expect.any(String) }]);
+    expect(db.publishSearchVerified.mock.invocationCallOrder[3]).toBeLessThan(db.indexUpsert.mock.invocationCallOrder[0]);
+    expect(db.indexUpsert.mock.invocationCallOrder[0]).toBeLessThan(db.publishSearchVerified.mock.invocationCallOrder[4]);
+  });
+
+  it.each([
+    { cutoff: '2026-10-15T06:30:00Z', checked: 1, pending: 1, verificationPending: 0, complete: false },
+    { cutoff: '2026-10-15T06:30:00Z', checked: 2, pending: 0, verificationPending: 1, complete: false },
+    { cutoff: '2026-10-15T06:30:00Z', checked: 2, pending: 0, verificationPending: 0, complete: false },
+  ])('leaves history queued until current coverage is complete: %o', async currentCoverage => {
+    const db = store([source()], [], [], currentCoverage);
+    const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [], totalCount: 0 }));
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: true, sources: 0, requests: 0 });
+    expect(provider).not.toHaveBeenCalled();
+    expect(db.commit).not.toHaveBeenCalled();
+    expect(db.finish).toHaveBeenCalledWith('lease', {});
+  });
+
+  it('resumes historical discovery only after current coverage and ready verification are complete', async () => {
+    const db = store([source()], [], [], { cutoff: '2026-10-15T06:30:00Z', checked: 2, pending: 0, verificationPending: 0, complete: true });
+    const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [], totalCount: 0 }));
+    expect(await runActiveCatalogWorker(db, { provider, now })).toMatchObject({ ok: true, sources: 1, requests: 1 });
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id)).toEqual(['history-construction']);
   });
 
   it('leaves verification and old source windows unacknowledged when the live windows use the request budget', async () => {
@@ -318,21 +455,20 @@ describe('all-age active catalog collection', () => {
     expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String), retryAfterSeconds: 1800 });
   });
 
-  it('keeps failed live discovery pending while verifying ready notices before history', async () => {
+  it('keeps failed live discovery and deferred history pending while verifying the entire claim', async () => {
     const identities = Array.from({ length: 8 }, (_, index) => ({ type: '공사' as const, number: `R26LIVEFAIL${index}` }));
     const db = store([source(), source({ id: 'registered-construction', kind: 'registered' })], identities, []);
     db.indexUpsert.mockResolvedValueOnce({ ok: false, storageFull: true });
     const provider: ActiveCatalogProvider = async (_operation, params) => params.inqryDiv === '2'
       ? { items: [row({ bidNtceNo: params.bidNtceNo, ntceKindNm: '취소공고' })], totalCount: 1 } : { items: [], totalCount: 0 };
     const result = await runActiveCatalogWorker(db, { provider, now });
-    expect(result).toMatchObject({ ok: false, sources: 1, searchGroups: 8, requests: 10 });
-    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id)).toEqual(['history-construction']);
+    expect(result).toMatchObject({ ok: false, sources: 0, searchGroups: 8, requests: 9 });
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedSources ?? [])).toEqual([
       { id: 'registered-construction', error: expect.any(String) },
     ]);
     expect(db.indexUpsert.mock.invocationCallOrder[0]).toBeLessThan(db.publishSearchVerified.mock.invocationCallOrder[0]);
-    expect(db.publishSearchVerified.mock.invocationCallOrder[3]).toBeLessThan(db.indexUpsert.mock.invocationCallOrder[1]);
-    expect(db.indexUpsert.mock.invocationCallOrder[1]).toBeLessThan(db.publishSearchVerified.mock.invocationCallOrder[4]);
+    expect(db.indexUpsert).toHaveBeenCalledTimes(1);
     expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String) });
   });
 
