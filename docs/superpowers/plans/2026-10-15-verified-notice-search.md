@@ -32,42 +32,44 @@
 
 **Files:** new additive migration and `supabase/tests/verified_notice_search.sql`; shared RPC types owned by root.
 
-- [ ] Add failing SQL regressions for verified-only publication, cancellation invalidation, private-rule independence, wide ranges and filter-before-page ordering.
-- [ ] Implement public verification enqueue/claim, lease-bound `search_publish`, generation tracking and `search_page` using the existing token boundary and storage guards.
-- [ ] Return `VerifiedNoticeSearchPage` with exact matching count, next cursor, snapshotVersion/asOf, source/verification coverage and capacity metadata.
-- [ ] Check all existing catalog/alarm SQL regressions plus repeated migration application in PGlite.
+- [x] Add failing SQL regressions for verified-only publication, cancellation invalidation, private-rule independence, wide ranges and filter-before-page ordering.
+- [x] Implement public verification enqueue/claim, lease-bound `search_publish`, generation tracking and `search_page` using the existing token boundary and storage guards.
+- [x] Return `VerifiedNoticeSearchPage` with exact matching count, next cursor, snapshotVersion/asOf, source/verification coverage and capacity metadata.
+- [x] Check all existing catalog/alarm SQL regressions plus repeated migration application in PGlite.
 
 ### Task 2: Fair background collection and full verification
 
 **Files:** `server/active-catalog-worker.ts`, worker tests; root owns store interfaces and HTTP budgets.
 
-- [ ] Add tests proving unrelated public matches and no-rule runs are fully verified, while old revisions/partial histories cannot publish.
-- [ ] Give verification work a bounded lane before source work; preserve 999-row source reads and durable batches.
-- [ ] Fetch current participation regions/licenses independently of personal rules, publish compact current heads and keep personal full history only when needed by alerts.
-- [ ] Verify timeout/quota/capacity handling leaves durable work pending.
+- [x] Add tests proving unrelated public matches and no-rule runs are fully verified, while old revisions/partial histories cannot publish.
+- [x] Give verification work a bounded lane before source work; preserve 999-row source reads and durable batches.
+- [x] Fetch current participation regions/licenses independently of personal rules, publish compact current heads and keep personal full history only when needed by alerts.
+- [x] Verify timeout/quota/capacity handling leaves durable work pending.
 
 ### Task 3: Bounded public search API
 
 **Files:** `src/live/active-catalog-types.ts`, `server/active-catalog-store.ts`, new `server/verified-notice-search.ts`, `server/http.ts`, `server/alert-http.ts`, API tests.
 
-- [ ] Validate dates in 1995–2100, combined business types, filters, minimal company geography, fixed maximum page size 50 and opaque cursors.
-- [ ] Serve `mode=search` only from the shared RPC; map changed-generation responses to HTTP 409 and reject invalid input before storage.
-- [ ] Keep authorization/menu checks and private no-store behavior, exclude personal contact details from requests.
-- [ ] Give catalog collection and alarm dispatch separate authenticated 43-second HTTP executions, each within the existing 60-second function limit; preserve a ten-minute cadence and run delivery one minute after collection.
+- [x] Validate dates in 1995–2100, combined business types, filters, minimal company geography, fixed maximum page size 50 and opaque cursors.
+- [x] Serve `mode=search` only from the shared RPC; map changed-generation responses to HTTP 409 and reject invalid input before storage.
+- [x] Keep authorization/menu checks and private no-store behavior, exclude personal contact details from requests.
+- [x] Give catalog collection and alarm dispatch separate authenticated 43-second HTTP executions, each within the existing 60-second function limit; preserve a ten-minute cadence and run delivery one minute after collection.
 
 ### Task 4: Immediate page UI and collection status
 
 **Files:** indexed search controller/hook, `LiveSearch.tsx`, `App.tsx`, relevant UI components and tests.
 
-- [ ] Replace per-candidate lookups with one verified-index request per page, debounce filter changes and cancel stale responses.
-- [ ] Send all filters before pagination; render global counts and 50-row cursor pages without filtering only a local subset.
-- [ ] Disable provider-backed list hydration; preserve explicit detail/number lookup and bookmarks/demo behavior.
-- [ ] Add wide date selection and show source/verification/capacity status, including a visible restart action for changed search generations.
+- [x] Replace per-candidate lookups with one verified-index request per page, debounce filter changes and cancel stale responses.
+- [x] Send all filters before pagination; render global counts and 50-row cursor pages without filtering only a local subset.
+- [x] Disable provider-backed list hydration; preserve explicit detail/number lookup and bookmarks/demo behavior.
+- [x] Add wide date selection and show source/verification/capacity status, including a visible restart action for changed search generations.
 
 ### Task 5: Integration and live acceptance
 
-- [ ] Independent review of SQL, controller races and worker checkpoint/capacity guards.
-- [ ] Run complete tests with bounded workers, TypeScript/Vite build and SQL integration regressions.
-- [ ] Apply compatible schema, deploy the approved application changes and verify actual worker progress within unchanged storage caps.
-- [ ] Check missing-record examples, newest cancellation, multi-year API queries and the actual browser request path; record first-page timing separately from source completion.
-- [ ] Report any remaining source backlog or concrete storage approval needed without overstating completeness.
+- [x] Independent review of SQL, controller races and worker checkpoint/capacity guards.
+- [x] Run complete tests with bounded workers, TypeScript/Vite build and SQL integration regressions.
+- [x] Apply compatible schema, deploy the approved application changes and verify actual worker progress within unchanged storage caps.
+- [x] Check missing-record examples, newest cancellation, multi-year API queries and the actual browser request path; record first-page timing separately from source completion.
+- [x] Report any remaining source backlog or concrete storage approval needed without overstating completeness.
+
+Operational acceptance: 2026-10-15 KST; see docs/notice-search-research.md for production timings, worker/cron proof and unchanged caps. Initial source/verification work remains in progress. The two previously missing examples are collected and queued, not yet claimed as publicly verified; source completeness is explicitly false.

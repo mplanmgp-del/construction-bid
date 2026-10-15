@@ -11,7 +11,7 @@ export function VerifiedSearchFeedback({ page, loading, stale, error, onRestart 
     {error && !stale && <div className="live-error" role="alert"><p>{error}</p><button type="button" className="button button-secondary" disabled={loading} onClick={onRestart}>다시 검색</button></div>}
     {page && <>
       <p>{page.indexCoverage.complete ? '공통 색인 최초 수집 완료' : `공통 색인 최초 수집 중 · 확인 ${page.indexCoverage.checked}구간 · 남은 ${page.indexCoverage.pending}구간`}. 화면은 선택한 제출마감 구간만 조회합니다.</p>
-      <p>검증된 색인 {page.verifiedCount.toLocaleString('ko-KR')}건 · 검증 대기 {page.pendingCount.toLocaleString('ko-KR')}건 · 참가조건 미확인 {page.conditionPendingCount.toLocaleString('ko-KR')}건</p>
+      <p>검증된 색인 {page.verifiedCount.toLocaleString('ko-KR')}건 · 검증 대기 {page.pendingCount.toLocaleString('ko-KR')}건 · <span title="현재 선택한 지역·면허 조건을 판정하지 못한 공고 수입니다.">선택조건 판정 대기 {page.conditionPendingCount.toLocaleString('ko-KR')}건</span></p>
       <p>자료 기준 {formatDateTime(page.asOf, { includeYear: true })} · {page.sourceSyncedThrough ? `원천 변경 확인 ${formatDateTime(page.sourceSyncedThrough, { includeYear: true })}` : '원천 동기화 확인 전'}</p>
       {!page.indexCoverage.complete || page.pendingCount > 0 || page.conditionPendingCount > 0 ? <p>수집·검증이 끝나지 않은 공고가 있습니다. 결과 0건은 전체 원천에 해당 공고가 없다는 뜻이 아닙니다.</p> : null}
       <p className={page.storage.full ? 'verified-search-storage-full' : undefined}>{page.storage.full ? '수집 공간 한도 도달 · ' : '색인 저장 공간 '}{(page.storage.bytes / 1_048_576).toFixed(2)} / {(page.storage.ceiling / 1_048_576).toFixed(2)} MiB</p>
