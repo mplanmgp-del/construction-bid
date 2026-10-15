@@ -12,6 +12,7 @@ type Row = Record<string, unknown>;
 class SourceSnapshotChanged extends Error {}
 class WorkerBudgetExhausted extends Error {}
 export type ActiveCatalogProvider = (operation: string, params: Record<string, string>, options?: { service: 'opening' }) => Promise<{ items: Row[]; totalCount: number }>;
+export const CURRENT_NOTICE_KEYWORDS = ['철거', '해체', '석면', '건설폐기물'] as const;
 const str = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 const minuteKst = (value: string) => {
   const time = Date.parse(value);
@@ -278,7 +279,12 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
           const notice = fact(row, job.type, now);
           if (ids.has(notice.id)) throw new SourceSnapshotChanged('공고 목록의 차수가 중복되어 확인 범위를 다시 수집합니다.');
           ids.add(notice.id);
-          indexFacts.push(notice);
+          // The current-only sweep completes the four requested work areas
+          // first. Unrelated rows are still validated and observed below;
+          // omission from this focused index is never a cancellation signal.
+          if (job.kind !== 'current' || CURRENT_NOTICE_KEYWORDS.some(keyword => notice.title.normalize('NFKC').includes(keyword))) {
+            indexFacts.push(notice);
+          }
           const key = `${notice.type}:${notice.number}`, previous = observed.get(key);
           if (!previous || Number(notice.revision) > Number(previous.revision)
             || notice.revision === previous.revision && Date.parse(notice.sourceUpdatedAt) > Date.parse(previous.sourceUpdatedAt!)) {

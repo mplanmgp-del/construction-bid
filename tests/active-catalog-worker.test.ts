@@ -363,6 +363,50 @@ describe('all-age active catalog collection', () => {
     }));
   });
 
+  it('indexes the four focused current titles including scheduled notices without invalidating unrelated titles', async () => {
+    const db = store([source({ id: 'current-construction', kind: 'current' })], [], []);
+    const rows = [
+      row({ bidNtceNo: 'R26FOCUS0', bidNtceNm: '노후 시설 철거 공사' }),
+      row({ bidNtceNo: 'R26FOCUS1', bidNtceNm: '기존 건축물 해체 공사', bidBeginDt: '2026-10-17 10:00:00' }),
+      row({ bidNtceNo: 'R26FOCUS2', bidNtceNm: '학교 석면 제거' }),
+      row({ bidNtceNo: 'R26FOCUS3', bidNtceNm: '건설폐기물 처리' }),
+      row({ bidNtceNo: 'R26OTHER0', bidNtceNm: '전산 유지보수' }),
+      row({ bidNtceNo: 'R26OTHER1', bidNtceNm: '도로 포장 공사', ntceKindNm: '취소공고' }),
+      row({ bidNtceNo: 'R26FOCUSBLOCK', bidNtceNm: '시설 철거 공사 취소', ntceKindNm: '취소공고' }),
+    ];
+    const result = await runActiveCatalogWorker(db, { provider: async () => ({ items: rows, totalCount: 7 }), now });
+    expect(result).toMatchObject({ ok: true, sources: 1, requests: 1 });
+    expect(db.indexUpsert.mock.calls[0][1].notices.map(notice => notice.number))
+      .toEqual(['R26FOCUS0', 'R26FOCUS1', 'R26FOCUS2', 'R26FOCUS3']);
+    expect(db.indexUpsert.mock.calls[0][1].notices[1].biddingStartAt).toBe('2026-10-17T10:00:00+09:00');
+    expect(db.indexUpsert.mock.calls[0][1].removed.map(notice => notice.number)).toEqual(['R26FOCUSBLOCK']);
+    expect(db.commit.mock.calls[0][1].sources?.[0]).toMatchObject({ totalCount: 7, receivedCount: 7, complete: true });
+    expect(db.commit.mock.calls[0][1].sources?.[0].observed.map(notice => notice.number))
+      .toEqual(['R26FOCUS0', 'R26FOCUS1', 'R26FOCUS2', 'R26FOCUS3', 'R26OTHER0', 'R26OTHER1', 'R26FOCUSBLOCK']);
+  });
+
+  it('advances a partial current source by all 999 raw rows while indexing only its focused candidate', async () => {
+    const db = store([source({ id: 'current-construction', kind: 'current' })], [], []);
+    const rows = Array.from({ length: 999 }, (_, index) => row({ bidNtceNo: `R26FOCUSRAW${index}`,
+      bidNtceNm: index === 746 ? '노후 건축물 철거' : '전산 유지보수' }));
+    const result = await runActiveCatalogWorker(db, { provider: async () => ({ items: rows, totalCount: 1000 }), now });
+    expect(result).toMatchObject({ ok: true, sources: 1, requests: 1 });
+    expect(db.indexUpsert).toHaveBeenCalledTimes(1);
+    expect(db.indexUpsert.mock.calls[0][1]).toMatchObject({ batch: 0, batches: 1, removed: [] });
+    expect(db.indexUpsert.mock.calls[0][1].notices.map(notice => notice.number)).toEqual(['R26FOCUSRAW746']);
+    expect(db.commit.mock.calls[0][1].sources?.[0]).toMatchObject({ page: 1, totalCount: 1000, receivedCount: 999, complete: false });
+    expect(db.commit.mock.calls[0][1].sources?.[0].observed).toHaveLength(999);
+  });
+
+  it.each(['history', 'registered', 'modified'] as const)('keeps unrelated current facts and actual cancellations in the %s source', async kind => {
+    const db = store([source({ id: `${kind}-construction`, kind })], [], []);
+    const rows = [row({ bidNtceNo: 'R26GENERAL0', bidNtceNm: '전산 유지보수' }),
+      row({ bidNtceNo: 'R26GENERAL1', bidNtceNm: '도로 포장 공사', ntceKindNm: '취소공고' })];
+    await runActiveCatalogWorker(db, { provider: async () => ({ items: rows, totalCount: 2 }), now });
+    expect(db.indexUpsert.mock.calls[0][1].notices.map(notice => notice.number)).toEqual(['R26GENERAL0']);
+    expect(db.indexUpsert.mock.calls[0][1].removed.map(notice => notice.number)).toEqual(['R26GENERAL1']);
+  });
+
   it('leaves unstarted current pages and remaining verification queued at the shared request cap', async () => {
     const identities = Array.from({ length: 6 }, (_, index) => ({ type: '공사' as const, number: `R26CURRENTLIMIT${index}` }));
     const db = store([
