@@ -13,6 +13,27 @@ const detail: G2bNoticeDetail = { number: 'TEST', revision: '000', allowedRegion
 ] }] };
 
 describe('notice summary through detail loading', () => {
+  it('shows the actual deadline and opening year in loaded, pending, failed and drawer summaries', () => {
+    const future = { ...bid, deadline: '2027-03-04T10:00:00+09:00', openingAt: '2027-03-04T11:00:00+09:00' };
+    const summaries = [
+      <NoticeSummary bid={future} detail={detail} />,
+      <PendingNoticeDetails bid={future} failed={false} />,
+      <PendingNoticeDetails bid={future} failed />,
+      <CompleteNoticeDetails bid={future} detail={detail} />,
+      <BidDetail bid={future} profile={{ id: 'test', companyName: '테스트', province: '', district: '', address: '', licenses: [], contactName: '', email: '' }} assessment={{ status: 'review', reason: '' }} isBookmarked={false} onClose={() => {}} onToggleBookmark={() => {}} />,
+    ];
+    for (const summary of summaries) {
+      const html = renderToStaticMarkup(summary);
+      expect(html).toContain('2027.03.04 10:00');
+      expect(html).toContain('2027.03.04 11:00');
+    }
+  });
+  it('keeps the year when full API detail sections are unavailable', () => {
+    const future = { ...bid, deadline: '2027-03-04T10:00:00+09:00', openingAt: '2027-03-04T11:00:00+09:00' };
+    const html = renderToStaticMarkup(<CompleteNoticeDetails bid={future} detail={{ ...detail, sections: [] }} showSummary={false} />);
+    expect(html).toContain('2027.03.04 10:00');
+    expect(html).toContain('2027.03.04 11:00');
+  });
   it('maps the budget independently and uses it before and after detail arrives', () => {
     expect(bid).toMatchObject({ estimatedPrice: 57836364, plannedAmount: 94340000 });
     for (const html of [renderToStaticMarkup(<NoticeSummary bid={bid} pending />), renderToStaticMarkup(<NoticeSummary bid={bid} detail={detail} />)]) {

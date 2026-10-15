@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessRegion, assessSearchRegion, assessSearchRegions, buildBidCsv, daysUntil, filterNotices, formatAmountInput, getPriceRangeError } from '../src/domain';
+import { assessRegion, assessSearchRegion, assessSearchRegions, buildBidCsv, daysUntil, filterNotices, formatAmountInput, formatDateTime, getPriceRangeError } from '../src/domain';
 import type { BidNotice, CompanyProfile, SearchFilters } from '../src/types';
 
 const company: CompanyProfile = {
@@ -400,5 +400,18 @@ describe('예시 기준일의 마감 D-day', () => {
     expect(daysUntil('2026-10-20T14:00:00+09:00')).toBe(8);
     expect(daysUntil('2026-10-11T15:30:00Z')).toBe(0);
     expect(daysUntil('2026-10-11T14:30:00Z')).toBe(-1);
+  });
+});
+
+describe('공고 일정의 연도 표시', () => {
+  it('연도를 요청한 일정은 한국시간의 년월일과 시분을 모두 표시한다', () => {
+    expect(formatDateTime('2027-03-04T10:00:00+09:00', { includeYear: true })).toBe('2027.03.04 10:00');
+    expect(formatDateTime('2026-12-31T15:30:00Z', { includeYear: true })).toBe('2027.01.01 00:30');
+    expect(formatDateTime('2027-03-04 11:00:00', { includeYear: true })).toBe('2027.03.04 11:00');
+  });
+
+  it('짧은 조회 시각 표시와 미제공 일정의 의미를 유지한다', () => {
+    expect(formatDateTime('2026-10-15T15:18:00+09:00')).toBe('10.15 15:18');
+    expect(formatDateTime('', { includeYear: true })).toBe('일정 미제공');
   });
 });

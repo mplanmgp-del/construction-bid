@@ -43,3 +43,12 @@ it('offers a direct custom lookup alongside condition saving',()=>{
   const html=renderToStaticMarkup(<AlertsPage alerts={access()} signedIn onLogin={()=>{}} onSearch={()=>{}}/>);
   expect(html).toContain('맞춤 조회');expect(html).toContain('알림 조건 저장');
 });
+
+it('does not claim all years are finished while final notice verification is pending', () => {
+  const state=access();
+  state.overview!.status={...state.overview!.status,backfillPending:true,catalog:{groupCount:3,activeCount:3,pendingSources:0,pendingVerification:1,completedSources:746,coverageFrom:'1995-10-01',bootstrapComplete:true,lastCheckedAt:null,error:null,storageBytes:65536,storageCeiling:16777216}};
+  const html=renderToStaticMarkup(<AlertsPage alerts={state} signedIn onLogin={()=>{}} />);
+  expect(html).toContain('전체 제공 연도 순차 확인 중');
+  expect(html).not.toContain('전체 제공 연도 확인 완료');
+  expect(html).toContain('상세 확인 대기 1건');
+});

@@ -32,7 +32,7 @@ function assessAlertRegions(notice: AlertNotice, values: string[], basis: AlertR
   return priority.map(status=>assessments.find(item=>item.status===status)).find(item=>item!==undefined)!;
 }
 
-/** Only source facts affect a version. A clock tick, ordering and revision label do not. */
+/** Keep this legacy fingerprint stable; revision advances are tracked separately by the planner. */
 function content(notice: AlertNotice): Record<string, unknown> {
   return {
     '공고명':clean(notice.title), '발주기관':clean(notice.agency), '수요기관':clean(notice.demandAgency || ''),
@@ -48,9 +48,18 @@ function content(notice: AlertNotice): Record<string, unknown> {
   };
 }
 export function noticeContentKey(notice: AlertNotice): string { return JSON.stringify(content(notice)); }
+const omittedFields=['첨부서류','공고 내용','참가조건'];
+export function noticeOmittedContentKey(notice:AlertNotice):string {
+  const values=content(notice);
+  return JSON.stringify(Object.fromEntries(omittedFields.map(key=>[key,values[key]])));
+}
+export function hasOmittedContentDigest(notice:AlertNotice):boolean {return /^[0-9a-f]{64}$/.test(notice.sourceOmittedDigest??'');}
 export function meaningfulChanges(before: AlertNotice, after: AlertNotice): string[] {
   const previous = content(before), next = content(after);
-  return Object.keys(previous).filter(key=>JSON.stringify(previous[key]) !== JSON.stringify(next[key]));
+  const compact=hasOmittedContentDigest(before)||hasOmittedContentDigest(after);
+  const fields=Object.keys(previous).filter(key=>!(compact&&(omittedFields.includes(key)||key==='참가 가능 지역'&&(!before.regionComplete||!after.regionComplete)||key==='요구 면허'&&(!before.licenseComplete||!after.licenseComplete)))
+    &&JSON.stringify(previous[key]) !== JSON.stringify(next[key]));
+  return Number(after.revision)>Number(before.revision)?['공고 차수',...fields]:fields;
 }
 export function alertNoticeKey(notice: Pick<AlertNotice,'type'|'number'>): string { return `g2b:${notice.type}:${notice.number}`; }
 export function isOlderAlertNotice(incoming: AlertNotice, stored: AlertNotice): boolean {

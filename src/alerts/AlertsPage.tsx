@@ -25,7 +25,7 @@ function formFromSettings(settings: AlertSettings): AlertForm {
     minDaysUntilDeadline: filter.minDaysUntilDeadline == null ? '' : String(filter.minDaysUntilDeadline), useCompanyLicenses: filter.useCompanyLicenses ?? false };
 }
 const splitValues = (text: string) => [...new Set(text.split(/[,\n]+/).map(value => value.trim()).filter(Boolean))];
-const timeLabel = (value: string | null) => value ? formatDateTime(value) : '아직 확인 전';
+const timeLabel = (value: string | null) => value ? formatDateTime(value, { includeYear: true }) : '아직 확인 전';
 function noticeHref(notice: AlertNotice): string {
   return `/notice-detail.html?${new URLSearchParams({ number: notice.number, revision: notice.revision, type: notice.type })}`;
 }
@@ -100,8 +100,9 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
     {!overview && <div className="alerts-loading panel" role="status">{alerts.loading ? '회원의 알림 정보를 불러오고 있습니다.' : '알림 정보를 불러오지 못했습니다. 잠시 후 자동으로 다시 확인합니다.'}</div>}
     {status && <div className={`alerts-service-status panel${status.paused || status.error || !status.configured ? ' alerts-service-attention' : ''}`}>
       <div><span className={`alerts-status-dot${status.configured && settings.enabled && !status.paused && !status.error ? ' is-active' : ''}`} /><strong>{!status.configured ? '서버 알림 설정 필요' : !settings.enabled ? '내 알림 꺼짐' : status.paused ? '수집 일시 중지' : status.error ? '공고 확인 지연' : !status.lastCheckedAt ? '첫 공고 확인 대기' : '서버에서 공고 확인 중'}</strong></div>
-      <dl><div><dt>마지막 확인</dt><dd>{timeLabel(status.lastCheckedAt)}</dd></div><div><dt>확인 범위</dt><dd>{status.coverageFrom ? `${timeLabel(status.coverageFrom)} 이후` : '수집 시작 대기'}</dd></div></dl>
-      {status.backfillPending && <p>기존 공고를 확인하고 있습니다. 확인이 끝난 공고부터 표시됩니다.</p>}
+      <dl><div><dt>마지막 확인</dt><dd>{timeLabel(status.lastCheckedAt)}</dd></div><div><dt>확인 범위</dt><dd>{status.catalog ? status.backfillPending ? '전체 제공 연도 순차 확인 중' : '전체 제공 연도 확인 완료' : status.coverageFrom ? `${timeLabel(status.coverageFrom)} 이후` : '수집 시작 대기'}</dd></div></dl>
+      {status.catalog && <p>완료한 구간 {status.catalog.completedSources.toLocaleString()}개 · 남은 구간 {status.catalog.pendingSources.toLocaleString()}개 · 상세 확인 대기 {status.catalog.pendingVerification.toLocaleString()}건</p>}
+      {status.backfillPending && <p>약 1,000건씩 읽어 조건에 맞는 공고만 보관합니다. 완료한 구간부터 기존 공고에 표시하며, 중단되어도 처리 위치에서 이어집니다.</p>}
       {status.error && <p role="status">{status.error}</p>}
       {!status.configured && <p>서버 연결을 완료해야 브라우저가 닫혀 있어도 공고를 확인할 수 있습니다.</p>}
       {isAdmin && <button type="button" className="button button-secondary" disabled={busy} onClick={() => { void alerts.setup(); }}><Settings2 size={15} /><span>{alerts.settingUp ? '서버 설정 중' : '서버 알림 설정'}</span></button>}

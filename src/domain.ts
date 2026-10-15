@@ -240,9 +240,9 @@ export function daysUntil(deadline: string, today: string = DEMO_TODAY): number 
   return Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
 }
 
-export function formatDateTime(value: string): string {
+export function formatDateTime(value: string, { includeYear = false }: { includeYear?: boolean } = {}): string {
   const time = timestamp(value);
   if (!Number.isFinite(time)) return '일정 미제공';
   const koreanTime = new Date(time + 9 * 60 * 60 * 1000).toISOString();
-  return `${koreanTime.slice(5, 10).replace('-', '.')} ${koreanTime.slice(11, 16)}`;
+  return `${koreanTime.slice(includeYear ? 0 : 5, 10).replaceAll('-', '.')} ${koreanTime.slice(11, 16)}`;
 }

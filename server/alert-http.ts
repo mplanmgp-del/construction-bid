@@ -5,6 +5,8 @@ import { runAlertWorker } from './alert-worker.ts';
 import { normalizeAlertSettings } from '../src/alerts/domain.ts';
 import { getAlertPushPublicKey,isAlertPushConfigured,validatePushEndpoint,validatePushSubscription } from './alert-push.ts';
 import type { AlertOverview } from '../src/alerts/types.ts';
+import { createActiveCatalogStore } from './active-catalog-store.ts';
+import { runActiveCatalogWorker } from './active-catalog-worker.ts';
 export function validWorkerToken(authorization:unknown,token=process.env.ALERT_WORKER_TOKEN):boolean {
   if(!token||token.length<32||typeof authorization!=='string') return false;
   const actual=Buffer.from(authorization),expected=Buffer.from(`Bearer ${token}`);
@@ -15,12 +17,21 @@ export async function handleAlertRequest(method:string,params:URLSearchParams,bo
   if(action==='worker') {
     if(method!=='POST') throw new AlertError(405,'METHOD_NOT_ALLOWED','POST 요청이 필요합니다.');
     if(!validWorkerToken(authorization)) throw new AlertError(401,'WORKER_UNAUTHORIZED','수집기 인증이 필요합니다.');
-    return runAlertWorker(store);
+    const started=Date.now(),catalog=createActiveCatalogStore();
+    catalog.setDeadline(started+25_000);
+    const collection=await runActiveCatalogWorker(catalog,{budgetMs:25_000,maxRequests:24}).catch(()=>({ok:false,error:'전체 공고 수집을 다음 확인 때 이어갑니다.'}));
+    catalog.setDeadline(started+53_000);
+    store.setDeadline?.(started+53_000);
+    const alerts=await runAlertWorker(store,{catalog,deadline:started+53_000});
+    return {...alerts,catalog:collection};
   }
   const bearer=await store.authenticate(authorization);
   if(action==='overview'&&method==='GET') {
     const data=await store.user<AlertOverview>(bearer,'get',{offset:params.get('offset')||'0',existingOffset:params.get('existingOffset')||'0'});
-    return {...data,publicKey:getAlertPushPublicKey(),status:{...data.status,pushConfigured:isAlertPushConfigured()}};
+    const catalog=await createActiveCatalogStore().page({limit:1}).catch(()=>null);
+    return {...data,publicKey:getAlertPushPublicKey(),status:{...data.status,pushConfigured:isAlertPushConfigured(),
+      ...(catalog?{coverageFrom:catalog.status.coverageFrom,backfillPending:!catalog.status.bootstrapComplete||catalog.status.pendingVerification>0||!!data.status.backfillPending,
+        error:data.status.error||catalog.status.error,catalog:catalog.status}:{})}};
   }
   if(method!=='POST') throw new AlertError(405,'METHOD_NOT_ALLOWED','POST 요청이 필요합니다.');
   if(action==='save') {await store.user(bearer,'save',{settings:normalizeAlertSettings(body.settings)});return {ok:true};}

@@ -4,6 +4,8 @@ import {collectAlertWindow,createAlertProvider,minuteKst,type AlertProvider} fro
 import {runAlertWorker} from '../server/alert-worker';
 import {DEFAULT_ALERT_SETTINGS,type AlertNotice,type WorkerRule} from '../src/alerts/types';
 import type {AlertStore} from '../server/alert-store';
+import { createHash } from 'node:crypto';
+import { noticeOmittedContentKey } from '../src/alerts/domain';
 const now=Date.parse('2026-10-15T10:00:00+09:00');
 const notice=(patch:Partial<AlertNotice>={}):AlertNotice=>({id:'g2b:공사:R26BK00001:000',number:'R26BK00001',revision:'000',title:'석면 해체공사',agency:'교육청',type:'공사',category:'석면',province:'서울',district:'',allowedRegions:[],estimatedPrice:100,contractMethod:'제한',status:'접수중',postedAt:'2026-10-15T09:55:00+09:00',deadline:'2026-10-20T10:00:00+09:00',openingAt:'2026-10-20T11:00:00+09:00',registrationDeadline:'2026-10-19T18:00:00+09:00',licenses:[],duration:'',description:'내용',requirements:[],documents:[],revised:false,source:'live',sourceUpdatedAt:'2026-10-15T09:55:00+09:00',regionComplete:true,licenseComplete:true,...patch});
 const rule:WorkerRule={userId:'owner',profile:null,settings:{...structuredClone(DEFAULT_ALERT_SETTINGS),enabled:true,activatedAt:'2026-10-15T09:00:00+09:00'}};
@@ -40,10 +42,60 @@ describe('durable alert event planning',()=>{
     const muted=planAlertChanges([notice({estimatedPrice:200})],[fact],member(fact),[disabled],now);
     expect(muted.events).toEqual([]);expect(muted.existing[0]).toMatchObject({version:2,initial:false});
   });
-  it('ignores old revisions and revision-only refreshes',()=>{
+  it('ignores old revisions but alerts once for a higher revision with identical content',()=>{
     const fact=planAlertChanges([notice({revision:'002'})],[],[],[rule],now).observations[0];
     expect(planAlertChanges([notice({estimatedPrice:200})],[fact],member(fact),[rule],now).observations).toEqual([]);
-    expect(planAlertChanges([notice({revision:'003'})],[fact],member(fact),[rule],now).events).toEqual([]);
+    const advanced=planAlertChanges([notice({revision:'003'})],[fact],member(fact),[rule],now);
+    expect(advanced.observations[0].fingerprint).toBe(fact.fingerprint);
+    expect(advanced.events).toEqual([expect.objectContaining({kind:'changed',version:2,changeFields:['공고 차수']})]);
+    const latest=advanced.observations[0];
+    const repeated=planAlertChanges([notice({revision:'003'}),notice({revision:'002'})],[latest],member(latest),[rule],now);
+    expect(repeated.events).toEqual([]);
+    expect(repeated.observations.map(item=>item.notice.revision)).toEqual(['003']);
+  });
+  it('processes unordered and repeated incoming revisions in ascending order without duplicate events',()=>{
+    const rows=[notice({revision:'002'}),notice(),notice({revision:'001'}),notice({revision:'001'})];
+    const plan=planAlertChanges(rows,[],[],[rule],now);
+    expect(rows[0].revision).toBe('002');
+    expect(plan.events.map(item=>({kind:item.kind,version:item.version}))).toEqual([{kind:'new',version:1},{kind:'changed',version:2},{kind:'changed',version:3}]);
+    expect(plan.observations.map(item=>[item.notice.revision,item.version])).toEqual([['000',1],['001',2],['001',2],['002',3]]);
+    const final=plan.observations.at(-1)!;
+    expect(planAlertChanges(rows,[final],member(final),[rule],now).events).toEqual([]);
+    expect(new Set(plan.observations.map(item=>item.fingerprint)).size).toBe(1);
+  });
+  it('seeds a historical multi-revision batch once instead of replaying its changes',()=>{
+    const historical=(revision:string)=>notice({revision,postedAt:`2026-10-14T0${Number(revision)+7}:00:00+09:00`,sourceUpdatedAt:`2026-10-14T0${Number(revision)+7}:00:00+09:00`});
+    const plan=planAlertChanges([historical('002'),historical('000'),historical('001')],[],[],[rule],now);
+    expect(plan.events).toEqual([]);
+    expect(new Set(plan.existing.map(item=>item.key)).size).toBe(1);
+    expect(plan.existing.at(-1)).toMatchObject({version:3});
+    expect(plan.observations.at(-1)).toMatchObject({version:3,notice:{revision:'002'}});
+  });
+  it('retains changes after activation while seeding earlier revisions in the same batch',()=>{
+    const old=notice({postedAt:'2026-10-14T08:00:00+09:00',sourceUpdatedAt:'2026-10-14T08:00:00+09:00'});
+    const plan=planAlertChanges([notice({revision:'002'}),old,notice({revision:'001'})],[],[],[rule],now);
+    expect(plan.existing).toEqual([{userId:'owner',key:'g2b:공사:R26BK00001',version:1}]);
+    expect(plan.events.map(item=>[item.kind,item.version])).toEqual([['changed',2],['changed',3]]);
+  });
+  it('still reports same-revision source changes after activation for an initial historical match',()=>{
+    const old=notice({postedAt:'2026-10-14T08:00:00+09:00',sourceUpdatedAt:'2026-10-14T08:00:00+09:00'});
+    const initial=planAlertChanges([old],[],[],[rule],now).observations[0];
+    const plan=planAlertChanges([{...old,estimatedPrice:200,sourceUpdatedAt:'2026-10-15T09:59:00+09:00'}],[initial],[{...member(initial)[0],initial:true}],[rule],now);
+    expect(plan.events[0]).toMatchObject({kind:'changed',version:2,changeFields:['추정가격']});
+  });
+  it('does not replay rich legacy observations when a compact catalog carries the same omitted facts',()=>{
+    const rich=notice({description:'원본 설명',documents:[{name:'공고문.pdf',url:'https://www.g2b.go.kr/example.pdf',size:'원문'}],requirements:['실적 증명'],allowedRegions:['서울'],licenses:['석면해체·제거업']});
+    const before=planAlertChanges([rich],[],[],[rule],now).observations[0];
+    const sourceOmittedDigest=createHash('sha256').update(noticeOmittedContentKey(rich)).digest('hex');
+    const compact=notice({...rich,description:'',documents:[],requirements:[],allowedRegions:null,licenses:[],regionComplete:false,licenseComplete:false,sourceOmittedDigest});
+    const migrated=planAlertChanges([compact],[before],member(before),[rule],now);
+    expect(migrated.events).toEqual([]);expect(migrated.observations[0]).toMatchObject({version:before.version,fingerprint:before.fingerprint});
+    const refreshed=planAlertChanges([compact],migrated.observations,member(migrated.observations[0]),[rule],now);
+    expect(refreshed.events).toEqual([]);
+    const changed={...compact,sourceOmittedDigest:createHash('sha256').update(noticeOmittedContentKey({...rich,description:'변경 설명'})).digest('hex')};
+    const updated=planAlertChanges([changed],migrated.observations,member(migrated.observations[0]),[rule],now);
+    expect(updated.events).toEqual([expect.objectContaining({version:2,kind:'changed',changeFields:['공고 내용']})]);
+    expect(planAlertChanges([changed],updated.observations,member(updated.observations[0]),[rule],now).events).toEqual([]);
   });
 });
 

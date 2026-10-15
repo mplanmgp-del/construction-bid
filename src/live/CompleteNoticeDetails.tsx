@@ -22,12 +22,12 @@ function fallbackSections(bid: BidNotice, detail: G2bNoticeDetail): G2bDetailSec
       { key: 'agency', label: '공고기관', value: bid.agency || null },
       { key: 'title', label: '공고명', value: bid.title || null, wide: true },
       { key: 'contract', label: '계약방법', value: bid.contractMethod || null },
-      { key: 'posted', label: '게시일시', value: bid.postedAt ? formatDateTime(bid.postedAt) : null },
+      { key: 'posted', label: '게시일시', value: bid.postedAt ? formatDateTime(bid.postedAt, { includeYear: true }) : null },
     ] },
     { id: 'schedule', label: '입찰 일정', fields: [
-      { key: 'registration', label: '참가자격 등록마감', value: bid.registrationDeadline ? formatDateTime(bid.registrationDeadline) : null },
-      { key: 'deadline', label: '입찰서 제출마감', value: bid.deadline ? formatDateTime(bid.deadline) : null },
-      { key: 'opening', label: '개찰일시', value: bid.openingAt ? formatDateTime(bid.openingAt) : null },
+      { key: 'registration', label: '참가자격 등록마감', value: bid.registrationDeadline ? formatDateTime(bid.registrationDeadline, { includeYear: true }) : null },
+      { key: 'deadline', label: '입찰서 제출마감', value: bid.deadline ? formatDateTime(bid.deadline, { includeYear: true }) : null },
+      { key: 'opening', label: '개찰일시', value: bid.openingAt ? formatDateTime(bid.openingAt, { includeYear: true }) : null },
     ] },
     { id: 'eligibility', label: '투찰 제한', fields: [
       { key: 'regions', label: '참가 가능 지역', value: detail.allowedRegions?.join(', ') || null, wide: true },

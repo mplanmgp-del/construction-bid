@@ -227,10 +227,10 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
             <section className="detail-section" aria-labelledby={`${id}-timeline`}>
               <div className="detail-section-title"><h3 id={`${id}-timeline`}><CalendarClock size={18} aria-hidden="true" />주요 일정</h3><span className="detail-deadline-badge">{deadlineLabel}</span></div>
               <ol className="detail-timeline">
-                <li><span className="detail-timeline-dot" /><span>공고 게시</span><strong>{formatDateTime(bid.postedAt)}</strong></li>
-                <li><span className="detail-timeline-dot" /><span>참가자격 등록 마감</span><strong>{formatDateTime(bid.registrationDeadline)}</strong></li>
-                <li className="detail-timeline-highlight"><span className="detail-timeline-dot" /><span>입찰서 제출 마감</span><strong>{formatDateTime(bid.deadline)}</strong></li>
-                <li><span className="detail-timeline-dot" /><span>개찰</span><strong>{formatDateTime(bid.openingAt)}</strong></li>
+                <li><span className="detail-timeline-dot" /><span>공고 게시</span><strong>{formatDateTime(bid.postedAt, { includeYear: true })}</strong></li>
+                <li><span className="detail-timeline-dot" /><span>참가자격 등록 마감</span><strong>{formatDateTime(bid.registrationDeadline, { includeYear: true })}</strong></li>
+                <li className="detail-timeline-highlight"><span className="detail-timeline-dot" /><span>입찰서 제출 마감</span><strong>{formatDateTime(bid.deadline, { includeYear: true })}</strong></li>
+                <li><span className="detail-timeline-dot" /><span>개찰</span><strong>{formatDateTime(bid.openingAt, { includeYear: true })}</strong></li>
               </ol>
             </section>
             <section className="detail-section" aria-labelledby={`${id}-description`}><h3 id={`${id}-description`}>공고 내용</h3><p className="detail-description">{bid.description}</p></section>

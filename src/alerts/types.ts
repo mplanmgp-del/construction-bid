@@ -1,4 +1,5 @@
 import type { BidNotice, Category, CompanyProfile } from '../types.ts';
+import type { ActiveCatalogStatus } from '../live/active-catalog-types.ts';
 
 export type AlertRegionBasis = 'auto' | 'site' | 'participation' | 'either' | 'both';
 export interface AlertFilter {
@@ -32,6 +33,8 @@ export interface AlertNotice extends BidNotice {
   sourceUpdatedAt: string;
   regionComplete: boolean;
   licenseComplete: boolean;
+  /** Hash of canonical full description/documents/requirements retained by a compact source record. */
+  sourceOmittedDigest?: string;
 }
 export interface AlertInboxItem {
   id: string;
@@ -44,6 +47,7 @@ export interface AlertInboxItem {
   existingCount?: number;
 }
 export interface AlertServiceStatus {
+  catalog?: ActiveCatalogStatus;
   configured: boolean;
   lastCheckedAt: string | null;
   coverageFrom: string | null;

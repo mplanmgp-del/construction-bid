@@ -14,11 +14,11 @@ const notice = (patch: Partial<AlertNotice> = {}): AlertNotice => ({
 });
 const settings = () => structuredClone(DEFAULT_ALERT_SETTINGS);
 describe('personalized alert content and matching',()=>{
-  it('ignores refresh times, derived phase, row order and revision-only edits',()=>{
+  it('preserves the legacy content fingerprint while reporting a new notice revision',()=>{
     const old=notice({licenses:['A','B'],allowedRegions:['서울','경기']});
     const repeated=notice({revision:'001',id:'other',status:'마감',revised:true,sourceUpdatedAt:'2026-10-15T10:00:00+09:00',licenses:['B','A'],allowedRegions:['경기','서울']});
     expect(noticeContentKey(repeated)).toBe(noticeContentKey(old));
-    expect(meaningfulChanges(old,repeated)).toEqual([]);
+    expect(meaningfulChanges(old,repeated)).toEqual(['공고 차수']);
   });
   it('identifies same-revision deadline, price, region and cancellation changes',()=>{
     expect(meaningfulChanges(notice(),notice({deadline:'2026-10-18T10:00:00+09:00',estimatedPrice:220000000,allowedRegions:['서울'],status:'취소'}))).toEqual(expect.arrayContaining(['제출 마감','추정가격','참가 가능 지역','공고 취소']));
