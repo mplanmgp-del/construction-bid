@@ -93,7 +93,7 @@ describe('alert presentation and direct links', () => {
   });
   it('shows rule fields, real collection status, and escaped inbox content', () => {
     const notice = { ...NOTICES[0], sourceUpdatedAt: '', regionComplete: true, licenseComplete: true };
-    const data = overview({ notifications: [{ id: '1', kind: 'initial', notice: null, message: '<script>message</script>', changeFields: [], createdAt: '', readAt: null, existingCount: 5 },
+    const data = overview({ settings:{...DEFAULT_ALERT_SETTINGS,enabled:true}, notifications: [{ id: '1', kind: 'initial', notice: null, message: '<script>message</script>', changeFields: [], createdAt: '', readAt: null, existingCount: 5 },
       { id: '2', kind: 'changed', notice, message: '일정 변경', changeFields: ['마감일'], createdAt: '', readAt: null }],
       status: { ...overview().status, paused: true, error: '공공데이터 확인 대기', lastCheckedAt: '2026-10-15T01:00:00Z' } });
     const html = renderToStaticMarkup(<AlertsPage alerts={access(data)} signedIn onLogin={() => {}} isAdmin />);
@@ -101,5 +101,10 @@ describe('alert presentation and direct links', () => {
     expect(html).toContain('기존 공고 5건 보기'); expect(html).toContain('공공데이터 확인 대기'); expect(html).toContain('수집 일시 중지');
     expect(html).toContain('&lt;script&gt;message&lt;/script&gt;'); expect(html).not.toContain('<script>');
     expect(html).toContain('/notice-detail.html?number='); expect(html).toContain('마감일'); expect(html).toContain('서버 알림 설정');
+  });
+  it('distinguishes a disabled personal rule from a paused server',()=>{
+    const data=overview({status:{...overview().status,configured:true,paused:true}});
+    const html=renderToStaticMarkup(<AlertsPage alerts={access(data)} signedIn onLogin={()=>{}} />);
+    expect(html).toContain('내 알림 꺼짐');
   });
 });
