@@ -9,8 +9,8 @@ import { validateCompanyAwardQuery } from './company-awards.ts';
 import type { CompanyAwardQuery } from '../src/company-award-types.ts';
 import type { G2bApiError } from '../src/g2b-types.ts';
 import { authorizeMenuRequest, menuForApi } from './menu-access.ts';
-import { readDeadlineCatalog, readVerifiedNoticeSearch } from './active-catalog-store.ts';
-import { parseVerifiedNoticeSearch } from './verified-notice-search.ts';
+import { readDeadlineCatalog, readVerifiedNoticeSearch, readVerifiedNoticeSearchResults, readVerifiedNoticeSearchStatus } from './active-catalog-store.ts';
+import { parseVerifiedNoticeSearch, parseVerifiedNoticeSearchStatus } from './verified-notice-search.ts';
 import { AlertError } from './alert-store.ts';
 
 type Client = ReturnType<typeof createG2bClient>;
@@ -97,6 +97,8 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
       return { status: 200, body, ...(body.retryAfterSeconds ? { retryAfterSeconds: body.retryAfterSeconds } : {}) };
     }
     if (path === '/api/notices') {
+      if (params.get('mode') === 'search-results') return { status: 200, body: await readVerifiedNoticeSearchResults(parseVerifiedNoticeSearch(params)) };
+      if (params.get('mode') === 'search-status') return { status: 200, body: await readVerifiedNoticeSearchStatus(parseVerifiedNoticeSearchStatus(params)) };
       if (params.get('mode') === 'search') return { status: 200, body: await readVerifiedNoticeSearch(parseVerifiedNoticeSearch(params)) };
       if (params.get('mode') === 'deadline') {
         // The provider has no submission-deadline range operation. This route

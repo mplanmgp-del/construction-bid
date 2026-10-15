@@ -1,7 +1,7 @@
 import { CATEGORIES, NOTICE_STATUSES, type SearchFilters } from '../src/types.ts';
 import { canonicalProvince, canonicalSearchProvince, normalizeSearchRegion } from '../src/search-filters.ts';
 import { getPriceRangeError } from '../src/domain.ts';
-import type { VerifiedNoticeSearchQuery } from '../src/live/active-catalog-types.ts';
+import type { VerifiedNoticeSearchQuery, VerifiedNoticeSearchStatusQuery } from '../src/live/active-catalog-types.ts';
 import { G2bError } from './g2b.ts';
 
 const invalid = (message = '검색 조건과 날짜를 확인해 주세요.'): never => { throw new G2bError(400, 'INVALID_SEARCH_QUERY', message); };
@@ -72,4 +72,14 @@ export function parseVerifiedNoticeSearch(params: URLSearchParams): VerifiedNoti
   const cursor = params.get('cursor') ?? '';
   if (cursor.length > 4096 || /[\u0000-\u0020\u007f]/.test(cursor)) return invalid('다음 페이지 정보를 확인해 주세요.');
   return { type, from, to, keyword, filters, ...(profile ? {profile} : {}), limit: Number(rawLimit), ...(cursor ? {cursor} : {}) };
+}
+
+/** Aggregate metadata is tied to the result snapshot, never a different query. */
+export function parseVerifiedNoticeSearchStatus(params: URLSearchParams): VerifiedNoticeSearchStatusQuery {
+  const query = parseVerifiedNoticeSearch(params);
+  const asOf = params.get('asOf') ?? '', snapshotVersion = params.get('snapshotVersion') ?? '';
+  if (query.cursor || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(asOf)
+    || !Number.isFinite(Date.parse(asOf)) || !/^\d{1,20}$/.test(snapshotVersion)) return invalid('검색 결과의 확인 시각과 버전을 확인해 주세요.');
+  const { cursor: _cursor, ...base } = query;
+  return { ...base, asOf, snapshotVersion };
 }

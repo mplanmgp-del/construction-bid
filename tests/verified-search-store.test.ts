@@ -22,3 +22,20 @@ it('publishes the claimed complete histories without exposing the worker token i
   expect(await store.publishSearchVerified('lease',{scopeVersion:'scope',groups:[]})).toEqual({ok:true});
   expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string)).toMatchObject({p_action:'search_publish',p_payload:{leaseId:'lease',scopeVersion:'scope',groups:[]}});
 });
+
+it('uses distinct result and status RPC actions with no aggregate request in the result path',async()=>{
+  const fetcher=vi.fn<typeof fetch>(async()=>Response.json({items:[],nextCursor:null}));
+  const store=createActiveCatalogStore({url:'https://example.supabase.co',key:'public',token:'x'.repeat(43),fetcher});
+  await store.searchResults(query());
+  expect(fetcher).toHaveBeenCalledOnce();expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string)).toMatchObject({p_action:'search_results'});
+  await store.searchStatus({...query(),asOf:'2026-10-16T00:01:02Z',snapshotVersion:'904'});
+  expect(JSON.parse(fetcher.mock.calls[1][1]!.body as string)).toMatchObject({p_action:'search_status',p_payload:{asOf:'2026-10-16T00:01:02Z',snapshotVersion:'904'}});
+});
+it.each(['searchResults','searchStatus'] as const)('keeps %s validation and snapshot failures safely mapped',async action=>{
+  const fetcher=vi.fn<typeof fetch>(async()=>Response.json({code:'22023',message:'private SQL'},{status:400}));
+  const store=createActiveCatalogStore({url:'https://example.supabase.co',key:'public',token:'x'.repeat(43),fetcher});
+  const input={...query(),asOf:'2026-10-16T00:01:02Z',snapshotVersion:'904'};
+  await expect(store[action](input)).rejects.toMatchObject({status:400,code:'INVALID_SEARCH_QUERY'});
+  fetcher.mockResolvedValueOnce(Response.json({code:'P0001',message:'SEARCH_CHANGED'},{status:400}));
+  await expect(store[action](input)).rejects.toMatchObject({status:409,code:'SEARCH_CHANGED'});
+});
