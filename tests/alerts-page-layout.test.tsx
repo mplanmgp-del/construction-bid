@@ -37,3 +37,9 @@ describe('alert settings page after inbox moves to the bell', () => {
     expect(html).toContain('alerts-push');
   });
 });
+
+
+it('offers a direct custom lookup alongside condition saving',()=>{
+  const html=renderToStaticMarkup(<AlertsPage alerts={access()} signedIn onLogin={()=>{}} onSearch={()=>{}}/>);
+  expect(html).toContain('맞춤 조회');expect(html).toContain('알림 조건 저장');
+});

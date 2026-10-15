@@ -1,15 +1,15 @@
 import { useRef, useState } from 'react';
-import { ArrowRight, Search, X } from 'lucide-react';
+import { ArrowRight, Search, Sparkles, X } from 'lucide-react';
 import { dateRangeError } from './client';
 import type { NoticeQuery } from './useLiveNotices';
 
-export function LiveSearch({ query, loading, refreshBlocked = false, onSearch }: { query: NoticeQuery; loading: boolean; refreshBlocked?: boolean; onSearch: (query: NoticeQuery) => void; onRefresh: () => void }) {
+export function LiveSearch({ query, loading, refreshBlocked = false, onSearch, onCustomSearch }: { query: NoticeQuery; loading: boolean; refreshBlocked?: boolean; onSearch: (query: NoticeQuery) => void; onRefresh: () => void; onCustomSearch?: () => void }) {
   const [draft, setDraft] = useState(query);
   const [error, setError] = useState('');
   const keywordInput = useRef<HTMLInputElement>(null);
   const changed = draft.type !== query.type || draft.from !== query.from || draft.to !== query.to || draft.keyword.trim() !== query.keyword.trim();
   return <section className="notice-search-panel panel" aria-label="입찰공고 통합검색">
-    <div className="notice-search-heading"><strong>공고 검색</strong><span>입찰 개시일 기준 · 이전 90일 게시 공고 포함</span></div>
+    <div className="notice-search-heading"><strong>공고 검색</strong><span>입찰 개시일 기준 · 이전 90일 게시 공고 포함</span>{onCustomSearch && <button type="button" className="button button-secondary custom-search-launch" onClick={onCustomSearch}><Sparkles size={15} />맞춤 조회</button>}</div>
     <form role="search" aria-label="입찰공고 검색" onSubmit={event => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);

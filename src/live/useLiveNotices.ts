@@ -25,6 +25,7 @@ export function useLiveNotices(enabled: boolean) {
   const [state, setState] = useState<SearchState>({ key: '', loading: false, refreshing: false, progress: { done: 0, total: 0 }, error: '', retryAt: 0 });
   const request = useRef<AbortController | null>(null);
   const sequence = useRef(0);
+  const [searchCount, setSearchCount] = useState(0);
   const [refreshCount, setRefreshCount] = useState(0);
   const handledRefresh = useRef(0);
   // Keep provider results separate from detail-enriched, account-filtered UI data.
@@ -86,7 +87,7 @@ export function useLiveNotices(enabled: boolean) {
     handledRefresh.current = refreshCount;
     if (enabled) void load(force);
     return () => { sequence.current++; request.current?.abort(); };
-  }, [enabled, load, refreshCount]);
+  }, [enabled, load, searchCount, refreshCount]);
   const visible = result?.key === key && canRetainNoticePage(result.meta) ? result : null;
   const active = state.key === key ? state : null;
   const loading = enabled && !requiresKeyword && (active?.loading ?? true);
@@ -119,7 +120,9 @@ export function useLiveNotices(enabled: boolean) {
   }
   return { query, setQuery, queryVersion: `${key}:${refreshCount}`, items: visible?.items ?? [], meta: visible?.meta ?? null, loading, refreshing, requiresKeyword, retryAt: active?.retryAt ?? 0,
     progress: active?.progress ?? { done: 0, total: 0 }, error: active?.error ?? '', applyDetail,
-    search: (next: NoticeQuery) => { setQuery(next); setRefreshCount(value => value + 1); },
+    // Search reevaluates cache age even for unchanged conditions; only refresh
+    // bypasses the browser and provider caches and invalidates detail lookups.
+    search: (next: NoticeQuery) => { setQuery(next); setSearchCount(value => value + 1); },
     refresh: () => { if (!requiresKeyword && Date.now() >= (active?.retryAt ?? 0)) setRefreshCount(value => value + 1); },
   };
 }

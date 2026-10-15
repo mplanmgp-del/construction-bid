@@ -6,9 +6,9 @@ import { ProviderQuotaError } from './provider-quota.ts';
 
 export const SEARCH_CACHE_FRESH_MS = 5 * 60_000;
 export const SEARCH_CACHE_MAX_AGE_MS = 24 * 60 * 60_000;
-export const SEARCH_CACHE_STALE_WARNING = '저장된 조회 결과입니다. 최신 정보는 새로고침으로 확인해 주세요.';
+export const SEARCH_CACHE_STALE_WARNING = '저장된 조회 결과입니다. 조회 시각을 확인해 주세요.';
 export const SEARCH_CACHE_QUOTA_WARNING = '공공데이터 API 호출 한도로 최신 자료를 받지 못해 저장된 공고를 표시합니다.';
-export const SEARCH_CACHE_FAILURE_WARNING = '최신 자료 갱신에 실패하여 저장된 공고를 표시합니다. 잠시 후 새로고침으로 확인해 주세요.';
+export const SEARCH_CACHE_FAILURE_WARNING = '최신 자료 갱신에 실패하여 저장된 공고를 표시합니다. 잠시 후 다시 검색해 주세요.';
 const MAX_BYTES = 2_000_000;
 const MAX_PENDING = 128;
 const SCHEMA = 1;

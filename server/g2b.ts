@@ -133,7 +133,11 @@ export function mapResult(row: Row, type: G2bBusinessType, index = 0): G2bOpenin
   };
 }
 
-export interface SearchQuery { type: G2bBusinessType; from: string; to: string; page: number; pageSize: number; keyword: string }
+export interface SearchQuery {
+  type: G2bBusinessType; from: string; to: string; page: number; pageSize: number; keyword: string;
+  agency?: string; demandAgency?: string; license?: string;
+  minAmount?: number; maxAmount?: number; excludeClosed?: boolean;
+}
 function integerParam(value: string | null, fallback: number, maximum: number): number {
   if (value === null) return fallback;
   if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > maximum) throw new G2bError(400, 'INVALID_QUERY', '페이지 또는 조회 건수가 올바르지 않습니다.');
@@ -149,7 +153,24 @@ export function parseSearch(params: URLSearchParams, maximumDays = 31): SearchQu
   }
   const keyword = params.get('keyword')?.trim() || '';
   if (keyword.length > 100 || /[\u0000-\u001f]/.test(keyword)) throw new G2bError(400, 'INVALID_QUERY', '검색어는 100자 이내로 입력해 주세요.');
-  return { type, from, to, keyword, page: integerParam(params.get('page'), 1, 10_000), pageSize: integerParam(params.get('pageSize'), 100, 100) };
+  const query: SearchQuery = { type, from, to, keyword, page: integerParam(params.get('page'), 1, 10_000), pageSize: integerParam(params.get('pageSize'), 100, 100) };
+  for (const name of ['agency', 'demandAgency', 'license'] as const) {
+    const raw = params.get(name) ?? '', value = raw.trim();
+    if (value.length > 100 || /[\u0000-\u001f\u007f]/.test(raw)) throw new G2bError(400, 'INVALID_QUERY', '기관명과 면허명은 제어문자 없이 100자 이내로 입력해 주세요.');
+    if (value) query[name] = value;
+  }
+  for (const name of ['minAmount', 'maxAmount'] as const) {
+    const raw = params.get(name)?.trim() ?? '';
+    if (!raw) continue;
+    const amount = Number(raw);
+    if (!/^\d+$/.test(raw) || !Number.isSafeInteger(amount) || amount < 0) throw new G2bError(400, 'INVALID_QUERY', '추정가격은 0 이상의 안전한 원 단위 정수로 입력해 주세요.');
+    query[name] = amount;
+  }
+  if (query.minAmount !== undefined && query.maxAmount !== undefined && query.minAmount > query.maxAmount) throw new G2bError(400, 'INVALID_QUERY', '최소 추정가격은 최대 추정가격 이하로 입력해 주세요.');
+  const excludeClosed = params.get('excludeClosed') ?? '';
+  if (!['', '0', '1'].includes(excludeClosed)) throw new G2bError(400, 'INVALID_QUERY', '마감 공고 제외 조건을 확인해 주세요.');
+  if (excludeClosed === '1') query.excludeClosed = true;
+  return query;
 }
 function providerError(code: string): G2bError | ProviderQuotaError {
   if (['20', '30', '31'].includes(code)) return new G2bError(503, 'G2B_AUTH_ERROR', '나라장터 API 인증 또는 이용 권한을 확인해 주세요. 서버 인증키와 활용신청 승인 상태 확인이 필요합니다.');
@@ -270,6 +291,11 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     const result = await request(BID_BASE, query.type === '공사' ? 'getBidPblancListInfoCnstwkPPSSrch' : 'getBidPblancListInfoServcPPSSrch', {
       inqryDiv: '1', inqryBgnDt: query.from.replaceAll('-', '') + '0000', inqryEndDt: query.to.replaceAll('-', '') + '2359',
       pageNo: String(query.page), numOfRows: String(query.pageSize), ...(query.keyword ? { bidNtceNm: query.keyword } : {}),
+      ...(query.agency ? { ntceInsttNm: query.agency } : {}), ...(query.demandAgency ? { dminsttNm: query.demandAgency } : {}),
+      ...(query.license ? { indstrytyNm: query.license } : {}),
+      ...(query.minAmount !== undefined ? { presmptPrceBgn: String(query.minAmount) } : {}),
+      ...(query.maxAmount !== undefined ? { presmptPrceEnd: String(query.maxAmount) } : {}),
+      ...(query.excludeClosed ? { bidClseExcpYn: 'Y' } : {}),
     });
     const warnings: string[] = [];
     const items = result.items.map(row => mapNotice(row, query.type, now()));

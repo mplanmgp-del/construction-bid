@@ -21,3 +21,14 @@ describe('menu access including direct links', () => {
     expect(menuIsLocked('admin', false, false, [])).toBe(false);
   });
 });
+
+
+describe('custom notice search access',()=>{
+  it('uses the notices permission for a direct custom-search link',()=>{
+    expect(appViewFromHash('#custom-search')).toBe('custom');
+    expect(appViewHash('custom')).toBe('#custom-search');
+    expect(menuIsLocked('custom',true,false,settings)).toBe(false);
+    expect(menuIsLocked('custom',true,false,settings.map(s=>({...s,locked:true})))).toBe(true);
+    expect(menuIsLocked('custom',false,true,settings)).toBe(true);
+  });
+});
