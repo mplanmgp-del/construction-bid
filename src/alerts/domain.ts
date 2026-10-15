@@ -44,7 +44,8 @@ function content(notice: AlertNotice): Record<string, unknown> {
     '참가 가능 지역':notice.allowedRegions === null ? null : sorted(notice.allowedRegions, region),
     '요구 면허':sorted(notice.licenses,license), '별도 지역조건':Boolean(notice.specialRegionCondition),
     '계약방법':clean(notice.contractMethod), '공고 취소':notice.status === '취소',
-    '첨부서류':notice.documents.map(doc=>[clean(doc.name),doc.url || '']).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    // Preserve the production ordering independently of the worker host locale.
+    '첨부서류':notice.documents.map(doc=>[clean(doc.name),doc.url || '']).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b),'en-US')),
     '공고 내용':clean(notice.description), '참가조건':sorted(notice.requirements),
   };
 }
