@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { G2bNoticePage } from '../src/g2b-types';
+import type { VerifiedNoticeSearchPage } from '../src/live/active-catalog-types';
+import { DEFAULT_FILTERS, DEMO_PROFILES } from '../src/data';
+import type { SearchFilters } from '../src/types';
 
 // This repository has no DOM test runtime. Run the hook's state/effect boundary
 // locally while retaining its real cache, abort, age and request-option logic.
@@ -52,13 +54,14 @@ import { NOTICE_CACHE_KEY } from '../src/live/notice-cache';
 import { useLiveNotices } from '../src/live/useLiveNotices';
 
 const now = Date.parse('2026-10-15T02:00:00Z');
-const page = (): G2bNoticePage => ({ items: [], totalCount: 0, page: 1, pageSize: 100, hasMore: false, fetchedAt: new Date(Date.now()).toISOString(), source: '나라장터' });
+const page = (): VerifiedNoticeSearchPage => ({ items: [], totalCount: 0, page: 1, pageSize: 50, hasMore: false, fetchedAt: new Date(Date.now()).toISOString(), source: '나라장터', nextCursor: null, snapshotVersion: 'epoch1', asOf: new Date(Date.now()).toISOString(), indexCoverage: { complete: true, pending: 0, checked: 746 }, sourceSyncedThrough: null, verifiedCount: 0, pendingCount: 0, conditionPendingCount: 0, storage: { bytes: 0, ceiling: 1000, full: false } });
 const fetcher = vi.mocked(fetchApi);
 function mount(enabled = true) {
+  let filters: SearchFilters = { ...DEFAULT_FILTERS, category: '전체', status: '전체' };
   let current: ReturnType<typeof useLiveNotices>;
-  const render = () => { hooks.begin(); current = useLiveNotices(enabled); hooks.commit(); };
+  const render = () => { hooks.begin(); current = useLiveNotices(enabled, filters, DEMO_PROFILES[0]); hooks.commit(); };
   render();
-  return { get current() { return current; }, async settle() {
+  return { get current() { return current; }, setFilters(next: SearchFilters) { filters = next; render(); }, async settle() {
     for (let i = 0; i < 60; i++) { if (hooks.isDirty()) render(); await Promise.resolve(); }
   } };
 }
@@ -77,10 +80,10 @@ describe('indexed deadline search lifecycle', () => {
     const view = mount(); await view.settle();
     expect(view.current.query).toEqual({ type: '공사·용역', from: '2026-04-15', to: '2027-04-15', keyword: '' });
     expect(view.current.requiresKeyword).toBe(false);
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(1);
     for (const [path] of fetcher.mock.calls) {
       const url = new URL(path, 'https://test.local');
-      expect(url.pathname).toBe('/api/notices'); expect(url.searchParams.get('mode')).toBe('deadline');
+      expect(url.pathname).toBe('/api/notices'); expect(url.searchParams.get('mode')).toBe('search');
       expect(url.searchParams.get('from')).toBe('2026-04-15'); expect(url.searchParams.get('to')).toBe('2027-04-15');
     }
     expect(NOTICE_CACHE_KEY).toContain('deadline'); expect(view.current.meta?.hasMore).toBe(false);
@@ -94,16 +97,26 @@ describe('indexed deadline search lifecycle', () => {
     view.current.search({ type: '공사', from: '2026-09-15', to: '2026-11-15', keyword: '철거' }); await view.settle();
     expect(signal.aborted).toBe(true);
     const url = new URL(fetcher.mock.calls.at(-1)![0], 'https://test.local');
-    expect(Object.fromEntries(url.searchParams)).toMatchObject({ mode: 'deadline', from: '2026-09-15', to: '2026-11-15', keyword: '철거', type: '공사' });
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ mode: 'search', from: '2026-09-15', to: '2026-11-15', keyword: '철거', type: '공사' });
   });
   it('exposes an index failure without inventing a completed empty search', async () => {
     fetcher.mockRejectedValue(new Error('색인 연결 실패'));
     const view = mount(); await view.settle(); expect(view.current.error).toContain('색인 연결 실패');
-    expect(view.current.hasMore).toBe(true); expect(view.current.loading).toBe(false); expect(view.current.meta).toBeNull();
+    expect(view.current.hasMore).toBe(false); expect(view.current.loading).toBe(false); expect(view.current.meta).toBeNull();
+  });
+  it('debounces all sidebar fields together and sends them before pagination', async () => {
+    const view = mount(); await view.settle(); expect(fetcher).toHaveBeenCalledTimes(1);
+    view.setFilters({ ...DEFAULT_FILTERS, category: '석면', status: '전체', license: '철거면허', sort: 'amountDesc' }); await view.settle();
+    vi.advanceTimersByTime(199); await view.settle(); expect(fetcher).toHaveBeenCalledTimes(1);
+    view.setFilters({ ...DEFAULT_FILTERS, category: '석면', status: '전체', license: '석면면허', sort: 'amountDesc' }); await view.settle();
+    vi.advanceTimersByTime(200); await view.settle(); expect(fetcher).toHaveBeenCalledTimes(2);
+    const params = new URL(fetcher.mock.calls[1][0], 'https://test.local').searchParams;
+    expect(JSON.parse(params.get('filters')!)).toMatchObject({ category: '석면', license: '석면면허', sort: 'amountDesc' });
+    expect(params.get('cursor')).toBeNull(); expect(params.get('limit')).toBe('50');
   });
   it('queries a repeated user search afresh instead of restoring old start-date cache data', async () => {
-    const view = mount(); await view.settle(); expect(fetcher).toHaveBeenCalledTimes(2);
-    view.current.search({ ...view.current.query }); await view.settle(); expect(fetcher).toHaveBeenCalledTimes(4);
+    const view = mount(); await view.settle(); expect(fetcher).toHaveBeenCalledTimes(1);
+    view.current.search({ ...view.current.query }); await view.settle(); expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher.mock.calls.every(([path]) => !path.includes('notices-start'))).toBe(true);
   });
 });

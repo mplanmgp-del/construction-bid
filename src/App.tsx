@@ -23,6 +23,7 @@ import { seedNoticeDetailRegions, selectNoticeRegionTargets } from './live/notic
 import { LiveSearch } from './live/LiveSearch';
 import { NoticeNumberLookup } from './live/NoticeNumberLookup';
 import { isOngoingNotice } from './notice-deadline-window';
+import { VerifiedSearchFeedback, VerifiedSearchPagination } from './live/VerifiedSearchFeedback';
 import { filtersForIndexedSearch } from './live/notice-search';
 import { CompanyDashboard } from './company/CompanyDashboard';
 import { FloatingQuickLinks } from './components/FloatingQuickLinks';
@@ -53,7 +54,6 @@ export default function App() {
   const access = useMenuAccess(member.user?.id);
   const [view, setView] = useState<View>(() => appViewFromHash(window.location.hash));
   const menuDisabled = mode === 'live' && menuIsLocked(view, access.ready, access.isAdmin, access.settings);
-  const live = useLiveNotices(mode === 'live' && !menuDisabled && view === 'notices');
   const [loaded] = useState(() => loadPrototypeState(DEMO_PROFILES));
   const [state, setState] = useState<PrototypeState>(loaded.state);
   const [storageWarning, setStorageWarning] = useState(loaded.warning);
@@ -61,6 +61,8 @@ export default function App() {
   const profile = mode === 'live' ? member.workspace?.profile ?? guestProfile : state.profiles.find(item => item.id === state.activeProfileId) ?? state.profiles[0];
   const [localFilters, setFilters] = useState<SearchFilters>(() => ({ ...DEFAULT_FILTERS, category: '전체', status: '전체', autoRegion: false }));
   const filters = useMemo(() => filtersForIndexedSearch(localFilters, mode === 'live' && view === 'notices'), [localFilters, mode, view]);
+  const serverSearch = mode === 'live' && view === 'notices';
+  const live = useLiveNotices(serverSearch && !menuDisabled, filters, { province: profile.province, district: profile.district });
   const [searchInput, setSearchInput] = useState(live.query.keyword);
   const [page, setPage] = useState(1);
   const [selectedNoticeIds, setSelectedNoticeIds] = useState<string[]>([]);
@@ -196,20 +198,23 @@ export default function App() {
     });
   }
 
+  useEffect(() => { setSelectedNoticeIds([]); setPage(1); }, [live.selectionKey]);
+
   const rawSourceNotices = useMemo(() => (view === 'bookmarks'
     ? mergeById(mode === 'live' ? Object.values(member.workspace?.noticeSnapshots ?? {}).map(bid => currentNotice(bid)) : [], availableNotices).filter(bid => bookmarks.includes(bid.id))
-    : availableNotices).filter(bid => mode !== 'live' || isOngoingNotice(bid, statusNow)), [view, mode, member.workspace?.noticeSnapshots, availableNotices, bookmarks, statusNow]);
+    : availableNotices).filter(bid => serverSearch || mode !== 'live' || isOngoingNotice(bid, statusNow)), [view, mode, serverSearch, member.workspace?.noticeSnapshots, availableNotices, bookmarks, statusNow]);
   const activeRegions = selectedRegions(filters);
   const activeStatuses = selectedStatuses(filters);
-  const regionCandidates = useMemo(() => filterNotices(rawSourceNotices,
-    { ...filters, siteProvince: '전체', regions: [], autoRegion: false, regionView: 'all' }, profile, statusNow), [rawSourceNotices, filters, profile, statusNow]);
+  const regionCandidates = useMemo(() => serverSearch ? rawSourceNotices : filterNotices(rawSourceNotices,
+    { ...filters, siteProvince: '전체', regions: [], autoRegion: false, regionView: 'all' }, profile, statusNow), [rawSourceNotices, filters, profile, statusNow, serverSearch]);
   const companyRegionFilter = !!profile.province && !!profile.district && (filters.autoRegion || filters.regionView !== 'all');
-  const regionFilterEnabled = mode === 'live' && !menuDisabled && (view === 'notices' || view === 'bookmarks')
+  const regionFilterEnabled = mode === 'live' && !menuDisabled && view === 'bookmarks'
     && (companyRegionFilter || (filters.type !== '공사' && activeRegions.length > 0));
-  const sourceNotices = useCachedNoticeRegions(regionCandidates);
-  const baseResults = useMemo(() => filterNotices(sourceNotices, { ...filters, autoRegion: false, regionView: 'all' }, profile, statusNow), [sourceNotices, filters, profile, statusNow]);
+  const cachedLocalNotices = useCachedNoticeRegions(serverSearch ? [] : regionCandidates);
+  const sourceNotices = serverSearch ? live.items : cachedLocalNotices;
+  const baseResults = useMemo(() => serverSearch ? sourceNotices : filterNotices(sourceNotices, { ...filters, autoRegion: false, regionView: 'all' }, profile, statusNow), [sourceNotices, filters, profile, statusNow, serverSearch]);
   const counts = useMemo(() => baseResults.reduce((total, bid) => { total[assessRegion(bid, profile).status]++; return total; }, { matched: 0, review: 0, excluded: 0 }), [baseResults, profile]);
-  const filtered = useMemo(() => filterNotices(sourceNotices, filters, profile, statusNow), [sourceNotices, filters, profile, statusNow]);
+  const filtered = useMemo(() => serverSearch ? sourceNotices : filterNotices(sourceNotices, filters, profile, statusNow), [sourceNotices, filters, profile, statusNow, serverSearch]);
   const unknownSearchRegions = !activeRegions.length ? 0
     : sourceNotices.filter(bid => assessSearchRegions(bid, activeRegions).status === 'review').length;
   const unknownParticipationRegions = companyRegionFilter
@@ -217,9 +222,9 @@ export default function App() {
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
   const pagination = pageGroup(safePage, pages);
-  const visibleNotices = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const visibleNotices = serverSearch ? filtered : filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const regionTargets = selectNoticeRegionTargets(regionCandidates, visibleNotices, regionFilterEnabled, companyRegionFilter);
-  const regionSearch = useNoticeRegions(regionTargets, mode === 'live' && !menuDisabled && (view === 'notices' || view === 'bookmarks'), true, live.queryVersion);
+  const regionSearch = useNoticeRegions(regionTargets, mode === 'live' && !menuDisabled && view === 'bookmarks', true, live.queryVersion);
   const allCount = filters.autoRegion ? counts.matched : baseResults.length;
   const selectedNotices = filtered.filter(bid => selectedNoticeIds.includes(bid.id));
   const exportNotices = selectedNotices.length ? selectedNotices : filtered;
@@ -276,21 +281,21 @@ export default function App() {
           {(!sidebarCollapsed || mobileFilters) && <FilterPanel filters={filters} showDeadlineRange={mode !== 'live' || view !== 'notices'} onChange={updateFilter} onReset={resetFilters} onCollapse={() => { setSidebarCollapsed(true); setMobileFilters(false); }} mobileOpen={mobileFilters} onMobileClose={() => setMobileFilters(false)} />}
           <section className="results-panel panel" aria-label="입찰공고 검색 결과">
             <div className="results-search-controls">
-        {mode === 'live' && view === 'notices' && <LiveSearch key={`${live.query.type}-${live.query.from}-${live.query.to}-${live.query.keyword}`} query={live.query} loading={live.loading || live.refreshing} refreshBlocked={live.retryAt > Date.now()} onSearch={query => { live.search(query); resetFilters(); setSearchInput(query.keyword); }} onRefresh={live.refresh} />}
+        {mode === 'live' && view === 'notices' && <LiveSearch key={`${live.query.type}-${live.query.from}-${live.query.to}-${live.query.keyword}`} query={live.query} loading={live.loading || live.refreshing} refreshBlocked={live.retryAt > Date.now()} onSearch={query => { live.search(query); setSearchInput(query.keyword); }} onRefresh={live.refresh} />}
         {mode === 'live' && view === 'notices' && member.user && <NoticeNumberLookup key={member.user.id} userId={member.user.id} bookmarks={bookmarks} onOpen={setSelectedBid} onBookmark={notice => toggleBookmark(notice.id, notice)} />}
         {!(mode === 'live' && view === 'notices') && <form className="search-bar" onSubmit={event => { event.preventDefault(); searchLocalNotices(searchInput); }}><Search size={23} strokeWidth={1.7} /><label className="sr-only" htmlFor="bid-search">공고 검색</label><input id="bid-search" value={searchInput} onChange={event => setSearchInput(event.target.value)} placeholder="공고명, 공고번호, 발주기관을 검색해 보세요" autoComplete="off" /><span className="search-shortcut">목록 검색</span>{searchInput && <button type="button" className="icon-button" aria-label="검색어 지우기" onClick={() => { setSearchInput(''); searchLocalNotices(''); }}><X size={17} /></button>}<button className="button button-primary search-submit" type="submit">검색<ArrowRight size={18} /></button></form>}
 
         <div className="category-tabs" aria-label="작업 분야">{(['전체', ...CATEGORIES] as const).map(category => <button key={category} className={filters.category === category ? 'active' : ''} onClick={() => updateFilter('category', category)}>{category}</button>)}</div>
 
             </div>
-            {mode === 'live' && view === 'notices' && <div className="live-scope">{live.loading && <p role="status">선택한 제출마감 기간의 공고를 확인 중입니다. ({live.progress.done}/{live.progress.total}건 확인)</p>}{live.indexCoverage && <p role="status">{live.indexCoverage.complete ? '공통 색인 최초 수집 완료 · 화면은 선택한 제출마감 구간만 조회합니다.' : `공통 색인 최초 수집 중 · 남은 수집 구간 ${live.indexCoverage.pending}개 · 확인한 구간 ${live.indexCoverage.checked}개. 확인된 공고부터 표시합니다. 화면은 선택한 제출마감 구간만 조회합니다.`}</p>}{live.hasMore && !live.loading && <p>아직 확인하지 않은 공고가 있습니다. 아래 ‘공고 더 조회’로 이어서 확인합니다.</p>}{live.error && <p className="live-error" role="alert">{live.error}</p>}{live.meta?.warnings?.map(warning => <p className="live-warning" key={warning}>{warning}</p>)}</div>}{mode === 'live' && view === 'bookmarks' && <p className="live-scope">저장한 공고 중 진행중·마감 임박·예정 공고를 표시합니다. 개찰 완료·취소 공고는 목록에서 제외되며 저장 기록은 보존됩니다.</p>}
-            <div className="results-toolbar"><div className="results-heading-group"><button className="button button-secondary show-filter-button" aria-label="상세 검색 열기" onClick={() => { if (window.matchMedia('(max-width: 1000px)').matches) setMobileFilters(true); else setSidebarCollapsed(false); }}><PanelLeftOpen size={16} /><span>상세 검색</span></button><h2>{view === 'bookmarks' ? '저장한 공고' : '검색 결과'} <strong>{filtered.length}</strong><span>건</span></h2></div><div className="results-actions">{mode === 'live' && view === 'notices' && <button type="button" className="button button-secondary alerts-save-search" disabled={!live.query.keyword.trim()} onClick={prepareCurrentSearchAlert}>이 조건으로 알림 받기</button>}<ExportButton onExport={exportResults} /><label className="sr-only" htmlFor="sort-order">공고 정렬</label><select id="sort-order" className="sort-select" value={filters.sort} onChange={event => updateFilter('sort', event.target.value as SearchFilters['sort'])}><option value="deadline">마감 임박순</option><option value="newest">최신 공고순</option><option value="amountDesc">추정가격 높은순</option><option value="amountAsc">추정가격 낮은순</option></select></div></div>
-            <div className="result-filter-line"><div className="result-state-tabs" aria-label="지역 판정 필터"><button className={filters.regionView === 'all' ? 'active' : ''} onClick={() => updateFilter('regionView', 'all')}>전체 <span>{allCount}</span></button></div><button className={`excluded-button ${filters.regionView === 'excluded' ? 'active' : ''}`} onClick={() => updateFilter('regionView', filters.regionView === 'excluded' ? 'all' : 'excluded')}>{filters.regionView === 'excluded' ? '기본 목록으로 돌아가기' : `지역 제외 ${counts.excluded}건 보기`}<ChevronRight size={13} /></button></div>
+            {serverSearch && <VerifiedSearchFeedback page={live.meta} loading={live.loading} stale={live.stale} error={live.error} onRestart={live.refresh} />}{mode === 'live' && view === 'bookmarks' && <p className="live-scope">저장한 공고 중 진행중·마감 임박·예정 공고를 표시합니다. 개찰 완료·취소 공고는 목록에서 제외되며 저장 기록은 보존됩니다.</p>}
+            <div className="results-toolbar"><div className="results-heading-group"><button className="button button-secondary show-filter-button" aria-label="상세 검색 열기" onClick={() => { if (window.matchMedia('(max-width: 1000px)').matches) setMobileFilters(true); else setSidebarCollapsed(false); }}><PanelLeftOpen size={16} /><span>상세 검색</span></button><h2>{view === 'bookmarks' ? '저장한 공고' : '검색 결과'} <strong>{serverSearch ? live.totalCount : filtered.length}</strong><span>건</span></h2></div><div className="results-actions">{mode === 'live' && view === 'notices' && <button type="button" className="button button-secondary alerts-save-search" disabled={!live.query.keyword.trim()} onClick={prepareCurrentSearchAlert}>이 조건으로 알림 받기</button>}<ExportButton onExport={exportResults} /><label className="sr-only" htmlFor="sort-order">공고 정렬</label><select id="sort-order" className="sort-select" value={filters.sort} onChange={event => updateFilter('sort', event.target.value as SearchFilters['sort'])}><option value="deadline">마감 임박순</option><option value="newest">최신 공고순</option><option value="amountDesc">추정가격 높은순</option><option value="amountAsc">추정가격 낮은순</option></select></div></div>
+            <div className="result-filter-line"><div className="result-state-tabs" aria-label="지역 판정 필터"><button className={filters.regionView === 'all' ? 'active' : ''} onClick={() => updateFilter('regionView', 'all')}>전체 {!serverSearch && <span>{allCount}</span>}</button></div><button className={`excluded-button ${filters.regionView === 'excluded' ? 'active' : ''}`} onClick={() => updateFilter('regionView', filters.regionView === 'excluded' ? 'all' : 'excluded')}>{filters.regionView === 'excluded' ? '기본 목록으로 돌아가기' : serverSearch ? '지역 제외 보기' : `지역 제외 ${counts.excluded}건 보기`}<ChevronRight size={13} /></button></div>
             <div className="chips-line"><div className="filter-chips">{chips.map(chip => <button key={chip.label} onClick={chip.remove}>{chip.label}<X size={12} /></button>)}{filters.autoRegion && <span className="automatic-chip"><ShieldCheck size={13} />내 지역 자동필터</span>}{chips.length === 0 && !filters.autoRegion && <span className="muted">모든 조건의 공고를 표시합니다.</span>}</div><button className="text-button reset-results" onClick={resetFilters}>조건 초기화</button></div>
             {filters.regionView === 'excluded' && <div className="excluded-notice"><Info size={15} />등록한 업체 소재지와 지역조건이 맞지 않는 공고입니다. 공고 상세에서 제외 사유를 확인할 수 있습니다.</div>}
             {(activeRegions.length > 0 || companyRegionFilter) && <div className="region-search-note" role="status">
               <div><strong>{activeRegions.length ? `${activeRegions.map(regionLabel).join(' · ')} 지역 검색` : '내 업체 참가 가능 지역 확인'}</strong><span>{companyRegionFilter ? '내 업체 소재지와 공고의 참가 가능 지역을 비교합니다.' : '공사: 현장 위치 · 용역: 참가 가능 지역'}</span>
-                {regionSearch.loading ? <p>참가 가능 지역을 확인 중입니다. {regionSearch.pending}건 남음</p>
+                {serverSearch ? <p>현재 페이지의 지역 정보입니다. 지역·면허·금액 조건은 서버의 전체 검색 결과에 적용합니다.</p> : regionSearch.loading ? <p>참가 가능 지역을 확인 중입니다. {regionSearch.pending}건 남음</p>
                   : companyRegionFilter && unknownParticipationRegions > 0 ? <p>지역 미확인 공고 {unknownParticipationRegions}건은 자동필터를 끄고 확인할 수 있습니다.</p>
                     : unknownSearchRegions > 0 ? <p>세부 지역이 확인되지 않은 공고 {unknownSearchRegions}건은 {filters.includeUnknownRegions ? '함께 표시합니다. 정확한 지역은 원문에서 확인해 주세요.' : '제외했습니다. 상세 검색의 ‘지역 미확인 공고 포함’으로 볼 수 있습니다.'}</p> : null}
                 {regionSearch.failed > 0 && <p>일부 지역 정보를 불러오지 못했습니다. 미확인 공고는 원문을 확인해 주세요.</p>}
@@ -299,12 +304,12 @@ export default function App() {
 
             {(visibleNotices.length > 0 || activeStatuses.length > 0 || activeRegions.length > 0) && <>
               {selectedNotices.length > 0 && <div className="selection-summary"><span>{selectedNotices.length}건 선택 · 다운로드 시 선택한 공고를 내보냅니다.</span><button onClick={() => setSelectedNoticeIds([])}>선택 해제</button></div>}
-              <NoticeList regionLookup={regionSearch} bids={visibleNotices} now={statusNow} statuses={activeStatuses} onStatusesChange={value => updateFilter('statuses', value)} searchRegions={activeRegions} resultsPaused={regionSearch.loading} keyword={[filters.keyword, mode === 'live' && view === 'notices' ? live.query.keyword : ''].filter(Boolean).join(' ')} profile={profile} bookmarks={bookmarks} selected={selectedNoticeIds} onSelect={setSelectedNoticeIds} onOpen={setSelectedBid} onBookmark={toggleBookmark} />
+              <NoticeList fetchPublicResults={!serverSearch} regionLookup={serverSearch ? undefined : regionSearch} bids={visibleNotices} now={statusNow} statuses={activeStatuses} onStatusesChange={value => updateFilter('statuses', value)} searchRegions={activeRegions} resultsPaused={regionSearch.loading} keyword={[filters.keyword, mode === 'live' && view === 'notices' ? live.query.keyword : ''].filter(Boolean).join(' ')} profile={profile} bookmarks={bookmarks} selected={selectedNoticeIds} onSelect={setSelectedNoticeIds} onOpen={setSelectedBid} onBookmark={toggleBookmark} />
             </>}
             {visibleNotices.length === 0 && <div className="empty-state"><div className="empty-icon">{view === 'bookmarks' && bookmarks.length === 0 ? <Bookmark size={30} /> : <FileSearch size={32} />}</div><h3>{mode === 'live' && view === 'notices' && live.requiresKeyword ? '검색할 공고명을 입력해 주세요' : mode === 'live' && live.loading ? '공고를 불러오는 중입니다' : mode === 'live' && live.error && view === 'notices' ? '현재 조건의 공고를 조회하지 못했습니다' : view === 'bookmarks' && bookmarks.length === 0 ? '아직 저장한 관심공고가 없습니다' : '조건에 맞는 공고가 없습니다'}</h3><p>{mode === 'live' && view === 'notices' && live.requiresKeyword ? '위 검색창에 철거·석면 등 공고명을 입력해 주세요.' : mode === 'live' && view === 'notices' && live.error ? '조회 상태는 위 안내에서 확인할 수 있습니다.' : view === 'bookmarks' && bookmarks.length === 0 ? '공고 옆 별표를 누르면 이 업체의 관심공고에 저장됩니다.' : '검색어를 바꾸거나 선택한 조건을 조금 넓혀보세요.'}</p><button className="button button-primary" onClick={view === 'bookmarks' && bookmarks.length === 0 ? () => navigate('notices') : resetFilters}>{view === 'bookmarks' && bookmarks.length === 0 ? '입찰공고 둘러보기' : '검색 조건 초기화'}<ArrowRight size={16} /></button></div>}
 
-            {filtered.length > 0 && <div className="results-bottom"><span className="result-range">검색 결과 {filtered.length}건 중 {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)}건</span><nav className="pagination" aria-label="검색 결과 페이지"><button aria-label="이전 10페이지" disabled={pagination.previous === null} onClick={() => pagination.previous !== null && setPage(pagination.previous)}><ChevronLeft size={15} /></button><div className="pagination-numbers">{pagination.items.map(number => <button key={number} aria-label={`${number}페이지`} aria-current={safePage === number ? 'page' : undefined} className={safePage === number ? 'active' : ''} onClick={() => setPage(number)}>{number}</button>)}</div><button aria-label="다음 10페이지" disabled={pagination.next === null} onClick={() => pagination.next !== null && setPage(pagination.next)}><ChevronRight size={15} /></button></nav><span className="page-size-label">30개씩 보기</span></div>}
-            {mode === 'live' && view === 'notices' && live.hasMore && <div className="notice-load-more"><button className="button button-secondary" disabled={live.loading} onClick={() => { void live.loadMore(); }}>{live.loading ? '확인 중' : '공고 더 조회'}<ChevronRight size={16} /></button></div>}
+            {!serverSearch && filtered.length > 0 && <div className="results-bottom"><span className="result-range">검색 결과 {filtered.length}건 중 {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)}건</span><nav className="pagination" aria-label="검색 결과 페이지"><button aria-label="이전 10페이지" disabled={pagination.previous === null} onClick={() => pagination.previous !== null && setPage(pagination.previous)}><ChevronLeft size={15} /></button><div className="pagination-numbers">{pagination.items.map(number => <button key={number} aria-label={`${number}페이지`} aria-current={safePage === number ? 'page' : undefined} className={safePage === number ? 'active' : ''} onClick={() => setPage(number)}>{number}</button>)}</div><button aria-label="다음 10페이지" disabled={pagination.next === null} onClick={() => pagination.next !== null && setPage(pagination.next)}><ChevronRight size={15} /></button></nav><span className="page-size-label">30개씩 보기</span></div>}
+            {serverSearch && <VerifiedSearchPagination total={live.totalCount} count={visibleNotices.length} pageNumber={live.pageNumber} hasNext={live.hasMore} hasPrevious={live.hasPrevious} loading={live.loading} stale={live.stale} onNext={() => { void live.next(); }} onPrevious={() => { void live.previous(); }} />}
 
           </section>
         </div>

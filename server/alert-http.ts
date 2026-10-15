@@ -14,16 +14,14 @@ export function validWorkerToken(authorization:unknown,token=process.env.ALERT_W
 }
 export async function handleAlertRequest(method:string,params:URLSearchParams,body:Record<string,unknown>,authorization:unknown,store:AlertStore=createAlertStore()) {
   const action=params.get('action')||String(body.action||'overview');
-  if(action==='worker') {
+  if(action==='worker'||action==='catalog-worker') {
     if(method!=='POST') throw new AlertError(405,'METHOD_NOT_ALLOWED','POST 요청이 필요합니다.');
     if(!validWorkerToken(authorization)) throw new AlertError(401,'WORKER_UNAUTHORIZED','수집기 인증이 필요합니다.');
     const started=Date.now(),catalog=createActiveCatalogStore();
-    catalog.setDeadline(started+25_000);
-    const collection=await runActiveCatalogWorker(catalog,{budgetMs:25_000,maxRequests:24}).catch(()=>({ok:false,error:'전체 공고 수집을 다음 확인 때 이어갑니다.'}));
-    catalog.setDeadline(started+53_000);
-    store.setDeadline?.(started+53_000);
-    const alerts=await runAlertWorker(store,{catalog,deadline:started+53_000});
-    return {...alerts,catalog:collection};
+    catalog.setDeadline(started+43_000);
+    if(action==='catalog-worker') return runActiveCatalogWorker(catalog,{budgetMs:43_000,maxRequests:40});
+    store.setDeadline?.(started+43_000);
+    return runAlertWorker(store,{catalog,deadline:started+43_000});
   }
   const bearer=await store.authenticate(authorization);
   if(action==='overview'&&method==='GET') {

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { koreanTimestamp, mapNotice, readProviderPayload } from './g2b.ts';
+import { createOpeningSummaryLoader } from './g2b-results.ts';
 import { ProviderQuotaError, providerRetryAfter } from './provider-quota.ts';
-import { matchAlarmNotice, noticeOmittedContentKey } from '../src/alerts/domain.ts';
-import { isOngoingNotice } from '../src/notice-deadline-window.ts';
+import { matchAlarmNotice, noticeContentKey, noticeOmittedContentKey } from '../src/alerts/domain.ts';
+import { isOngoingNotice, noticeTimestamp } from '../src/notice-deadline-window.ts';
 import type { ActiveCatalogStore } from './active-catalog-store.ts';
 import type { ActiveCatalogCommit, ActiveCatalogIdentity, ActiveCatalogSourceJob } from '../src/live/active-catalog-types.ts';
 import type { AlertNotice, WorkerRule } from '../src/alerts/types.ts';
@@ -10,7 +11,7 @@ import type { AlertNotice, WorkerRule } from '../src/alerts/types.ts';
 type Row = Record<string, unknown>;
 class SourceSnapshotChanged extends Error {}
 class WorkerBudgetExhausted extends Error {}
-export type ActiveCatalogProvider = (operation: string, params: Record<string, string>) => Promise<{ items: Row[]; totalCount: number }>;
+export type ActiveCatalogProvider = (operation: string, params: Record<string, string>, options?: { service: 'opening' }) => Promise<{ items: Row[]; totalCount: number }>;
 const str = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 const minuteKst = (value: string) => {
   const time = Date.parse(value);
@@ -36,18 +37,20 @@ export function createActiveCatalogProvider(
   options: { deadline?: number; clock?: () => number } = {},
 ): ActiveCatalogProvider {
   const clock = options.clock ?? Date.now;
-  return async (operation, params) => {
+  return async (operation, params, service) => {
     if (!key?.trim()) throw new Error('나라장터 인증키가 설정되지 않았습니다.');
     const remaining = (options.deadline ?? clock() + 20_000) - clock() - 8_000;
     if (remaining < 1_000) throw new WorkerBudgetExhausted('나라장터 조회 시간이 부족하여 다음 확인 때 이어서 수집합니다.');
     let decoded = key.trim();
     try { if (decoded.includes('%')) decoded = decodeURIComponent(decoded); }
     catch { throw new Error('나라장터 인증키 형식을 확인해 주세요.'); }
-    const url = new URL(operation, 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/');
+    const url = new URL(operation, service?.service === 'opening'
+      ? 'https://apis.data.go.kr/1230000/as/ScsbidInfoService/'
+      : 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/');
     url.search = new URLSearchParams({ ...params, serviceKey: decoded, type: 'json' }).toString();
     let response: Response;
     try {
-      response = await fetcher(url, { signal: AbortSignal.timeout(Math.min(12_000, remaining)), redirect: 'error', cache: 'no-store', headers: { Accept: 'application/json' } });
+      response = await fetcher(url, { signal: AbortSignal.timeout(Math.min(25_000, remaining)), redirect: 'error', cache: 'no-store', headers: { Accept: 'application/json' } });
     } catch { throw new Error('나라장터 응답이 지연되어 다음 확인 때 이어서 수집합니다.'); }
     if (response.status === 429) throw new ProviderQuotaError(providerRetryAfter(response.headers.get('Retry-After'), clock()));
     try {
@@ -98,14 +101,8 @@ function potentialRules(notice: AlertNotice, rules: WorkerRule[], now: number) {
     { ...rule.settings, filter: { ...rule.settings.filter, includeUnknown: true } }, rule.profile, now).matched);
 }
 
-async function participantConditions(notice: AlertNotice, rules: WorkerRule[], request: ActiveCatalogProvider): Promise<AlertNotice> {
-  let region = false, license = false;
-  for (const rule of rules) {
-    const filter = rule.settings.filter, basis = filter.regionBasis ?? 'auto';
-    region ||= !notice.regionComplete && (filter.useCompanyRegion || filter.regions.length > 0
-      && (basis === 'participation' || basis === 'either' || basis === 'both' || basis === 'auto' && notice.type === '용역'));
-    license ||= !notice.licenseComplete && (filter.licenses.length > 0 || filter.useCompanyLicenses === true);
-  }
+async function participantConditions(notice: AlertNotice, request: ActiveCatalogProvider): Promise<AlertNotice> {
+  const region = !notice.regionComplete, license = !notice.licenseComplete;
   const exact = { inqryDiv: '2', bidNtceNo: notice.number, bidNtceOrd: notice.revision };
   const load = async (operation: string, field: string): Promise<string[]> => {
     const rows: Row[] = []; let total: number | undefined;
@@ -132,7 +129,21 @@ async function participantConditions(notice: AlertNotice, rules: WorkerRule[], r
   return enriched;
 }
 
-/** One durable claim; independent live sources finish before historical verification work. */
+/** Reuse only completed condition facts from the exact unchanged source version. */
+function reuseParticipantConditions(notice: AlertNotice, cached?: AlertNotice): AlertNotice {
+  if (!cached || cached.number !== notice.number || cached.type !== notice.type || cached.revision !== notice.revision
+    || cached.sourceUpdatedAt !== notice.sourceUpdatedAt || cached.sourceOmittedDigest !== notice.sourceOmittedDigest) return notice;
+  const sourceKey = (value: AlertNotice) => noticeContentKey({ ...value, allowedRegions: null, licenses: [] });
+  if (sourceKey(cached) !== sourceKey(notice)) return notice;
+  const names = (values: unknown): values is string[] => Array.isArray(values) && values.every(value => typeof value === 'string' && Boolean(value.trim()));
+  return { ...notice,
+    ...(cached.regionComplete && (cached.allowedRegions === null || names(cached.allowedRegions))
+      ? { allowedRegions: cached.allowedRegions, regionComplete: true } : {}),
+    ...(cached.licenseComplete && names(cached.licenses) ? { licenses: cached.licenses, licenseComplete: true } : {}),
+  };
+}
+
+/** A durable claim gives verification an initial lane before bounded source discovery. */
 export async function runActiveCatalogWorker(store: ActiveCatalogStore, options: {
   provider?: ActiveCatalogProvider; now?: number; maxRequests?: number; budgetMs?: number; clock?: () => number;
 } = {}) {
@@ -140,8 +151,8 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   const deadline = clock() + Math.min(43_000, Math.max(1_000, options.budgetMs ?? 43_000));
   const maximum = Math.min(40, Math.max(0, options.maxRequests ?? 40));
   // Reserve one store commit and lease release (each RPC has an 8s timeout).
-  const provider = options.provider ?? createActiveCatalogProvider(undefined, undefined, { deadline: deadline - 8_000, clock });
-  let requests = 0, sources = 0, groups = 0, versions = 0;
+  const provider = options.provider ?? createActiveCatalogProvider(undefined, undefined, { deadline, clock });
+  let requests = 0, sources = 0, groups = 0, versions = 0, searchGroups = 0;
   const warnings: string[] = [];
   const claim = await store.claim();
   if (!claim.leaseId) return { ok: true, skipped: true, sources, groups, versions, requests };
@@ -150,14 +161,29 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   let quotaFailure: ProviderQuotaError | undefined;
   let storageFailure: unknown;
   let restartRequired = false;
-  const request: ActiveCatalogProvider = async (operation, params) => {
-    if (storageFailure) throw storageFailure;
-    if (quotaFailure) throw quotaFailure;
-    if (restartRequired || clock() > deadline - 17_000 || requests >= maximum) throw new WorkerBudgetExhausted('나라장터 조회 시간 또는 호출 예산에 도달하여 다음 확인 때 이어서 수집합니다.');
-    requests++;
-    try { return await provider(operation, params); }
-    catch (error) { if (error instanceof ProviderQuotaError) quotaFailure = error; throw error; }
+  let activeRequests = 0;
+  const requestWaiters: (() => void)[] = [];
+  const acquireRequest = async () => {
+    if (activeRequests < 4) { activeRequests++; return; }
+    await new Promise<void>(resolve => requestWaiters.push(resolve));
   };
+  const releaseRequest = () => {
+    const next = requestWaiters.shift();
+    if (next) next(); else activeRequests--;
+  };
+  const request: ActiveCatalogProvider = async (operation, params, service) => {
+    await acquireRequest();
+    try {
+      // Opening summaries fan out into two requests; all work shares this global cap.
+      if (storageFailure) throw storageFailure;
+      if (quotaFailure) throw quotaFailure;
+      if (restartRequired || clock() > deadline - 10_000 || requests >= maximum) throw new WorkerBudgetExhausted('나라장터 조회 시간 또는 호출 예산에 도달하여 다음 확인 때 이어서 수집합니다.');
+      requests++;
+      try { return await (service ? provider(operation, params, service) : provider(operation, params)); }
+      catch (error) { if (error instanceof ProviderQuotaError) quotaFailure = error; throw error; }
+    } finally { releaseRequest(); }
+  };
+  const openingSummary = createOpeningSummaryLoader((_base, operation, params) => request(operation, params, { service: 'opening' }), clock);
   const commit = async (payload: ActiveCatalogCommit) => {
     if (storageFailure) throw storageFailure;
     try {
@@ -169,12 +195,79 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       return result;
     } catch (error) { storageFailure = error; throw error; }
   };
+  const groupPayload: ActiveCatalogCommit = { scopeVersion: claim.scopeVersion, groups: [], rejectedGroups: [], failedGroups: [] };
+  const flushGroups = async () => {
+    if (!groupPayload.failedGroups!.length && !groupPayload.rejectedGroups!.length) return;
+    await commit({ ...groupPayload, failedGroups: [...groupPayload.failedGroups!], rejectedGroups: [...groupPayload.rejectedGroups!] });
+    warnings.push(...groupPayload.failedGroups!.map(item => item.error));
+    groupPayload.failedGroups = []; groupPayload.rejectedGroups = [];
+  };
+  const verifyIdentity = async (identity: ActiveCatalogIdentity) => {
+    try {
+      let total: number | undefined;
+      const all: AlertNotice[] = [];
+      for (let page = 1; page <= 2; page++) {
+        const result = await request(`getBidPblancListInfo${identity.type === '공사' ? 'Cnstwk' : 'Servc'}`, { inqryDiv: '2', bidNtceNo: identity.number, pageNo: String(page), numOfRows: '999' });
+        if (total !== undefined && total !== result.totalCount) throw new Error('조회 도중 공고 차수의 전체 건수가 바뀌어 다시 확인합니다.');
+        total = result.totalCount;
+        if (!total || total > 1000) throw new Error('공고 차수 이력을 모두 확인하지 못해 다시 확인합니다.');
+        validPage(result.items, total, page, 999);
+        const items = result.items.map(row => fact(row, identity.type, now));
+        if (items.some(item => item.number !== identity.number)) throw new Error('공고 번호와 차수 응답이 일치하지 않아 다시 확인합니다.');
+        all.push(...items);
+        if (all.length === total) break;
+      }
+      if (all.length !== total || new Set(all.map(item => item.revision)).size !== all.length) throw new Error('공고 차수 이력이 누락되거나 중복되어 다시 확인합니다.');
+      all.sort((a, b) => Number(a.revision) - Number(b.revision));
+      const latest = all.at(-1)!;
+      if (identity.revision !== undefined && (!/^\d{1,3}$/.test(identity.revision)
+        || Number(latest.revision) < Number(identity.revision)
+        || Number(latest.revision) === Number(identity.revision) && identity.sourceUpdatedAt
+          && Date.parse(latest.sourceUpdatedAt) < Date.parse(identity.sourceUpdatedAt))) {
+        throw new Error('공고 전체 이력이 이미 확인한 변경·취소 정보보다 오래되어 다시 확인합니다.');
+      }
+      let checked = reuseParticipantConditions(latest, identity.notice);
+      if (isOngoingNotice(checked, now) && noticeTimestamp(checked.deadline) <= now && noticeTimestamp(checked.openingAt) > now) {
+        const completion = await openingSummary({ number: checked.number, revision: checked.revision, type: checked.type });
+        if (!(completion.openingComplete ?? completion.complete)) {
+          if (quotaFailure) throw quotaFailure;
+          if (requests >= maximum || clock() > deadline - 10_000) throw new WorkerBudgetExhausted();
+          throw new Error('공고 개찰 상태를 모두 확인하지 못해 다음 확인 때 다시 시도합니다.');
+        }
+        if (/^(?:개찰\s*완료|유찰)$/.test(completion.result.trim())) checked = { ...checked, openingCompleted: true };
+      }
+      if (isOngoingNotice(checked, now)) checked = await participantConditions(checked, request);
+      all[all.length - 1] = checked;
+      // Public publication never keeps historical bodies or consumes the private queue.
+      // Only after it succeeds may private retention acknowledge the verification job.
+      try {
+        if (storageFailure) throw storageFailure;
+        const payload = { scopeVersion: claim.scopeVersion, groups: [all] };
+        if (Buffer.byteLength(JSON.stringify(payload)) > 2_800_000) throw new Error('공고 차수의 저장 응답이 너무 커서 확인 범위를 유지합니다.');
+        const published = await store.publishSearchVerified(leaseId, payload);
+        if (published.storageFull) throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
+        if (!published.ok) throw new Error('공고 검색 색인 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
+        searchGroups++;
+      } catch (error) { storageFailure = error; throw error; }
+      const matched = potentialRules(checked, rules, now).some(rule => matchAlarmNotice(checked, rule.settings, rule.profile, now).matched);
+      if (matched || identity.tracked) {
+        await commit({ scopeVersion: claim.scopeVersion, groups: [all] });
+        groups++; versions += all.length;
+      } else groupPayload.rejectedGroups!.push({ type: identity.type, number: identity.number });
+    } catch (error) { if (!(error instanceof WorkerBudgetExhausted)) groupPayload.failedGroups!.push({ type: identity.type, number: identity.number, error: safeError(error) }); }
+  };
   try {
     if (!claim.scopeVersion) throw new Error('공고 알림 조건의 수집 범위를 확인하지 못했습니다.');
+    // Ready verification cannot be starved by a slow 999-row source response.
+    await parallel(claim.verify.slice(0, 4), verifyIdentity);
+    await flushGroups();
     const failedSources: NonNullable<ActiveCatalogCommit['failedSources']> = [];
     // The public deadline index is shared across search and alerts. Its source
     // coverage must never depend on whether an individual has enabled alerts.
-    const jobs = [...claim.sources].sort((a, b) => Number(a.kind === 'history') - Number(b.kind === 'history'));
+    const liveSources = claim.sources.filter(job => job.kind !== 'history'), historySources = claim.sources.filter(job => job.kind === 'history');
+    // Every due live registration/modification window keeps the ten-minute cadence.
+    // Historical discovery follows in at most two lanes, bounded by the same clock and request budget.
+    const jobs = [...liveSources, ...historySources.slice(0, 2)];
     await parallel(jobs, async (job: ActiveCatalogSourceJob) => {
       try {
         const suffix = job.type === '공사' ? 'Cnstwk' : 'Servc';
@@ -216,8 +309,8 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
           }
           if (!result.ok) throw new Error('공고 색인 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
         }
-        // Only personal potential matches persist in the revision-verification
-        // queue. The independent public index already contains all candidates.
+        // Personal candidates and public verification work are kept separately.
+        // Index batches remain unverified until the complete history is published.
         const completed = { id: job.id, page: job.page, totalCount: response.totalCount,
           receivedCount: response.items.length, observed: [...observed.values()], items,
           complete: (job.page - 1) * job.pageSize + response.items.length === response.totalCount };
@@ -231,53 +324,15 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       await commit({ scopeVersion: claim.scopeVersion, sources: [], failedSources });
     }
 
-    const groupPayload: ActiveCatalogCommit = { scopeVersion: claim.scopeVersion, groups: [], rejectedGroups: [], failedGroups: [] };
-    // Unstarted claims remain pending in SQL; finish releases the shared lease.
-    // Do not spend two more store RPCs when the time reserved for them is gone.
-    const verify = rules.length && !restartRequired && clock() <= deadline - 17_000 ? claim.verify : [];
-    await parallel(verify, async identity => {
-      try {
-        let total: number | undefined;
-        const all: AlertNotice[] = [];
-        for (let page = 1; page <= 2; page++) {
-          const result = await request(`getBidPblancListInfo${identity.type === '공사' ? 'Cnstwk' : 'Servc'}`, { inqryDiv: '2', bidNtceNo: identity.number, pageNo: String(page), numOfRows: '999' });
-          if (total !== undefined && total !== result.totalCount) throw new Error('조회 도중 공고 차수의 전체 건수가 바뀌어 다시 확인합니다.');
-          total = result.totalCount;
-          if (!total || total > 1000) throw new Error('공고 차수 이력을 모두 확인하지 못해 다시 확인합니다.');
-          validPage(result.items, total, page, 999);
-          const items = result.items.map(row => fact(row, identity.type, now));
-          if (items.some(item => item.number !== identity.number)) throw new Error('공고 번호와 차수 응답이 일치하지 않아 다시 확인합니다.');
-          all.push(...items);
-          if (all.length === total) break;
-        }
-        if (all.length !== total || new Set(all.map(item => item.revision)).size !== all.length) throw new Error('공고 차수 이력이 누락되거나 중복되어 다시 확인합니다.');
-        all.sort((a, b) => Number(a.revision) - Number(b.revision));
-        const latest = all.at(-1)!;
-        if (identity.revision !== undefined && (!/^\d{1,3}$/.test(identity.revision)
-          || Number(latest.revision) < Number(identity.revision)
-          || Number(latest.revision) === Number(identity.revision) && identity.sourceUpdatedAt
-            && Date.parse(latest.sourceUpdatedAt) < Date.parse(identity.sourceUpdatedAt))) {
-          throw new Error('공고 전체 이력이 이미 확인한 변경·취소 정보보다 오래되어 다시 확인합니다.');
-        }
-        const potential = potentialRules(latest, rules, now);
-        const checked = potential.length ? await participantConditions(latest, potential, request) : latest;
-        const matched = potential.some(rule => matchAlarmNotice(checked, rule.settings, rule.profile, now).matched);
-        if (matched || identity.tracked) {
-          all[all.length - 1] = checked;
-          await commit({ scopeVersion: claim.scopeVersion, groups: [all] });
-          groups++; versions += all.length;
-        } else groupPayload.rejectedGroups!.push({ type: identity.type, number: identity.number });
-      } catch (error) { if (!(error instanceof WorkerBudgetExhausted)) groupPayload.failedGroups!.push({ type: identity.type, number: identity.number, error: safeError(error) }); }
-    });
-    if (groupPayload.failedGroups!.length || groupPayload.rejectedGroups!.length) {
-      await commit(groupPayload);
-      warnings.push(...groupPayload.failedGroups!.map(item => item.error));
-    }
+    // Unstarted jobs remain pending and the lease is released by finish.
+    const verify = !restartRequired && clock() <= deadline - 10_000 ? claim.verify.slice(4) : [];
+    await parallel(verify, verifyIdentity);
+    await flushGroups();
   } catch (error) { warnings.push(safeError(error)); }
   const uniqueWarnings = [...new Set(warnings)];
   try { await store.finish(leaseId, { ...(uniqueWarnings.length ? { error: uniqueWarnings[0] } : {}),
     ...(quotaFailure?.retryAfterSeconds ? { retryAfterSeconds: quotaFailure.retryAfterSeconds } : {}) }); }
   catch (error) { uniqueWarnings.push(safeError(error)); }
-  return { ok: uniqueWarnings.length === 0, sources, groups, versions, requests, ...(restartRequired ? { restartRequired: true } : {}),
+  return { ok: uniqueWarnings.length === 0, sources, groups, versions, searchGroups, requests, ...(restartRequired ? { restartRequired: true } : {}),
     ...(uniqueWarnings.length ? { error: uniqueWarnings[0], warnings: uniqueWarnings } : {}) };
 }

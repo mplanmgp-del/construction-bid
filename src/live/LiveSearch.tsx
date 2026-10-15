@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { ArrowRight, Search, X } from 'lucide-react';
-import { dateRangeError } from './client';
+import { indexedSearchDateError } from './indexed-notice-search';
 import type { NoticeQuery } from './useLiveNotices';
 import { deadlineMonthWindow } from '../notice-deadline-window';
 import './notice-search.css';
@@ -16,7 +16,7 @@ export function LiveSearch({ query, loading, refreshBlocked = false, onSearch }:
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const next: NoticeQuery = { type: form.get('type') as NoticeQuery['type'], from: String(form.get('from') ?? ''), to: String(form.get('to') ?? ''), keyword: String(form.get('keyword') ?? '').trim() };
-      const nextError = dateRangeError(next.from, next.to, 367); setError(nextError ?? '');
+      const nextError = indexedSearchDateError(next.from, next.to); setError(nextError ?? '');
       if (!nextError) {
         setDraft(next); onSearch(next);
       }
@@ -30,10 +30,11 @@ export function LiveSearch({ query, loading, refreshBlocked = false, onSearch }:
       </div>
       <div className="notice-search-options">
         <label className="notice-search-type">업무 구분<select name="type" value={draft.type} onChange={event => { setDraft({ ...draft, type: event.target.value as NoticeQuery['type'] }); setError(''); }}><option>공사·용역</option><option>공사</option><option>용역</option></select></label>
-        <label>제출마감 시작일<input name="from" aria-label="입찰서 제출마감 시작일" type="date" required value={draft.from} onChange={event => { setDraft({ ...draft, from: event.target.value }); setError(''); }} /></label>
-        <label>제출마감 종료일<input name="to" aria-label="입찰서 제출마감 종료일" type="date" required value={draft.to} onChange={event => { setDraft({ ...draft, to: event.target.value }); setError(''); }} /></label>
+        <label>제출마감 시작일<input name="from" aria-label="입찰서 제출마감 시작일" type="date" min="1995-10-01" max="2100-12-31" required value={draft.from} onChange={event => { setDraft({ ...draft, from: event.target.value }); setError(''); }} /></label>
+        <label>제출마감 종료일<input name="to" aria-label="입찰서 제출마감 종료일" type="date" min="1995-10-01" max="2100-12-31" required value={draft.to} onChange={event => { setDraft({ ...draft, to: event.target.value }); setError(''); }} /></label>
       </div>
       <div className="notice-period-presets" role="group" aria-label="제출마감 기간 빠른 선택">{[1, 3, 6].map(months => <button type="button" key={months} aria-pressed={JSON.stringify({ from: draft.from, to: draft.to }) === JSON.stringify(deadlineMonthWindow(months))} onClick={() => { const next = { ...draft, ...deadlineMonthWindow(months), keyword: draft.keyword.trim() }; setDraft(next); setError(''); onSearch(next); }}>전후 {months}개월</button>)}</div>
+      <div className="notice-period-presets notice-period-wide" role="group" aria-label="넓은 제출마감 기간 선택">{[12, 36].map(months => <button type="button" key={months} onClick={() => { const next = { ...draft, ...deadlineMonthWindow(months), keyword: draft.keyword.trim() }; setDraft(next); setError(''); onSearch(next); }}>전후 {months / 12}년</button>)}<button type="button" onClick={() => { const next = { ...draft, from: '1995-10-01', to: '2100-12-31', keyword: draft.keyword.trim() }; setDraft(next); setError(''); onSearch(next); }}>전체 보관 범위</button></div>
     </form>
     {error && <p id="notice-search-error" className="live-error" role="alert">{error}</p>}
   </section>;

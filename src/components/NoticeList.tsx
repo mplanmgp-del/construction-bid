@@ -15,12 +15,13 @@ export function HighlightTitle({ title, keyword }: { title: string; keyword: str
   return <>{title.split(pattern).map((part, index) => index % 2 ? <mark key={index}>{part}</mark> : part)}</>;
 }
 
-export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSelect, onOpen, onBookmark, now = Date.now(), searchProvince = '전체', resultsPaused = false, status = '전체', onStatusChange, statuses, onStatusesChange, searchRegions, regionLookup }: {
+export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSelect, onOpen, onBookmark, now = Date.now(), searchProvince = '전체', resultsPaused = false, status = '전체', onStatusChange, statuses, onStatusesChange, searchRegions, regionLookup, fetchPublicResults = true }: {
   bids: BidNotice[]; keyword: string; profile: CompanyProfile; bookmarks: string[];
   selected: string[]; onSelect: (ids: string[]) => void; onOpen: (bid: BidNotice) => void; onBookmark: (id: string) => void;
   now?: number;
   searchProvince?: string;
   resultsPaused?: boolean;
+  fetchPublicResults?: boolean;
   status?: SearchFilters['status'];
   onStatusChange?: (status: SearchFilters['status']) => void;
   statuses?: NoticeStatus[];
@@ -28,7 +29,7 @@ export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSele
   searchRegions?: SearchRegion[];
   regionLookup?: { pendingKeys: ReadonlySet<string>; failedKeys: ReadonlySet<string>; loading: boolean; retry: () => void; retryAt: number };
 }) {
-  const { entries, refresh } = useResultSummaries(bids, !resultsPaused);
+  const { entries, refresh } = useResultSummaries(bids, fetchPublicResults && !resultsPaused);
   const checked = bids.length > 0 && bids.every(bid => selected.includes(bid.id));
   const loading = bids.some(bid => needsResult(bid) && !entries[resultKey(bid)]);
   const incomplete = bids.some(bid => needsResult(bid) && (entries[resultKey(bid)]?.error || entries[resultKey(bid)]?.data?.complete === false));
@@ -62,6 +63,6 @@ export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSele
         </tr>;
       })}</tbody>
     </table>
-    {bids.some(needsResult) && <div className="nl-results-note"><span role="status">{resultsPaused ? '지역 조건 확인 후 공개 개찰·낙찰 결과를 조회합니다.' : loading ? '공개 개찰·낙찰 결과를 확인하고 있습니다.' : incomplete ? '일부 공개 결과를 확인하지 못했습니다. 다시 조회하거나 공고 상세에서 확인해 주세요.' : '1순위 업체와 최종 낙찰업체는 다를 수 있습니다. 공개 결과가 없는 항목은 -로 표시합니다.'}</span><button type="button" onClick={refresh} disabled={loading || resultsPaused}>결과 다시 조회</button></div>}
+    {fetchPublicResults && bids.some(needsResult) && <div className="nl-results-note"><span role="status">{resultsPaused ? '지역 조건 확인 후 공개 개찰·낙찰 결과를 조회합니다.' : loading ? '공개 개찰·낙찰 결과를 확인하고 있습니다.' : incomplete ? '일부 공개 결과를 확인하지 못했습니다. 다시 조회하거나 공고 상세에서 확인해 주세요.' : '1순위 업체와 최종 낙찰업체는 다를 수 있습니다. 공개 결과가 없는 항목은 -로 표시합니다.'}</span><button type="button" onClick={refresh} disabled={loading || resultsPaused}>결과 다시 조회</button></div>}
   </div>;
 }

@@ -1,6 +1,6 @@
 import { AlertError } from './alert-store.ts';
 import type { AlertNotice } from '../src/alerts/types.ts';
-import type { ActiveCatalogClaim, ActiveCatalogCommit, ActiveCatalogPage, ActiveCatalogPageQuery, DeadlineCatalogPage, DeadlineCatalogQuery, DeadlineIndexBatch } from '../src/live/active-catalog-types.ts';
+import type { ActiveCatalogClaim, ActiveCatalogCommit, ActiveCatalogPage, ActiveCatalogPageQuery, DeadlineCatalogPage, DeadlineCatalogQuery, DeadlineIndexBatch, SearchVerifiedBatch, VerifiedNoticeSearchPage, VerifiedNoticeSearchQuery } from '../src/live/active-catalog-types.ts';
 
 /** Server-only catalog access. The shared worker token never reaches browser clients. */
 export function createActiveCatalogStore(options: { url?: string; key?: string; token?: string; fetcher?: typeof fetch } = {}) {
@@ -25,7 +25,12 @@ export function createActiveCatalogStore(options: { url?: string; key?: string; 
         signal: AbortSignal.timeout(Math.max(1, Math.min(8_000, Math.floor(remaining)))), cache: 'no-store', redirect: 'error',
       });
     } catch { throw new AlertError(503, 'CATALOG_STORAGE_UNAVAILABLE', '전체 공고 저장소에 연결하지 못했습니다. 잠시 후 다시 조회해 주세요.'); }
-    if (!response.ok) throw new AlertError(503, 'CATALOG_STORAGE_ERROR', '전체 공고 저장소 요청을 처리하지 못했습니다. 확인 범위는 유지됩니다.');
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({})) as { code?: string; message?: string };
+      if (error.message === 'SEARCH_CHANGED') throw new AlertError(409, 'SEARCH_CHANGED', '공고가 갱신되었습니다. 누락 없이 확인하려면 처음부터 다시 검색해 주세요.');
+      if (action === 'search_page' && error.code === '22023') throw new AlertError(400, 'INVALID_SEARCH_QUERY', '검색 조건이나 다음 페이지 정보를 확인해 주세요.');
+      throw new AlertError(503, 'CATALOG_STORAGE_ERROR', '전체 공고 저장소 요청을 처리하지 못했습니다. 확인 범위는 유지됩니다.');
+    }
     return await response.json() as T;
   }
   return {
@@ -36,6 +41,8 @@ export function createActiveCatalogStore(options: { url?: string; key?: string; 
     page: (query: ActiveCatalogPageQuery = {}) => rpc<ActiveCatalogPage>('page', query),
     alarmPage: (query: ActiveCatalogPageQuery = {}) => rpc<ActiveCatalogPage>('alarm_page', query),
     deadlinePage: (query: DeadlineCatalogQuery) => rpc<DeadlineCatalogPage>('deadline_page', query),
+    searchPage: (query: VerifiedNoticeSearchQuery) => rpc<VerifiedNoticeSearchPage>('search_page', query),
+    publishSearchVerified: (leaseId: string, batch: SearchVerifiedBatch) => rpc<{ok: boolean; storageFull?: boolean}>('search_publish', {leaseId, ...batch}),
     indexUpsert: (leaseId: string, batch: DeadlineIndexBatch) => rpc<{ ok: boolean; storageFull?: boolean }>('index_upsert', { leaseId, ...batch }),
     publishVerified: (notices: AlertNotice[]) => rpc<{ ok: boolean; storageFull?: boolean }>('publish_verified', { notices }),
     enrich: (notice: AlertNotice) => rpc<{ ok: boolean }>('enrich', { notice }),
@@ -46,4 +53,8 @@ export type ActiveCatalogStore = ReturnType<typeof createActiveCatalogStore>;
 /** Public facts only. Source checkpoints and worker credentials stay server-side. */
 export async function readDeadlineCatalog(query: DeadlineCatalogQuery, store = createActiveCatalogStore()): Promise<DeadlineCatalogPage> {
   return store.deadlinePage(query);
+}
+
+export async function readVerifiedNoticeSearch(query: VerifiedNoticeSearchQuery, store = createActiveCatalogStore()): Promise<VerifiedNoticeSearchPage> {
+  return store.searchPage(query);
 }

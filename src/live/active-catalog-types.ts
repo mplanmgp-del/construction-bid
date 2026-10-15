@@ -1,10 +1,12 @@
 import type { AlertNotice, WorkerRule } from '../alerts/types';
 import type { G2bBusinessType, G2bNoticePage } from '../g2b-types';
+import type { SearchFilters } from '../types';
 
 export interface ActiveCatalogIdentity {
   type: G2bBusinessType; number: string; tracked?: boolean;
   /** Minimum source facts that a later full-history response must contain. */
   revision?: string; sourceUpdatedAt?: string;
+  notice?: AlertNotice;
 }
 export interface ActiveCatalogSourceJob {
   id: string; type: G2bBusinessType; kind: 'history' | 'registered' | 'modified';
@@ -51,3 +53,18 @@ export interface DeadlineIndexBatch {
   scopeVersion: string; sourceId: string; page: number; batch: number; batches: number;
   notices: AlertNotice[]; removed: ActiveCatalogIdentity[];
 }
+
+export interface VerifiedNoticeSearchQuery {
+  type: G2bBusinessType | '공사·용역'; from: string; to: string; keyword: string;
+  filters: SearchFilters; profile?: { province: string; district: string };
+  limit?: number; cursor?: string;
+}
+export interface VerifiedNoticeSearchPage extends G2bNoticePage {
+  nextCursor: string | null; snapshotVersion: string; asOf: string;
+  validUntil?: string;
+  indexCoverage: { complete: boolean; pending: number; checked: number };
+  sourceSyncedThrough: string | null; verifiedCount: number; pendingCount: number; conditionPendingCount: number;
+  storage: { bytes: number; ceiling: number; full: boolean };
+  sourceError?: string | null;
+}
+export interface SearchVerifiedBatch { scopeVersion: string; groups: AlertNotice[][] }

@@ -14,10 +14,174 @@ function store(sources: ActiveCatalogSourceJob[] = [], verify: ActiveCatalogClai
   const commit = vi.fn(async (_leaseId: string, _payload: ActiveCatalogCommit) => ({ ok: true }));
   const finish = vi.fn(async (_leaseId: string, _payload: { error?: string }) => ({ ok: true }));
   const indexUpsert = vi.fn<ActiveCatalogStore['indexUpsert']>(async () => ({ ok: true }));
-  return { claim: vi.fn(async () => ({ leaseId: 'lease', sources, verify, rules, scopeVersion: 'enabled-rules-v1' })), commit, finish, indexUpsert } as unknown as ActiveCatalogStore & { commit: typeof commit; finish: typeof finish; indexUpsert: typeof indexUpsert };
+  const publishSearchVerified = vi.fn<ActiveCatalogStore['publishSearchVerified']>(async () => ({ ok: true }));
+  return { claim: vi.fn(async () => ({ leaseId: 'lease', sources, verify, rules, scopeVersion: 'enabled-rules-v1' })), commit, finish, indexUpsert, publishSearchVerified } as unknown as ActiveCatalogStore & { commit: typeof commit; finish: typeof finish; indexUpsert: typeof indexUpsert; publishSearchVerified: typeof publishSearchVerified };
 }
 
 describe('all-age active catalog collection', () => {
+  it.each(['개찰완료', '유찰'])('excludes an actually %s notice awaiting a future scheduled opening', async state => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
+    const provider = vi.fn<ActiveCatalogProvider>(async operation => operation === 'getOpengResultListInfoCnstwk'
+      ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', bidClsfcNo: '0', rbidNo: '0', progrsDivCdNm: state }], totalCount: 1 }
+      : operation === 'getScsbidListSttusCnstwk' ? { items: [], totalCount: 0 }
+        : { items: [row({ bidClseDt: '2026-10-14 10:00:00', opengDt: '2026-10-16 11:00:00' })], totalCount: 1 });
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: true, requests: 3, searchGroups: 1 });
+    expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({ openingCompleted: true });
+    expect(provider.mock.calls.some(([operation]) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation))).toBe(false);
+  });
+
+  it('keeps verification queued when actual opening status cannot be confirmed', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
+    const provider: ActiveCatalogProvider = async operation => {
+      if (operation === 'getOpengResultListInfoCnstwk') throw new Error('private-provider-url');
+      return operation === 'getScsbidListSttusCnstwk' || /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation) ? { items: [], totalCount: 0 }
+        : { items: [row({ bidClseDt: '2026-10-14 10:00:00', opengDt: '2026-10-16 11:00:00' })], totalCount: 1 };
+    };
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result.ok).toBe(false);
+    expect(db.publishSearchVerified).not.toHaveBeenCalled();
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedGroups ?? [])).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain('private-provider-url');
+  });
+
+  it('excludes completed openings even when winner lookup is unavailable', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
+    const provider: ActiveCatalogProvider = async operation => {
+      if (operation === 'getScsbidListSttusCnstwk') throw new Error('winner unavailable');
+      return operation === 'getOpengResultListInfoCnstwk'
+        ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', bidClsfcNo: '0', rbidNo: '0', progrsDivCdNm: '개찰완료' }], totalCount: 1 }
+        : { items: [row({ bidClseDt: '2026-10-14 10:00:00', opengDt: '2026-10-16 11:00:00' })], totalCount: 1 };
+    };
+    expect(await runActiveCatalogWorker(db, { provider, now })).toMatchObject({ ok: true, requests: 3 });
+    expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({ openingCompleted: true });
+  });
+
+  it('keeps a genuine future rebid after a complete non-terminal opening status', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
+    const provider: ActiveCatalogProvider = async operation => operation === 'getOpengResultListInfoCnstwk'
+      ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', bidClsfcNo: '0', rbidNo: '1', progrsDivCdNm: '재입찰' }], totalCount: 1 }
+      : operation === 'getScsbidListSttusCnstwk' || /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation) ? { items: [], totalCount: 0 }
+        : { items: [row({ bidClseDt: '2026-10-14 10:00:00', opengDt: '2026-10-16 11:00:00' })], totalCount: 1 };
+    expect(await runActiveCatalogWorker(db, { provider, now })).toMatchObject({ ok: true, requests: 5 });
+    expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({ regionComplete: true, licenseComplete: true });
+    expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0].openingCompleted).not.toBe(true);
+  });
+
+  it('counts opening calls in the shared 40-request and four-concurrent-call limits', async () => {
+    let running = 0, maximum = 0;
+    const identities = Array.from({ length: 12 }, (_, index) => ({ type: '공사' as const, number: `R26OPENING${index}` }));
+    const db = store([], identities, []);
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => {
+      running++; maximum = Math.max(maximum, running);
+      await new Promise(resolve => setTimeout(resolve, 1));
+      running--;
+      return /^(?:getOpengResultListInfo|getScsbidListSttus)/.test(operation) || /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+        ? { items: [], totalCount: 0 }
+        : { items: [row({ bidNtceNo: params.bidNtceNo, bidClseDt: '2026-10-14 10:00:00', opengDt: '2026-10-16 11:00:00' })], totalCount: 1 };
+    });
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: true, requests: 40 });
+    expect(maximum).toBe(4);
+    expect(provider.mock.calls.some(([operation]) => operation === 'getOpengResultListInfoCnstwk')).toBe(true);
+    expect(db.publishSearchVerified.mock.calls.length).toBeLessThan(identities.length);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedGroups ?? [])).toEqual([]);
+  });
+
+  it('verifies and publishes every ongoing public notice and its conditions without personal alarm rules', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
+    const provider = vi.fn<ActiveCatalogProvider>(async operation => operation === 'getBidPblancListInfoPrtcptPsblRgn'
+      ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '001', prtcptPsblRgnNm: '서울특별시' }], totalCount: 1 }
+      : operation === 'getBidPblancListInfoLicenseLimit'
+        ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '001', lcnsLmtNm: '정보통신공사업' }], totalCount: 1 }
+        : { items: [row(), row({ bidNtceOrd: '001', bidNtceNm: '전산 유지보수' })], totalCount: 2 });
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: true, requests: 3 });
+    expect(db.publishSearchVerified).toHaveBeenCalledWith('lease', { scopeVersion: 'enabled-rules-v1', groups: [[
+      expect.objectContaining({ revision: '000' }), expect.objectContaining({ revision: '001', allowedRegions: ['서울특별시'], licenses: ['정보통신공사업'], regionComplete: true, licenseComplete: true }),
+    ]] });
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.groups ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? [])).toEqual([{ type: '공사', number: 'R26BK01359594' }]);
+    expect(db.publishSearchVerified.mock.invocationCallOrder[0]).toBeLessThan(db.commit.mock.invocationCallOrder[0]);
+  });
+
+  it('keeps a failed public publication queued without consuming or privately accepting it', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }]);
+    db.publishSearchVerified.mockResolvedValueOnce({ ok: false });
+    const result = await runActiveCatalogWorker(db, { provider: async operation => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: [row()], totalCount: 1 }, now });
+    expect(result.ok).toBe(false);
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(1);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.groups ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? [])).toEqual([]);
+  });
+
+  it('publishes a cancellation tombstone from complete history without fetching inactive participant conditions', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
+    const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row(), row({ bidNtceOrd: '001', ntceKindNm: '취소공고' })], totalCount: 2 }));
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: true, requests: 1 });
+    expect(db.publishSearchVerified).toHaveBeenCalledWith('lease', expect.objectContaining({ groups: [[expect.objectContaining({ revision: '000' }), expect.objectContaining({ revision: '001', status: '취소' })]] }));
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.groups ?? [])).toEqual([]);
+  });
+
+  it('finishes ready verification before a slow source page can exhaust the invocation', async () => {
+    let elapsed = 0;
+    const db = store([source()], [{ type: '공사', number: 'R26BK01359594' }], []);
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => {
+      if (params.inqryDiv === '1') { elapsed += 25_000; return { items: [], totalCount: 0 }; }
+      elapsed += 100;
+      return /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation) ? { items: [], totalCount: 0 } : { items: [row()], totalCount: 1 };
+    });
+    await runActiveCatalogWorker(db, { provider, now, clock: () => elapsed, budgetMs: 43_000 });
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(1);
+    expect(provider.mock.calls[0][1]).toMatchObject({ inqryDiv: '2', bidNtceNo: 'R26BK01359594' });
+    expect(db.publishSearchVerified.mock.invocationCallOrder[0]).toBeLessThan(db.indexUpsert.mock.invocationCallOrder[0]);
+  });
+
+  it('keeps verification unfinished after the 40-call cap without treating budget exhaustion as a failed notice', async () => {
+    const identities = Array.from({ length: 16 }, (_, index) => ({ type: '공사' as const, number: `R26BUDGET${index}` }));
+    const db = store([], identities, []);
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: [row({ bidNtceNo: params.bidNtceNo })], totalCount: 1 });
+    const result = await runActiveCatalogWorker(db, { provider, now, maxRequests: 40 });
+    expect(result).toMatchObject({ ok: true, requests: 40, searchGroups: 12 });
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(12);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.rejectedGroups ?? [])).toHaveLength(12);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedGroups ?? [])).toEqual([]);
+    expect(db.finish).toHaveBeenCalledWith('lease', {});
+  });
+
+  it('reuses completed participant facts only while the verified source version is unchanged', async () => {
+    const mapped = mapNotice(row(), '공사', now);
+    const cached = compactCatalogNotice({ ...mapped, sourceUpdatedAt: mapped.postedAt, allowedRegions: ['서울특별시'], licenses: ['해체공사업'], regionComplete: true, licenseComplete: true });
+    for (const changed of [false, true]) {
+      const db = store([], [{ type: '공사', number: 'R26BK01359594', notice: cached }], []);
+      const provider = vi.fn<ActiveCatalogProvider>(async operation => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+        ? { items: [], totalCount: 0 } : { items: [row(changed ? { bidNtceNm: '공고명 변경 철거공사' } : {})], totalCount: 1 });
+      const result = await runActiveCatalogWorker(db, { provider, now });
+      expect(result).toMatchObject({ ok: true, requests: changed ? 3 : 1, searchGroups: 1 });
+      expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({ regionComplete: true, licenseComplete: true,
+        allowedRegions: changed ? [] : ['서울특별시'], licenses: changed ? [] : ['해체공사업'] });
+    }
+  });
+
+  it('polls every due registration and modification window before historical discovery', async () => {
+    const db = store([source({ id: 'live-cnstwk', kind: 'registered' }), source({ id: 'changed-cnstwk', kind: 'modified' }),
+      source({ id: 'live-servc', kind: 'registered', type: '용역' }), source({ id: 'changed-servc', kind: 'modified', type: '용역' }),
+      source({ id: 'history-cnstwk' }), source({ id: 'history-servc', type: '용역' })]);
+    const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [], totalCount: 0 }));
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: true, sources: 6, requests: 6 });
+    const completed = db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id);
+    expect(completed).toEqual(['live-cnstwk', 'changed-cnstwk', 'live-servc', 'changed-servc', 'history-cnstwk', 'history-servc']);
+    expect(provider.mock.calls.map(([operation, params]) => [operation, params.inqryDiv])).toEqual([
+      ['getBidPblancListInfoCnstwk', '1'], ['getBidPblancListInfoCnstwk', '3'], ['getBidPblancListInfoServc', '1'], ['getBidPblancListInfoServc', '3'],
+      ['getBidPblancListInfoCnstwkPPSSrch', '1'], ['getBidPblancListInfoServcPPSSrch', '1'],
+    ]);
+  });
+
   it('discovers a 1995-posted active notice with a 2099 deadline and no opening date', async () => {
     const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row({ bidClseDt: '2099-03-04 10:00:00' })], totalCount: 1 }));
     const db = store([source()]);
@@ -49,10 +213,11 @@ describe('all-age active catalog collection', () => {
 
   it('reads both provider pages if all 1000 three-digit revisions exist', async () => {
     const rows = Array.from({ length: 1000 }, (_, index) => row({ bidNtceOrd: String(index).padStart(3, '0') }));
-    const provider = vi.fn<ActiveCatalogProvider>(async (_operation, params) => ({ items: params.pageNo === '1' ? rows.slice(0, 999) : rows.slice(999), totalCount: 1000 }));
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: params.pageNo === '1' ? rows.slice(0, 999) : rows.slice(999), totalCount: 1000 });
     const db = store([], [{ type: '공사', number: 'R26BK01359594' }]);
     const result = await runActiveCatalogWorker(db, { provider, now });
-    expect(provider).toHaveBeenCalledTimes(2);
+    expect(provider).toHaveBeenCalledTimes(4);
     expect(result).toMatchObject({ ok: true, groups: 1, versions: 1000 });
     expect(db.commit.mock.calls[0][1].groups?.[0].at(-1)?.revision).toBe('999');
   });
@@ -104,20 +269,22 @@ describe('all-age active catalog collection', () => {
 
   it('limits concurrent provider calls to four', async () => {
     let running = 0, maximum = 0;
-    const provider: ActiveCatalogProvider = async () => { running++; maximum = Math.max(maximum, running); await new Promise(resolve => setTimeout(resolve, 2)); running--; return { items: [], totalCount: 0 }; };
-    await runActiveCatalogWorker(store(Array.from({ length: 9 }, (_, i) => source({ id: `job-${i}` }))), { provider, now });
+    const provider: ActiveCatalogProvider = async (operation, params) => { running++; maximum = Math.max(maximum, running); await new Promise(resolve => setTimeout(resolve, 2)); running--; return /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: [row({ bidNtceNo: params.bidNtceNo })], totalCount: 1 }; };
+    await runActiveCatalogWorker(store([], Array.from({ length: 9 }, (_, i) => ({ type: '공사', number: `R26TEST${i}` }))), { provider, now });
     expect(maximum).toBe(4);
   });
 
-  it('releases a short-budget claim without changing unstarted verification jobs', async () => {
+  it('releases a short-budget claim without acknowledging partially started verification', async () => {
     let elapsed = 0;
     const db = store([source()], [{ type: '공사', number: 'R26BK01359594' }]);
-    const provider = vi.fn<ActiveCatalogProvider>(async () => { elapsed += 2000; return { items: [], totalCount: 0 }; });
+    const provider = vi.fn<ActiveCatalogProvider>(async () => { elapsed += 2000; return { items: [row()], totalCount: 1 }; });
     db.commit.mockImplementation(async () => { elapsed += 1500; return { ok: true }; });
-    const result = await runActiveCatalogWorker(db, { provider, now, budgetMs: 20_000, clock: () => elapsed });
-    expect(result).toMatchObject({ ok: true, sources: 1, groups: 0, requests: 1 });
+    const result = await runActiveCatalogWorker(db, { provider, now, budgetMs: 20_000, maxRequests: 1, clock: () => elapsed });
+    expect(result).toMatchObject({ ok: true, sources: 0, groups: 0, requests: 1 });
     expect(provider).toHaveBeenCalledTimes(1);
-    expect(db.commit).toHaveBeenCalledTimes(1);
+    expect(db.commit).not.toHaveBeenCalled();
+    expect(db.publishSearchVerified).not.toHaveBeenCalled();
     expect(db.finish).toHaveBeenCalledWith('lease', {});
   });
 
@@ -216,7 +383,8 @@ describe('all-age active catalog collection', () => {
 
   it('discards a candidate when its verified latest revision no longer matches any rule', async () => {
     const db = store([], [{ type: '공사', number: 'R26BK01359594' }]);
-    await runActiveCatalogWorker(db, { provider: async () => ({ items: [row(), row({ bidNtceOrd: '001', bidNtceNm: '전산 유지보수' })], totalCount: 2 }), now });
+    await runActiveCatalogWorker(db, { provider: async operation => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+      ? { items: [], totalCount: 0 } : { items: [row(), row({ bidNtceOrd: '001', bidNtceNm: '전산 유지보수' })], totalCount: 2 }, now });
     expect(db.commit.mock.calls[0][1]).toMatchObject({ scopeVersion: 'enabled-rules-v1', groups: [],
       rejectedGroups: [{ type: '공사', number: 'R26BK01359594' }] });
   });
@@ -227,15 +395,16 @@ describe('all-age active catalog collection', () => {
     expect(db.commit.mock.calls[0][1]).toMatchObject({ groups: [], rejectedGroups: [{ type: '공사', number: 'R26BK01359594' }] });
   });
 
-  it('loads only necessary exact participant conditions before retaining a matching group', async () => {
+  it('loads common exact region and license conditions before retaining a matching group', async () => {
     const provider = vi.fn<ActiveCatalogProvider>(async (operation) => operation === 'getBidPblancListInfoLicenseLimit'
       ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', lcnsLmtNm: '해체공사업' }], totalCount: 1 }
+      : operation === 'getBidPblancListInfoPrtcptPsblRgn' ? { items: [], totalCount: 0 }
       : { items: [row()], totalCount: 1 });
     const db = store([], [{ type: '공사', number: 'R26BK01359594' }], [rule({ licenses: ['해체공사업'], includeUnknown: false })]);
     const result = await runActiveCatalogWorker(db, { provider, now });
-    expect(result).toMatchObject({ ok: true, groups: 1, requests: 2 });
-    expect(provider.mock.calls.map(([operation]) => operation)).toEqual(['getBidPblancListInfoCnstwk', 'getBidPblancListInfoLicenseLimit']);
-    expect(db.commit.mock.calls[0][1].groups?.[0][0]).toMatchObject({ licenses: ['해체공사업'], licenseComplete: true, regionComplete: false });
+    expect(result).toMatchObject({ ok: true, groups: 1, requests: 3 });
+    expect(provider.mock.calls.map(([operation]) => operation)).toEqual(['getBidPblancListInfoCnstwk', 'getBidPblancListInfoPrtcptPsblRgn', 'getBidPblancListInfoLicenseLimit']);
+    expect(db.commit.mock.calls[0][1].groups?.[0][0]).toMatchObject({ licenses: ['해체공사업'], licenseComplete: true, regionComplete: true });
   });
 
   it('drops a candidate whose exact conditions do not match and retries an incomplete condition page', async () => {
@@ -243,6 +412,7 @@ describe('all-age active catalog collection', () => {
       const db = store([], [{ type: '공사', number: 'R26BK01359594' }], [rule({ licenses: ['해체공사업'], includeUnknown: false })]);
       const result = await runActiveCatalogWorker(db, { provider: async operation => operation === 'getBidPblancListInfoLicenseLimit'
         ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', lcnsLmtNm: '정보통신공사업' }], totalCount: truncated ? 2 : 1 }
+        : operation === 'getBidPblancListInfoPrtcptPsblRgn' ? { items: [], totalCount: 0 }
         : { items: [row()], totalCount: 1 }, now });
       expect(db.commit.mock.calls[0][1].groups).toEqual([]);
       if (truncated) {
@@ -259,6 +429,7 @@ describe('all-age active catalog collection', () => {
     const db = store([], [{ type: '공사', number: 'R26BK01359594' }], [rule({ licenses: ['해체공사업'], includeUnknown: false })]);
     const result = await runActiveCatalogWorker(db, { provider: async operation => operation === 'getBidPblancListInfoLicenseLimit'
       ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: revision, lcnsLmtNm: '해체공사업' }], totalCount: 1 }
+      : operation === 'getBidPblancListInfoPrtcptPsblRgn' ? { items: [], totalCount: 0 }
       : { items: [row()], totalCount: 1 }, now });
     expect(result.ok).toBe(false);
     expect(db.commit.mock.calls.flatMap(([, payload]) => payload.groups ?? [])).toEqual([]);
@@ -267,7 +438,7 @@ describe('all-age active catalog collection', () => {
   });
 
   it('restarts a reordered source page atomically without reporting a completed source or a storage failure', async () => {
-    const db = store([source({ page: 2, totalCount: 1000 })], [{ type: '공사', number: 'R26BK01359594' }]);
+    const db = store([source({ page: 2, totalCount: 1000 })]);
     db.commit.mockImplementationOnce(async () => ({ ok: true, restartRequired: true }));
     const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row()], totalCount: 1000 }));
     const result = await runActiveCatalogWorker(db, { provider, now });
@@ -286,7 +457,7 @@ describe('all-age active catalog collection', () => {
     expect(result.ok).toBe(false);
     expect(provider.mock.calls.length).toBeLessThanOrEqual(4);
     expect(db.commit.mock.calls[0][1].sources).toEqual([]);
-    expect(db.commit.mock.calls[0][1].failedSources).toHaveLength(9);
+    expect(db.commit.mock.calls[0][1].failedSources).toHaveLength(2);
     expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String), retryAfterSeconds: 1800 });
   });
 
@@ -322,6 +493,15 @@ describe('all-age active catalog collection', () => {
 });
 
 describe('active catalog provider', () => {
+  it('routes exact opening summaries to the fixed opening service', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 0, items: [] } } })));
+    await createActiveCatalogProvider('test-key', fetcher)('getOpengResultListInfoCnstwk', { inqryDiv: '4', bidNtceNo: 'R26BK01359594', bidNtceOrd: '000' }, { service: 'opening' });
+    const url = new URL(String(fetcher.mock.calls[0][0]));
+    expect(url.origin).toBe('https://apis.data.go.kr');
+    expect(url.pathname).toBe('/1230000/as/ScsbidInfoService/getOpengResultListInfoCnstwk');
+    expect(url.searchParams.get('bidNtceOrd')).toBe('000');
+  });
+
   it('reads complete provider pages without leaking its server key', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ response: { header: { resultCode: '00' }, body: { totalCount: 1, items: [row()] } } })));
     const provider = createActiveCatalogProvider('test-key', fetcher);
