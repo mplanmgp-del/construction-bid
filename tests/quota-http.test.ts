@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createG2bClient } from '../server/g2b';
 import { handleG2bRequest, nodeApiHandler } from '../server/http';
 import { ProviderQuotaError } from '../server/provider-quota';
+vi.mock('../server/menu-access', async original => ({ ...await original<typeof import('../server/menu-access')>(), authorizeMenuRequest: vi.fn(async () => null) }));
 
 vi.mock('@vercel/functions', () => {
   const entries = new Map<string, unknown>();
@@ -52,7 +53,7 @@ it.each([undefined, '120'])('preserves quota status and only real Retry-After on
   const stale = await request();
   expect(stale.status).toBe(200);
   expect(stale.headers.get('X-Search-Cache')).toBe('STALE');
-  expect(stale.headers.get('Vercel-CDN-Cache-Control')).toBeUndefined();
+  expect(stale.headers.get('Vercel-CDN-Cache-Control')).toBe('private, no-store');
   expect(stale.body.quotaExceeded).toBe(true);
   expect(stale.body.retryAfterSeconds).toBe(retryAfter ? 120 : undefined);
   expect(stale.headers.get('Retry-After')).toBe(retryAfter);

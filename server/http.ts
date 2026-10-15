@@ -7,7 +7,8 @@ import { createCompanyArchiveReader, parseCompanyHistoryQuery } from './company-
 import { OpeningResultsError } from './g2b-results.ts';
 import { validateCompanyAwardQuery } from './company-awards.ts';
 import type { CompanyAwardQuery } from '../src/company-award-types.ts';
-import type { G2bApiError, G2bNoticeRegionsPage } from '../src/g2b-types.ts';
+import type { G2bApiError } from '../src/g2b-types.ts';
+import { authorizeMenuRequest, menuForApi } from './menu-access.ts';
 
 type Client = ReturnType<typeof createG2bClient>;
 let currentKey: string | undefined;
@@ -150,6 +151,13 @@ export async function nodeApiHandler(req: NodeRequest, res: NodeResponse) {
     url.pathname = companyRoutes[url.searchParams.get('_companyAction') || ''] || url.pathname;
     url.searchParams.delete('_companyAction');
   }
+  if (menuForApi(url.pathname)) {
+    // A public CDN hit would skip this lock check, including after an admin locks
+    // a previously open menu. Internal provider caches remain safe to reuse.
+    res.setHeader('Vercel-CDN-Cache-Control', 'private, no-store');
+    const access = await authorizeMenuRequest(url.pathname, req.headers.authorization ?? req.headers.Authorization);
+    if (access) { res.statusCode = access.status; res.end(JSON.stringify(access.body)); return; }
+  }
   // Region hydration uses bounded batches and must not consume the search/result allowance.
   const regionBatch = url.pathname === '/api/notice-regions';
   const awardBatch = ['/api/company-awards', '/api/company-participation', '/api/company-contracts', '/api/company-history', '/api/companies'].includes(url.pathname);
@@ -168,21 +176,5 @@ export async function nodeApiHandler(req: NodeRequest, res: NodeResponse) {
   res.statusCode = result.status;
   if (result.retryAfterSeconds) res.setHeader('Retry-After', String(result.retryAfterSeconds));
   if (result.cacheStatus) res.setHeader('X-Search-Cache', result.cacheStatus);
-  // Only public, complete search snapshots are shared. Errors and explicit refreshes never enter CDN cache.
-  if (url.pathname === '/api/notices-start' && result.status === 200 && url.searchParams.get('refresh') !== '1' && result.cacheStatus !== 'STALE') {
-    res.setHeader('Vercel-CDN-Cache-Control', 'public, max-age=60');
-  }
-  if (url.pathname === '/api/notice-regions' && result.status === 200 && url.searchParams.get('refresh') !== '1') {
-    const body = result.body as G2bNoticeRegionsPage;
-    if (!body.retryAfterSeconds && body.items.length > 0 && body.items.every(item => item.complete && !item.error)) {
-      res.setHeader('Vercel-CDN-Cache-Control', 'public, max-age=300');
-    }
-  }
-  // These contain public procurement data only. Share complete responses; a partial
-  // response or an explicit retry must reach the server so missing data can recover.
-  if (['/api/opening-results', '/api/result-summary'].includes(url.pathname) && result.status === 200 && url.searchParams.get('refresh') !== '1') {
-    const body = result.body as { complete?: boolean; warnings?: string[] };
-    if (body.complete && !body.warnings?.length) res.setHeader('Vercel-CDN-Cache-Control', 'public, max-age=120');
-  }
   res.end(JSON.stringify(result.body));
 }

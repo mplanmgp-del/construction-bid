@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createG2bClient } from '../server/g2b';
 import { handleG2bRequest, nodeApiHandler, type NodeResponse } from '../server/http';
 import { ProviderQuotaError } from '../server/provider-quota';
+vi.mock('../server/menu-access', async original => ({ ...await original<typeof import('../server/menu-access')>(), authorizeMenuRequest: vi.fn(async () => null) }));
 
 const archive = vi.hoisted(() => ({ search: vi.fn(), company: vi.fn(), profile: vi.fn(), watch: vi.fn(), combinedHistory: vi.fn() }));
 vi.mock('../server/company-history', async importOriginal => ({ ...await importOriginal<typeof import('../server/company-history')>(),
@@ -53,7 +54,7 @@ describe('indexed MY HTTP routes', () => {
     expect(result.body.coverage.status).toBe('collecting');
     expect(archive.combinedHistory).toHaveBeenCalledOnce();
     expect(result.headers['Cache-Control']).toBe('no-store');
-    expect(result.headers['Vercel-CDN-Cache-Control']).toBeUndefined();
+    expect(result.headers['Vercel-CDN-Cache-Control']).toBe('private, no-store');
   });
 
   it('validates indexed pages and dates before any database work', async () => {

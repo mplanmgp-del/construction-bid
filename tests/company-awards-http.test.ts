@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createG2bClient } from '../server/g2b';
 import { handleG2bRequest, nodeApiHandler, type NodeResponse } from '../server/http';
+vi.mock('../server/menu-access', async original => ({ ...await original<typeof import('../server/menu-access')>(), authorizeMenuRequest: vi.fn(async () => null) }));
 
 const cacheAccess = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn() }));
 vi.mock('@vercel/functions', () => ({
@@ -53,13 +54,13 @@ it.each([
   const params = query(); params.set('from', from); params.set('to', to);
   const first = await request(params);
   expect(first.headers['Cache-Control']).toBe('no-store');
-  expect(first.headers['Vercel-CDN-Cache-Control']).toBeUndefined();
+  expect(first.headers['Vercel-CDN-Cache-Control']).toBe('private, no-store');
   expect(first.headers['X-Search-Cache']).toBeUndefined();
   vi.mocked(Date.now).mockReturnValue(started + 120_500);
   const next = await request(params);
   expect(next.headers['Cache-Control']).toBe('no-store');
   expect(next.headers['X-Search-Cache']).toBeUndefined();
-  expect(next.headers['Vercel-CDN-Cache-Control']).toBeUndefined();
+  expect(next.headers['Vercel-CDN-Cache-Control']).toBe('private, no-store');
   expect(cacheAccess.get).not.toHaveBeenCalled();
   expect(cacheAccess.set).not.toHaveBeenCalled();
 });

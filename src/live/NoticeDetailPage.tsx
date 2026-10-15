@@ -9,6 +9,9 @@ import { noticeState } from '../notice-status';
 import { OpeningResultsPanel } from './OpeningResultsPanel';
 import { useMemberWorkspace } from '../member/useMemberWorkspace';
 import { FloatingQuickLinks } from '../components/FloatingQuickLinks';
+import { useMenuAccess } from '../admin/useMenuAccess';
+import { LockedMenu } from '../admin/AdminPage';
+import { menuIsLocked } from '../admin/navigation';
 
 function queryNotice() {
   const params = new URLSearchParams(window.location.search);
@@ -24,6 +27,8 @@ function emptyNotice(detail: G2bNoticeDetail, type: string): BidNotice {
 
 export function NoticeDetailPage() {
   const member = useMemberWorkspace();
+  const access = useMenuAccess(member.user?.id);
+  const locked = menuIsLocked('notices', access.ready, access.isAdmin, access.settings);
   const [query] = useState(queryNotice);
   const [detail, setDetail] = useState<G2bNoticeDetail | null>(null);
   const [loading, setLoading] = useState(query.valid);
@@ -46,14 +51,14 @@ export function NoticeDetailPage() {
   }, []);
 
   useEffect(() => {
-    if (!query.valid) return;
+    if (!query.valid || locked) { setDetail(null); setLoading(false); return; }
     const abort = new AbortController();
     setLoading(true); setError('');
     fetchApi<G2bNoticeDetail>(`/api/detail?${new URLSearchParams({ number: query.number, revision: query.revision, type: query.type })}`, abort.signal)
       .then(value => { if (!abort.signal.aborted) { setDetail(value); setLoading(false); } })
       .catch(reason => { if (!abort.signal.aborted) { setError(reason instanceof Error ? reason.message : '공고 상세정보를 불러오지 못했습니다.'); setLoading(false); } });
     return () => abort.abort();
-  }, [query, retry]);
+  }, [query, retry, locked]);
 
   useEffect(() => { document.title = bid?.title ? `${bid.title} | 공사입찰 검색` : '공고 상세 | 공사입찰 검색'; }, [bid?.title]);
   useEffect(() => { if (!toast) return; const timeout = window.setTimeout(() => setToast(''), 3000); return () => clearTimeout(timeout); }, [toast]);
@@ -62,6 +67,8 @@ export function NoticeDetailPage() {
     try { await navigator.clipboard.writeText(`${query.number}-${query.revision}`); setToast('공고번호를 복사했습니다.'); }
     catch { setToast('공고번호를 복사하지 못했습니다. 번호를 선택해 직접 복사해 주세요.'); }
   }
+
+  if (locked) return <div className="fnd-page"><main className="fnd-page-main"><LockedMenu menu="notices" setting={access.settings.find(setting => setting.menu_key === 'notices')} loading={!access.ready && !access.error} onLogin={() => window.location.assign('/#account')} onRetry={() => { void access.refresh(); }} /></main></div>;
 
   return <div className="fnd-page">
     <header className="fnd-page-header"><div className="fnd-page-header-inner"><a className="fnd-brand" href="/"><span className="fnd-brand-icon"><Building2 size={24} /></span><span>공사입찰 <b>검색</b></span></a><span className="fnd-header-caption">나라장터 공고 상세</span><a className="fnd-back" href="/"><ArrowLeft size={16} /><span>공고 목록</span></a>{sourceUrl && <a className="fnd-header-original" href={sourceUrl} target="_blank" rel="noopener noreferrer">나라장터 원문 <ExternalLink size={16} /></a>}</div></header>

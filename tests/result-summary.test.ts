@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createG2bClient, mapNotice } from '../server/g2b';
 import { handleG2bRequest, nodeApiHandler } from '../server/http';
+vi.mock('../server/menu-access', async original => ({ ...await original<typeof import('../server/menu-access')>(), authorizeMenuRequest: vi.fn(async () => null) }));
 const identity = { bidNtceNo: 'R26BK01756799', bidNtceOrd: '000', bidClsfcNo: '1', rbidNo: '0' };
 const opening = { ...identity, progrsDivCdNm: '개찰완료', opengCorpInfo: '1순위 업체^1111111111^대표^100000^90.1' };
 const winner = { ...identity, bidwinnrNm: '최종 업체', bidwinnrBizno: '2222222222', sucsfbidAmt: '110000' };
@@ -44,7 +45,7 @@ describe('dedicated public result HTTP integration', () => {
     expect((await handleG2bRequest('/api/opening-results', invalid, api)).status).toBe(400);
     expect(loader).not.toHaveBeenCalled();
   });
-  it('shares complete public responses briefly; explicit refresh bypasses CDN', async () => {
+  it('keeps menu-controlled opening results outside public CDN even when complete', async () => {
     vi.stubEnv('G2B_SERVICE_KEY', 'opening-cdn-test');
     vi.stubGlobal('fetch', async () => response([]));
     for (const refresh of [false, true]) {
@@ -53,7 +54,7 @@ describe('dedicated public result HTTP integration', () => {
       await nodeApiHandler({ method: 'GET', url: `/api/opening-results?${params()}${refresh ? '&refresh=1' : ''}`, headers: { 'x-forwarded-for': 'opening-cdn-test' } }, res);
       expect(res.statusCode).toBe(200); expect(JSON.parse(body).complete).toBe(true);
       expect(headers.get('Cache-Control')).toBe('no-store');
-      expect(headers.get('Vercel-CDN-Cache-Control')).toBe(refresh ? undefined : 'public, max-age=120');
+      expect(headers.get('Vercel-CDN-Cache-Control')).toBe('private, no-store');
     }
   });
   it('keeps invalid dates rejected for existing summary callers', async () => {

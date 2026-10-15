@@ -2,7 +2,7 @@ import { NoticeList } from './components/NoticeList';
 import { pageGroup } from './pagination';
 import { selectedRegions, selectedStatuses, regionKey, regionLabel } from './search-filters';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Bookmark, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, ExternalLink, FileSearch, Info, MapPin, PanelLeftOpen, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Star, UserRound, X } from 'lucide-react';
+import { ArrowRight, Bookmark, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, ExternalLink, FileSearch, Info, LockKeyhole, MapPin, PanelLeftOpen, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Star, UserRound, X } from 'lucide-react';
 import { CATEGORIES, type BidNotice, type CompanyProfile, type SearchFilters } from './types';
 import { DEFAULT_FILTERS, DEMO_PROFILES, DEMO_TODAY, NOTICES } from './data';
 import { assessRegion, assessSearchRegions, buildBidCsv, daysUntil, filterNotices, formatAmountInput, formatDateTime, formatPrice } from './domain';
@@ -23,8 +23,12 @@ import { LiveSearch } from './live/LiveSearch';
 import { CompanyDashboard } from './company/CompanyDashboard';
 import { FloatingQuickLinks } from './components/FloatingQuickLinks';
 import { currentNotice, koreanToday, mergeById } from './live/client';
+import { useMenuAccess } from './admin/useMenuAccess';
+import { AdminPage, LockedMenu } from './admin/AdminPage';
+import { APP_MENUS, type MenuKey } from './admin/types';
+import { appViewFromHash, appViewHash, menuIsLocked, type AppView } from './admin/navigation';
 
-type View = 'notices' | 'bookmarks' | 'profile' | 'results';
+type View = AppView;
 const PAGE_SIZE = 30;
 
 function saveDownload(blob: Blob, filename: string) {
@@ -37,8 +41,10 @@ function saveDownload(blob: Blob, filename: string) {
 export default function App() {
   const [mode, setMode] = useState<'live' | 'demo'>('live');
   const member = useMemberWorkspace();
-  const [view, setView] = useState<View>(() => window.location.hash === '#my-bids' ? 'results' : 'notices');
-  const live = useLiveNotices(mode === 'live' && (view === 'notices' || view === 'bookmarks'));
+  const access = useMenuAccess(member.user?.id);
+  const [view, setView] = useState<View>(() => appViewFromHash(window.location.hash));
+  const menuDisabled = mode === 'live' && menuIsLocked(view, access.ready, access.isAdmin, access.settings);
+  const live = useLiveNotices(mode === 'live' && !menuDisabled && (view === 'notices' || view === 'bookmarks'));
   const [loaded] = useState(() => loadPrototypeState(DEMO_PROFILES));
   const [state, setState] = useState<PrototypeState>(loaded.state);
   const [storageWarning, setStorageWarning] = useState(loaded.warning);
@@ -57,6 +63,13 @@ export default function App() {
   const bookmarks = mode === 'live' ? member.workspace?.bookmarks ?? [] : state.bookmarks[profile.id] ?? [];
   const availableNotices = mode === 'live' ? live.items : NOTICES;
 
+  useEffect(() => {
+    const onHashChange = () => { setView(appViewFromHash(window.location.hash)); setSelectedBid(null); setMobileFilters(false); setPage(1); };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+  useEffect(() => { if (menuDisabled) { setSelectedBid(null); setMobileFilters(false); } }, [menuDisabled]);
+
   // Update schedule labels locally; no new notice search or provider request is needed.
   useEffect(() => {
     const update = () => setStatusNow(Date.now());
@@ -68,7 +81,7 @@ export default function App() {
   // Region filtering is opt-in for each visit, including accounts with an older saved ON preference.
   useEffect(() => { setSelectedNoticeIds([]); setSelectedBid(null); setPage(1); noticeFiltersRef.current = { ...noticeFiltersRef.current, autoRegion: false, regionView: 'all' }; setFilters(previous => ({ ...previous, autoRegion: false, regionView: 'all' })); }, [member.user?.id, mode]);
   useEffect(() => {
-    if (member.recoveryMode) { setMode('live'); setView('profile'); setSelectedBid(null); setMobileFilters(false); }
+    if (member.recoveryMode) { setMode('live'); setView('account'); setSelectedBid(null); setMobileFilters(false); }
   }, [member.recoveryMode]);
 
   useEffect(() => { if (view === 'notices') noticeFiltersRef.current = filters; }, [filters, view]);
@@ -108,6 +121,7 @@ export default function App() {
     if (next === 'bookmarks') { setFilters({ ...DEFAULT_FILTERS, category: '전체', status: '전체', autoRegion: false }); setSearchInput(''); }
     if (next === 'notices') { const saved = noticeFiltersRef.current; setFilters(saved); setSearchInput(mode === 'live' ? live.query.keyword : saved.keyword); }
     setView(next);
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${appViewHash(next)}`);
   }
 
   function switchProfile(id: string) {
@@ -119,7 +133,7 @@ export default function App() {
   function toggleBookmark(id: string) {
     const exists = bookmarks.includes(id);
     if (mode === 'live') {
-      if (!member.ready) { setView('profile'); setToast('로그인 후 관심공고를 회원별로 저장할 수 있습니다.'); return; }
+      if (!member.ready) { navigate('account'); setToast('로그인 후 관심공고를 회원별로 저장할 수 있습니다.'); return; }
       const bid = sourceNotices.find(item => item.id === id) ?? selectedBid ?? member.workspace?.noticeSnapshots[id];
       member.updateWorkspace(current => {
         const snapshot = { ...current.noticeSnapshots };
@@ -163,7 +177,7 @@ export default function App() {
   const regionCandidates = useMemo(() => filterNotices(rawSourceNotices,
     { ...filters, siteProvince: '전체', regions: [], autoRegion: false, regionView: 'all' }, profile, statusNow), [rawSourceNotices, filters, profile, statusNow]);
   const companyRegionFilter = !!profile.province && !!profile.district && (filters.autoRegion || filters.regionView !== 'all');
-  const regionFilterEnabled = mode === 'live' && (view === 'notices' || view === 'bookmarks')
+  const regionFilterEnabled = mode === 'live' && !menuDisabled && (view === 'notices' || view === 'bookmarks')
     && (companyRegionFilter || (filters.type !== '공사' && activeRegions.length > 0));
   const sourceNotices = useCachedNoticeRegions(regionCandidates);
   const baseResults = useMemo(() => filterNotices(sourceNotices, { ...filters, autoRegion: false, regionView: 'all' }, profile, statusNow), [sourceNotices, filters, profile, statusNow]);
@@ -178,7 +192,7 @@ export default function App() {
   const pagination = pageGroup(safePage, pages);
   const visibleNotices = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const regionTargets = selectNoticeRegionTargets(regionCandidates, visibleNotices, regionFilterEnabled, companyRegionFilter);
-  const regionSearch = useNoticeRegions(regionTargets, mode === 'live' && (view === 'notices' || view === 'bookmarks'), true, live.queryVersion);
+  const regionSearch = useNoticeRegions(regionTargets, mode === 'live' && !menuDisabled && (view === 'notices' || view === 'bookmarks'), true, live.queryVersion);
   const allCount = filters.autoRegion ? counts.matched : baseResults.length;
   const selectedNotices = filtered.filter(bid => selectedNoticeIds.includes(bid.id));
   const exportNotices = selectedNotices.length ? selectedNotices : filtered;
@@ -215,14 +229,18 @@ export default function App() {
   return <div className="app-shell">
     <header className="app-header"><div className="header-inner">
       <button className="brand" onClick={() => navigate('notices')} aria-label="공사입찰 검색 홈"><span className="brand-mark"><span /><span /><span /></span><span>공사입찰 <b>검색</b></span></button>
-      <nav className="main-nav" aria-label="주 메뉴"><button className={view === 'notices' ? 'active' : ''} onClick={() => navigate('notices')}><ClipboardList size={17} /><span>입찰공고</span></button><button className={view === 'bookmarks' ? 'active' : ''} onClick={() => navigate('bookmarks')}><Bookmark size={17} /><span>관심공고</span>{bookmarks.length > 0 && <span className="nav-count">{bookmarks.length}</span>}</button><button className={view === 'profile' ? 'active' : ''} onClick={() => navigate('profile')}><UserRound size={17} /><span>내 정보</span></button>{mode === 'live' && <button className={view === 'results' ? 'active' : ''} onClick={() => navigate('results')}><FileSearch size={17} /><span>MY입찰관리</span></button>}</nav>
-      <div className="header-account">{mode === 'live' ? <button className="button button-secondary" onClick={() => navigate('profile')}>{member.user ? '내 계정' : '로그인'}</button> : <div className="account-select"><span className="account-avatar">{profile.companyName[0] || '업'}</span><label className="sr-only" htmlFor="demo-profile-switch">테스트 업체 전환</label><select id="demo-profile-switch" value={profile.id} onChange={event => switchProfile(event.target.value)}>{state.profiles.map(item => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select><ChevronDown size={15} /></div>}</div>
+      <nav className="main-nav" aria-label="주 메뉴">{APP_MENUS.filter(menu => mode === 'live' || menu.key !== 'results').map(menu => {
+        const locked = mode === 'live' && access.settings.find(setting => setting.menu_key === menu.key)?.locked;
+        const Icon = menu.key === 'notices' ? ClipboardList : menu.key === 'bookmarks' ? Bookmark : menu.key === 'profile' ? UserRound : FileSearch;
+        return <button key={menu.key} className={view === menu.key ? 'active' : ''} onClick={() => navigate(menu.key)} title={locked ? access.isAdmin ? '잠금 중 · 관리자 열람 가능' : '현재 점검 중인 메뉴입니다.' : undefined}><Icon size={17} /><span>{menu.label}</span>{locked && <LockKeyhole className="menu-lock-icon" size={12} aria-label="잠금" />}{menu.key === 'bookmarks' && bookmarks.length > 0 && <span className="nav-count">{bookmarks.length}</span>}</button>;
+      })}{mode === 'live' && access.ready && access.isAdmin && <button className={view === 'admin' ? 'active' : ''} onClick={() => navigate('admin')}><ShieldCheck size={17} /><span>관리자</span></button>}</nav>
+      <div className="header-account">{mode === 'live' ? <button className="button button-secondary" onClick={() => navigate('account')}>{member.user ? '내 계정' : '로그인'}</button> : <div className="account-select"><span className="account-avatar">{profile.companyName[0] || '업'}</span><label className="sr-only" htmlFor="demo-profile-switch">테스트 업체 전환</label><select id="demo-profile-switch" value={profile.id} onChange={event => switchProfile(event.target.value)}>{state.profiles.map(item => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select><ChevronDown size={15} /></div>}</div>
     </div></header>
 
     <main className="main-container">
       {mode === 'demo' && storageWarning && <div className="storage-warning" role="status"><Info size={16} />{storageWarning}<button className="icon-button" onClick={() => setStorageWarning(null)} aria-label="안내 닫기"><X size={15} /></button></div>}
       {mode === 'live' && <div className="live-member-status" role="status">{member.user ? `회원 저장: ${member.saveStatus === 'saved' ? '클라우드 저장 완료' : member.saveStatus === 'saving' ? '저장 중' : member.saveStatus === 'error' ? '저장 실패 — 내 정보에서 재시도' : member.loading ? '불러오는 중' : '준비'}` : '로그인하면 내 업체·관심공고·투찰 준비 기록을 기기 간에 이어서 사용할 수 있습니다.'}</div>}
-      {view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
+      {view === 'admin' ? <AdminPage access={access} onLogin={() => navigate('account')} /> : view === 'account' ? <MemberAccess member={member} /> : menuDisabled ? <LockedMenu menu={view as MenuKey} setting={access.settings.find(setting => setting.menu_key === view)} loading={!access.ready && !access.error} onLogin={() => navigate('account')} onRetry={() => { void access.refresh(); }} /> : view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
         <section className="search-intro"><div><div className="eyebrow"><span className="eyebrow-line" />공공입찰을 더 명확하게</div><h1>{view === 'bookmarks' ? '관심공고' : '철거·공사 입찰공고'}</h1><p>{view === 'bookmarks' ? '저장한 공고를 모아보고, 다음 입찰을 준비하세요.' : '우리 업체의 지역조건에 맞는 공고를 한곳에서 확인하세요.'}</p></div><div className="intro-note"><span className="small-dot" />{mode === 'live' ? '나라장터 공공데이터 연동' : '나라장터 공고 · 예시 데이터'}<span className="intro-date">{mode === 'live' ? `한국시간 ${koreanToday().replaceAll('-', '.')}` : `예시 기준일 ${DEMO_TODAY.replaceAll('-', '.')}`}</span></div></section>
 
         <section className="company-strip" aria-label="내 업체 지역 자동필터"><div className="company-strip-info"><span className="company-icon"><Building2 size={20} /></span><div><div className="company-name">{profile.companyName || '업체 정보 미등록'}<span>내 업체</span></div><div className="company-address"><MapPin size={12} />본점 {profile.province} {profile.district}</div></div><button className="company-edit" aria-label="업체 정보 수정" onClick={() => navigate('profile')}><Settings2 size={14} /><span>업체 정보 수정</span></button></div><div className="auto-filter-control"><div><label className="switch-label"><input type="checkbox" checked={filters.autoRegion} onChange={event => { updateFilter('autoRegion', event.target.checked); updateFilter('regionView', 'all'); }} /><span className="switch-track" /><strong>내 지역 조건에 맞는 공고</strong></label><p>{filters.autoRegion ? '내 업체 지역과 일치하거나 전국인 공고만 표시합니다. 미확인 공고는 자동필터를 끄고 원문을 확인해 주세요.' : '지역조건에 관계없이 모든 공고를 표시하고 있습니다.'}</p></div><span className="filter-state">{filters.autoRegion ? '자동필터 ON' : '자동필터 OFF'}</span></div></section>
@@ -266,7 +284,7 @@ export default function App() {
       <footer className="app-footer"><div><span className="footer-brand">공사입찰 검색</span><span>내 업체에 맞는 공고, 더 간편하게.</span></div><div className="footer-links"><span>{mode === 'live' ? '공개 공고·결과 조회 및 회원별 입찰 준비 관리' : '화면·공고·업체 정보는 테스트용 예시입니다.'}</span><a href="https://www.g2b.go.kr" target="_blank" rel="noreferrer">나라장터<ExternalLink size={12} /></a></div></footer>
     </main>
     <FloatingQuickLinks key={profile.id} profile={profile} />
-    {selectedBid && <BidDetail bid={selectedBid} now={statusNow} profile={profile} assessment={assessRegion(selectedBid, profile)} isBookmarked={bookmarks.includes(selectedBid.id)} onClose={() => setSelectedBid(null)} onToggleBookmark={() => toggleBookmark(selectedBid.id)} onEnriched={detail => applyNoticeDetail(selectedBid.id, detail)} preparation={mode === 'live' ? <BidPreparation bidId={selectedBid.id} bid={selectedBid} member={member} /> : undefined} />}
+    {selectedBid && !menuDisabled && <BidDetail bid={selectedBid} now={statusNow} profile={profile} assessment={assessRegion(selectedBid, profile)} isBookmarked={bookmarks.includes(selectedBid.id)} onClose={() => setSelectedBid(null)} onToggleBookmark={() => toggleBookmark(selectedBid.id)} onEnriched={detail => applyNoticeDetail(selectedBid.id, detail)} preparation={mode === 'live' ? <BidPreparation bidId={selectedBid.id} bid={selectedBid} member={member} /> : undefined} />}
     <div className={`toast ${toast ? 'visible' : ''}`} role="status" aria-live="polite">{toast && <><span><Check size={15} /></span>{toast}</>}</div>
   </div>;
 }

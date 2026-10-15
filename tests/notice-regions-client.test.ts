@@ -4,6 +4,9 @@ import type { BidNotice } from '../src/types';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+// Region scheduling is tested as a guest; session forwarding has its own tests.
+vi.mock('../src/member/client', () => ({ getMemberClient: () => null }));
+
 let regions: typeof import('../src/live/notice-regions');
 const service = (number: string, changes: Partial<BidNotice> = {}): BidNotice => ({
   ...NOTICES[0], id: `${number}-000`, number, revision: '000', type: '용역', source: 'live',

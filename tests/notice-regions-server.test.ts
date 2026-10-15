@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createG2bClient } from '../server/g2b';
 import { handleG2bRequest, nodeApiHandler } from '../server/http';
+vi.mock('../server/menu-access', async original => ({ ...await original<typeof import('../server/menu-access')>(), authorizeMenuRequest: vi.fn(async () => null) }));
 
 const response = (items: unknown[], totalCount = items.length) => new Response(JSON.stringify({ response: { header: { resultCode: '00' }, body: { items, totalCount } } }));
 const identity = { number: 'R26BK01758083', revision: '001' };
@@ -174,14 +175,14 @@ describe('on-demand participation regions', () => {
     expect(result.items.slice(2)).toMatchObject([{ number: 'C', complete: false, error: 'G2B_UNAVAILABLE' }, { number: 'D', complete: false, error: 'G2B_UNAVAILABLE' }]);
   });
 
-  it.each([true, false])('shares only a fully confirmed successful batch with the CDN: complete=%s', async complete => {
+  it.each([true, false])('keeps menu-controlled region responses outside public CDN: complete=%s', async complete => {
     vi.stubEnv('G2B_SERVICE_KEY', `region-header-test-${complete}`);
     vi.stubGlobal('fetch', vi.fn(async () => response([region], complete ? 1 : 2)));
     const headers = new Map<string, string>();
     const res = { statusCode: 0, setHeader: (name: string, value: string) => { headers.set(name, value); }, end: vi.fn() };
     await nodeApiHandler({ method: 'GET', url: `/api/notice-regions?${params()}`, headers: { 'x-forwarded-for': `region-${complete}` } }, res);
     expect(res.statusCode).toBe(200);
-    expect(headers.get('Vercel-CDN-Cache-Control')).toBe(complete ? 'public, max-age=300' : undefined);
+    expect(headers.get('Vercel-CDN-Cache-Control')).toBe('private, no-store');
     expect(headers.get('Cache-Control')).toBe('no-store');
   });
 

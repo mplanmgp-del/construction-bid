@@ -1,4 +1,5 @@
 import type { BidNotice } from '../types';
+import { getMemberClient } from '../member/client';
 
 export function koreanToday(now = new Date()): string {
   return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -52,7 +53,19 @@ function retryAfter(response: Response, value: unknown): number | undefined {
 }
 
 export async function fetchApi<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(path, { signal, headers: { Accept: 'application/json' } });
+  signal?.throwIfAborted();
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  // Only our relative API paths receive a session. Authorization is verified
+  // by the server and never derived from editable profile fields.
+  if (path.startsWith('/api/')) {
+    const client = getMemberClient();
+    if (client) {
+      const { data, error } = await client.auth.getSession();
+      if (!error && data.session?.access_token) headers.Authorization = `Bearer ${data.session.access_token}`;
+    }
+  }
+  signal?.throwIfAborted();
+  const response = await fetch(path, { signal, headers });
   const data = await response.json().catch(() => null);
   if (!response.ok || !data || data.error) throw new ApiError(
     typeof data?.error?.message === 'string' ? data.error.message : '나라장터 데이터를 가져오지 못했습니다. 잠시 후 다시 조회해 주세요.',
