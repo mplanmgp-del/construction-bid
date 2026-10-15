@@ -14,7 +14,7 @@ function access(): AlertsAccess {
     subscriptionCount: 0, publicKey: null,
   };
   return { userId: 'member-a', overview, loading: false, loadingMore: false, loadingExisting: false, saving: false, reading: false, settingUp: false, error: null, message: '',
-    refresh: async () => true, save: async () => true, read: async () => true, setup: async () => true, loadMore: async () => true, loadExisting: async () => true };
+    refresh: async () => true, save: async () => true, read: async () => true, remove: async () => true, restore: async () => true, loadDeleted: async () => true, setup: async () => true, loadMore: async () => true, loadExisting: async () => true };
 }
 
 describe('alert settings page after inbox moves to the bell', () => {

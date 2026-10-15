@@ -20,7 +20,7 @@ function repository(overrides: Partial<AlertRepository> = {}): AlertRepository {
 function access(data = overview()) {
   return { userId: 'a', overview: data, loading: false, error: null, saving: false, reading: false, settingUp: false,
     loadingMore: false, loadingExisting: false, message: '', refresh: async () => true, save: async () => true,
-    read: async () => true, setup: async () => true, loadMore: async () => true, loadExisting: async () => true };
+    read: async () => true, remove: async () => true, restore: async () => true, loadDeleted: async () => true, setup: async () => true, loadMore: async () => true, loadExisting: async () => true };
 }
 
 describe('personal alert account lifecycle', () => {

@@ -44,6 +44,7 @@ export interface AlertInboxItem {
   changeFields: string[];
   createdAt: string;
   readAt: string | null;
+  deletedAt?: string | null;
   existingCount?: number;
 }
 export interface AlertServiceStatus {
@@ -61,6 +62,9 @@ export interface AlertOverview {
   notifications: AlertInboxItem[];
   unreadCount: number;
   hasMore: boolean;
+  deletedNotifications?: AlertInboxItem[];
+  deletedHasMore?: boolean;
+  deletedCount?: number;
   existingMatches: AlertNotice[];
   existingHasMore: boolean;
   status: AlertServiceStatus;

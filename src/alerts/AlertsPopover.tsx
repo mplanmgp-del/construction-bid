@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, CheckCheck, ChevronRight, RefreshCw, Settings2, X } from 'lucide-react';
+import { ArrowLeft, Bell, CheckCheck, ChevronRight, RefreshCw, RotateCcw, Settings2, Trash2, X } from 'lucide-react';
 import { formatDateTime } from '../domain';
 import type { AlertInboxItem, AlertNotice } from './types';
 import { BookmarkButton } from '../components/BookmarkButton';
@@ -25,37 +25,87 @@ interface ContentProps {
 }
 
 export function AlertsPopoverContent({ alerts, signedIn, onLogin, onClose, onOpenSettings, onOpenExisting, headingId, bookmarks = [], onBookmark }: ContentProps) {
+  const [ui, setUi] = useState({ owner: alerts.userId, trash: false, confirmDelete: false, busy: false, feedback: '' });
+  const owner = useRef(alerts.userId); owner.current = alerts.userId;
+  const mutation = useRef(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const sameOwner = ui.owner === alerts.userId;
+  const trash = sameOwner && ui.trash;
+  const busy = Boolean(alerts.removing || alerts.restoring || alerts.reading || alerts.saving || alerts.settingUp || sameOwner && ui.busy);
   const overview = signedIn ? alerts.overview : null;
-  const notifications = overview?.notifications ?? [];
+  const notifications = trash ? overview?.deletedNotifications ?? [] : overview?.notifications ?? [];
+  const count = trash ? overview?.deletedCount ?? notifications.length : overview?.unreadCount ?? 0;
+  const hasMore = trash ? overview?.deletedHasMore : overview?.hasMore;
+  const canChangeAll = notifications.length > 0 || Boolean(hasMore) || trash && Boolean(overview?.deletedCount);
+  useEffect(() => {
+    mutation.current = false;
+    setUi({ owner: alerts.userId, trash: false, confirmDelete: false, busy: false, feedback: '' });
+  }, [alerts.userId, signedIn]);
+  async function change(action: 'remove' | 'restore', target: { id: string } | { all: true }) {
+    if (busy || mutation.current || !signedIn) return;
+    const userId = alerts.userId;
+    mutation.current = true;
+    setUi(previous => ({ ...previous, busy: true, feedback: '' }));
+    try {
+      const changed = await alerts[action](target);
+      if (owner.current !== userId) return;
+      if (changed) {
+        setUi(previous => previous.owner === userId ? { ...previous, confirmDelete: false,
+          feedback: action === 'remove' ? '알림을 삭제했습니다.' : '알림을 복원했습니다.' } : previous);
+      }
+    } finally {
+      if (owner.current === userId) {
+        mutation.current = false;
+        setUi(previous => previous.owner === userId ? { ...previous, busy: false } : previous);
+        // The controller can remove an acknowledged row even if reloading its
+        // final count fails. Keep focus in the panel without claiming success.
+        heading.current?.focus();
+      }
+    }
+  }
+  function switchInbox() {
+    if (busy || mutation.current) return;
+    const nextTrash = !trash;
+    setUi({ owner: alerts.userId, trash: nextTrash, confirmDelete: false, busy: false, feedback: '' });
+    if (nextTrash && overview?.deletedNotifications === undefined) void alerts.loadDeleted();
+    heading.current?.focus();
+  }
   function openExisting(item: AlertInboxItem) {
+    if (busy || mutation.current || trash) return;
     if (!item.readAt) void alerts.read({ id: item.id });
     onOpenExisting();
   }
   return <>
-    <div className="alert-popover-heading"><h2 id={headingId}>알림{Boolean(overview?.unreadCount) && <span>{overview?.unreadCount}</span>}</h2>
-      <div>{signedIn && <button type="button" className="alert-popover-read-all" disabled={!overview?.unreadCount || alerts.reading} onClick={() => { void alerts.read({ all: true }); }}><CheckCheck size={14} />모두 읽음</button>}
+    <div className="alert-popover-heading"><h2 ref={heading} tabIndex={-1} id={headingId}>{trash ? '삭제한 알림' : '알림'}{count > 0 && <span>{count}</span>}</h2>
+      <div>{signedIn && !trash && <button type="button" className="alert-popover-read-all" disabled={!overview?.unreadCount || alerts.reading || busy} onClick={() => { if (!mutation.current) void alerts.read({ all: true }); }}><CheckCheck size={14} />모두 읽음</button>}
+        {signedIn && <button type="button" className="alert-popover-bulk" disabled={!canChangeAll || busy || alerts.loadingDeleted} onClick={() => { if (busy || mutation.current) return; if (trash) void change('restore', { all: true }); else setUi(previous => ({ ...previous, confirmDelete: !previous.confirmDelete, feedback: '' })); }} aria-expanded={!trash ? sameOwner && ui.confirmDelete : undefined}>{trash ? <RotateCcw size={13} /> : <Trash2 size={13} />}{trash ? '전체 복원' : '전체 삭제'}</button>}
         <button type="button" className="alert-popover-close" onClick={onClose} aria-label="알림 닫기"><X size={17} /></button></div>
     </div>
     <div className="alert-popover-body">
       {!signedIn ? <div className="alert-popover-empty"><Bell size={24} /><p>로그인하고 맞춤 공고 알림을 받아보세요.</p><button type="button" className="button button-primary" onClick={onLogin}>로그인</button></div> : <>
-        {alerts.error && <div className="alert-popover-error" role="alert"><p>{alerts.error}</p><button type="button" disabled={alerts.loading} onClick={() => { void alerts.refresh(); }}><RefreshCw size={13} />다시 확인</button></div>}
+        {sameOwner && ui.confirmDelete && !trash && <div className="alert-popover-confirm" role="group" aria-label="전체 알림 삭제 확인"><p>받은 알림을 모두 삭제할까요?</p><small>이전 알림도 포함합니다. 삭제한 알림에서 복원할 수 있습니다.</small><div><button type="button" disabled={busy} onClick={() => { void change('remove', { all: true }); }}>전체 알림 삭제</button><button type="button" disabled={busy} onClick={() => setUi(previous => ({ ...previous, confirmDelete: false }))}>취소</button></div></div>}
+        {sameOwner && ui.feedback && <div className="alert-popover-feedback" role="status"><p>{ui.feedback}</p>{ui.feedback === '알림을 삭제했습니다.' && <small>삭제한 알림에서 복원할 수 있습니다.</small>}</div>}
+        {alerts.error && <div className="alert-popover-error" role="alert"><p>{alerts.error}</p><button type="button" disabled={alerts.loading || alerts.loadingDeleted || busy} onClick={() => { void alerts.refresh(); }}><RefreshCw size={13} />다시 확인</button></div>}
         {!overview && !alerts.error && <p className="alert-popover-empty" role="status">{alerts.loading ? '알림을 불러오는 중입니다.' : '알림을 불러오지 못했습니다.'}</p>}
-        {overview && notifications.length === 0 && <div className="alert-popover-empty"><Bell size={24} /><p>아직 받은 알림이 없습니다.</p><small>저장한 조건에 맞는 공고가 올라오면 알려드려요.</small></div>}
-        {notifications.map(item => <article key={item.id} className={`alert-popover-item${item.readAt ? '' : ' is-unread'}`}>
-          <div className="alert-popover-meta"><span className={`alert-popover-kind kind-${item.kind}`}>{eventLabels[item.kind]}</span>{!item.readAt && <span className="alert-popover-unread" aria-label="읽지 않음" />}<time dateTime={item.createdAt || undefined}>{item.createdAt ? formatDateTime(item.createdAt) : ''}</time></div>
-          {item.notice ? <a className="alert-popover-title" href={`/notice-detail.html?${new URLSearchParams({ number: item.notice.number, revision: item.notice.revision, type: item.notice.type })}`} target="_blank" rel="noopener noreferrer" onClick={() => { if (!item.readAt) void alerts.read({ id: item.id }); onClose(); }}>{item.notice.title}<ChevronRight size={14} /></a> : null}
+        {trash && alerts.loadingDeleted && <p className="alert-popover-loading" role="status">삭제한 알림을 불러오는 중입니다.</p>}
+        {overview && notifications.length === 0 && !alerts.loadingDeleted && <div className="alert-popover-empty">{trash ? <Trash2 size={24} /> : <Bell size={24} />}<p>{trash ? '삭제한 알림이 없습니다.' : '아직 받은 알림이 없습니다.'}</p><small>{trash ? '삭제한 알림은 이곳에서 복원할 수 있습니다.' : '저장한 조건에 맞는 공고가 올라오면 알려드려요.'}</small></div>}
+        {notifications.map(item => <article key={item.id} className={`alert-popover-item${trash ? ' is-deleted' : item.readAt ? '' : ' is-unread'}`}>
+          <div className="alert-popover-meta"><span className={`alert-popover-kind kind-${item.kind}`}>{eventLabels[item.kind]}</span>{!trash && !item.readAt && <span className="alert-popover-unread" aria-label="읽지 않음" />}<time dateTime={(trash && item.deletedAt ? item.deletedAt : item.createdAt) || undefined}>{trash && item.deletedAt ? `삭제 ${formatDateTime(item.deletedAt)}` : item.createdAt ? formatDateTime(item.createdAt) : ''}</time>
+            <button type="button" className={`alert-popover-item-change${trash ? ' is-restore' : ''}`} disabled={busy} aria-label={`${item.notice?.title || item.message || eventLabels[item.kind]} 알림 ${trash ? '복원' : '삭제'}`} title={trash ? '알림 복원' : '알림 삭제'} onClick={() => { void change(trash ? 'restore' : 'remove', { id: item.id }); }}>{trash ? <RotateCcw size={14} /> : <Trash2 size={14} />}</button>
+          </div>
+          {item.notice ? trash ? <p className="alert-popover-title">{item.notice.title}</p> : <a className="alert-popover-title" href={`/notice-detail.html?${new URLSearchParams({ number: item.notice.number, revision: item.notice.revision, type: item.notice.type })}`} target="_blank" rel="noopener noreferrer" aria-disabled={busy || undefined} tabIndex={busy ? -1 : undefined} onClick={event => { if (busy || mutation.current) { event.preventDefault(); return; } if (!item.readAt) void alerts.read({ id: item.id }); onClose(); }}>{item.notice.title}<ChevronRight size={14} /></a> : null}
           {item.message && <p className="alert-popover-message">{item.message}</p>}
           {item.changeFields.length > 0 && <div className="alert-popover-changes">{item.changeFields.map(field => <span key={field}>{field}</span>)}</div>}
-          {item.notice && onBookmark && <div className="alert-popover-bookmark"><BookmarkButton noticeTitle={item.notice.title} saved={bookmarks.includes(item.notice.id)} onToggle={() => onBookmark(item.notice!)} /></div>}
-          {(item.kind === 'initial' || !item.readAt) && <div className="alert-popover-actions">
-            {item.kind === 'initial' && <button type="button" onClick={() => openExisting(item)}>기존 공고 {item.existingCount ?? 0}건 보기<ChevronRight size={13} /></button>}
-            {!item.readAt && <button type="button" disabled={alerts.reading} onClick={() => { void alerts.read({ id: item.id }); }}>읽음</button>}
+          {!trash && item.notice && onBookmark && <div className="alert-popover-bookmark"><BookmarkButton noticeTitle={item.notice.title} saved={bookmarks.includes(item.notice.id)} disabled={busy} onToggle={() => { if (!mutation.current) onBookmark(item.notice!); }} /></div>}
+          {!trash && (item.kind === 'initial' || !item.readAt) && <div className="alert-popover-actions">
+            {item.kind === 'initial' && <button type="button" disabled={busy} onClick={() => openExisting(item)}>기존 공고 {item.existingCount ?? 0}건 보기<ChevronRight size={13} /></button>}
+            {!item.readAt && <button type="button" disabled={alerts.reading || busy} onClick={() => { if (!mutation.current) void alerts.read({ id: item.id }); }}>읽음</button>}
           </div>}
         </article>)}
-        {overview?.hasMore && <button type="button" className="alert-popover-more" disabled={alerts.loadingMore || alerts.loading} onClick={() => { void alerts.loadMore(); }}>{alerts.loadingMore ? '불러오는 중' : '이전 알림 더 보기'}</button>}
+        {hasMore && <button type="button" className="alert-popover-more" disabled={alerts.loadingMore || alerts.loadingDeleted || alerts.loading || busy} onClick={() => { if (trash) void alerts.loadDeleted(); else void alerts.loadMore(); }}>{alerts.loadingMore || alerts.loadingDeleted ? '불러오는 중' : trash ? '삭제한 알림 더 보기' : '이전 알림 더 보기'}</button>}
       </>}
     </div>
-    {signedIn && <button type="button" className="alert-popover-settings" onClick={onOpenSettings}><Settings2 size={15} />알림 조건 설정<ChevronRight size={15} /></button>}
+    {signedIn && <><button type="button" className="alert-popover-inbox-switch" disabled={busy || alerts.loadingDeleted} onClick={switchInbox} aria-label={trash ? '받은 알림' : '삭제한 알림'}>{trash ? <ArrowLeft size={14} /> : <Trash2 size={14} />}{trash ? '받은 알림' : '삭제한 알림'}{!trash && Boolean(overview?.deletedCount) && <span>{overview?.deletedCount}</span>}</button><button type="button" className="alert-popover-settings" disabled={busy} onClick={() => { if (!mutation.current) onOpenSettings(); }}><Settings2 size={15} />알림 조건 설정<ChevronRight size={15} /></button></>}
   </>;
 }
 

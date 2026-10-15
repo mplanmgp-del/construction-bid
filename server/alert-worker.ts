@@ -33,6 +33,7 @@ export async function runAlertWorker(store:AlertStore,{dispatchOnly=false,provid
     for(let start=0;start<deliveries.length;start+=5) {
       const results=await Promise.all(deliveries.slice(start,start+5).map(async item=>{
         const notification=item.notification;
+        if(notification.deletedAt)return {id:item.id,status:'failed' as const};
         if(notification.kind!=='test'&&notification.kind!=='initial'
           &&(!notification.notice||!isAlarmEligible(notification.notice,Date.now())))return {id:item.id,status:'failed' as const};
         return {id:item.id,...await sendAlertPush(item.subscription,notification)};

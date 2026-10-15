@@ -27,7 +27,7 @@ export async function handleAlertRequest(method:string,params:URLSearchParams,bo
   }
   const bearer=await store.authenticate(authorization);
   if(action==='overview'&&method==='GET') {
-    const data=await store.user<AlertOverview>(bearer,'get',{offset:params.get('offset')||'0',existingOffset:params.get('existingOffset')||'0'});
+    const data=await store.user<AlertOverview>(bearer,'get',{offset:params.get('offset')||'0',existingOffset:params.get('existingOffset')||'0',deletedOffset:params.get('deletedOffset')||'0'});
     const catalog=await createActiveCatalogStore().page({limit:1}).catch(()=>null);
     return {...data,publicKey:getAlertPushPublicKey(),status:{...data.status,pushConfigured:isAlertPushConfigured(),
       ...(catalog?{coverageFrom:catalog.status.coverageFrom,backfillPending:!catalog.status.bootstrapComplete||catalog.status.pendingVerification>0||!!data.status.backfillPending,
@@ -36,6 +36,12 @@ export async function handleAlertRequest(method:string,params:URLSearchParams,bo
   if(method!=='POST') throw new AlertError(405,'METHOD_NOT_ALLOWED','POST 요청이 필요합니다.');
   if(action==='save') {await store.user(bearer,'save',{settings:normalizeAlertSettings(body.settings)});return {ok:true};}
   if(action==='read') {await store.user(bearer,'read',body.all===true?{all:true}:{id:String(body.id||'')});return {ok:true};}
+  if(action==='delete'||action==='restore') {
+    const single=typeof body.id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.id)&&!('all' in body);
+    const all=body.all===true&&!('id' in body);
+    if(!single&&!all)throw new AlertError(400,'INVALID_TARGET','삭제하거나 복원할 알림을 확인해 주세요.');
+    await store.user(bearer,action,all?{all:true}:{id:body.id});return {ok:true};
+  }
   if(action==='subscribe') {
     if(!isAlertPushConfigured()) throw new AlertError(503,'PUSH_NOT_CONFIGURED','푸시 서버 설정이 아직 완료되지 않았습니다.');
     await store.user(bearer,'subscribe',{subscription:validatePushSubscription(body.subscription)});return {ok:true};

@@ -18,7 +18,7 @@ describe('push delivery uses the current alarm deadline and phase',()=>{
     vi.useFakeTimers();vi.setSystemTime(now);
     const queued=[item('opened','changed',notice({openingAt:'2026-10-15T09:00:00+09:00'})),
       item('outside','new',notice({deadline:'2026-10-23T10:00:00+09:00',openingAt:'2026-10-23T11:00:00+09:00'})),
-      item('cancelled','cancelled',notice({status:'취소'})),item('active','new',notice()),item('test','test',null),item('digest','initial',null)];
+      item('cancelled','cancelled',notice({status:'취소'})), {...item('deleted','new',notice()),deletedAt:new Date(now).toISOString()}, item('active','new',notice()),item('test','test',null),item('digest','initial',null)];
     const settle=vi.fn(async()=>({}));
     const store={claim:async()=>({leaseId:'lease',enabled:true,collectionDue:false,rules:[]}),
       deliveries:vi.fn(async()=>({deliveries:queued.map(notification=>({id:notification.id,notification,subscription:{}}))})),
@@ -26,6 +26,6 @@ describe('push delivery uses the current alarm deadline and phase',()=>{
     await runAlertWorker(store,{dispatchOnly:true,now,deadline:now+45000});
     expect(transport.send.mock.calls.map(call=>(call as unknown as [unknown,AlertInboxItem])[1].id)).toEqual(['active','test','digest']);
     const results=settle.mock.calls.flatMap(call=>(call as unknown as [unknown,{id:string;status:string}[]])[1]);
-    expect(results.filter(result=>result.status==='failed').map(result=>result.id)).toEqual(['opened','outside','cancelled']);
+    expect(results.filter(result=>result.status==='failed').map(result=>result.id)).toEqual(['opened','outside','cancelled','deleted']);
   });
 });
