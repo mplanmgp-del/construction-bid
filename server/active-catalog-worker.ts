@@ -159,6 +159,15 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   if (!claim.leaseId) return { ok: true, skipped: true, sources, groups, versions, requests };
   const leaseId = claim.leaseId;
   const rules = (claim.rules ?? []).filter(rule => rule.settings.enabled);
+  // Every protected mutation locks the same database runtime row. Keep source
+  // and verification provider calls parallel, but avoid competing RPC writes
+  // inside this invocation. A failed write must not poison later queued work.
+  let writeTail = Promise.resolve();
+  const write = <T>(operation: () => Promise<T>): Promise<T> => {
+    const pending = writeTail.then(operation);
+    writeTail = pending.then(() => undefined, () => undefined);
+    return pending;
+  };
   let quotaFailure: ProviderQuotaError | undefined;
   let restartRequired = false;
   let activeRequests = 0;
@@ -185,7 +194,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   const openingSummary = createOpeningSummaryLoader((_base, operation, params) => request(operation, params, { service: 'opening' }), clock);
   const commit = async (payload: ActiveCatalogCommit) => {
     if (Buffer.byteLength(JSON.stringify(payload)) > 2_800_000) throw new Error('공고 한 구간의 저장 응답이 너무 커서 확인 범위를 유지합니다.');
-    const result = await store.commit(leaseId, payload);
+    const result = await write(() => store.commit(leaseId, payload));
     if (result.storageFull) throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
     if (!result.ok) throw new Error('전체 공고 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
     if (result.restartRequired) restartRequired = true;
@@ -241,7 +250,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       // Only after it succeeds may private retention acknowledge the verification job.
       const payload = { scopeVersion: claim.scopeVersion, groups: [all] };
       if (Buffer.byteLength(JSON.stringify(payload)) > 2_800_000) throw new Error('공고 차수의 저장 응답이 너무 커서 확인 범위를 유지합니다.');
-      const published = await store.publishSearchVerified(leaseId, payload);
+      const published = await write(() => store.publishSearchVerified(leaseId, payload));
       if (published.storageFull) throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
       if (!published.ok) throw new Error('공고 검색 색인 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
       searchGroups++;
@@ -301,10 +310,10 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
         for (let batch = 0; batch < batches; batch++) {
           if (clock() > deadline - 9_000) throw new WorkerBudgetExhausted('공고 색인 저장 시간이 부족하여 같은 구간에서 이어서 확인합니다.');
           const slice = indexFacts.slice(batch * 200, (batch + 1) * 200);
-          const result = await store.indexUpsert(leaseId, { scopeVersion: claim.scopeVersion, sourceId: job.id, page: job.page,
+          const result = await write(() => store.indexUpsert(leaseId, { scopeVersion: claim.scopeVersion, sourceId: job.id, page: job.page,
             batch, batches, notices: slice.filter(notice => isOngoingNotice(notice, now)),
             removed: slice.filter(notice => !isOngoingNotice(notice, now)).map(notice => ({ type: notice.type,
-              number: notice.number, revision: notice.revision, sourceUpdatedAt: notice.sourceUpdatedAt })) });
+              number: notice.number, revision: notice.revision, sourceUpdatedAt: notice.sourceUpdatedAt })) }));
           if (result.storageFull) {
             throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
           }
@@ -350,8 +359,8 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
     }
   } catch (error) { warnings.push(safeError(error)); }
   const uniqueWarnings = [...new Set(warnings)];
-  try { await store.finish(leaseId, { ...(uniqueWarnings.length ? { error: uniqueWarnings[0] } : {}),
-    ...(quotaFailure?.retryAfterSeconds ? { retryAfterSeconds: quotaFailure.retryAfterSeconds } : {}) }); }
+  try { await write(() => store.finish(leaseId, { ...(uniqueWarnings.length ? { error: uniqueWarnings[0] } : {}),
+    ...(quotaFailure?.retryAfterSeconds ? { retryAfterSeconds: quotaFailure.retryAfterSeconds } : {}) })); }
   catch (error) { uniqueWarnings.push(safeError(error)); }
   return { ok: uniqueWarnings.length === 0, sources, groups, versions, searchGroups, requests, ...(restartRequired ? { restartRequired: true } : {}),
     ...(uniqueWarnings.length ? { error: uniqueWarnings[0], warnings: uniqueWarnings } : {}) };

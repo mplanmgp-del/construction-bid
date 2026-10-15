@@ -205,6 +205,45 @@ describe('all-age active catalog collection', () => {
       expect(JSON.stringify(result)).not.toContain('private retry storage URL');
     });
 
+  it.each([false, true])('serializes protected writes while retaining four provider lanes (one index fails: %s)', async failIndex => {
+    const jobs = Array.from({ length: 4 }, (_, index) => source({ id: `live-write-${index}`, kind: 'registered' }));
+    const identities = Array.from({ length: 8 }, (_, index) => ({ type: '공사' as const, number: `R26WRITE${index}`, tracked: true }));
+    const db = store(jobs, identities, []);
+    let runningWrites = 0, maximumWrites = 0, runningProvider = 0, maximumProvider = 0;
+    const protectedWrite = async <T>(action: () => T): Promise<T> => {
+      runningWrites++; maximumWrites = Math.max(maximumWrites, runningWrites);
+      try {
+        if (runningWrites > 1) throw new Error('overlapping protected RPCs');
+        await new Promise(resolve => setTimeout(resolve, 1));
+        return action();
+      } finally { runningWrites--; }
+    };
+    db.indexUpsert.mockImplementation(async (_lease, batch) => protectedWrite(() => {
+      if (failIndex && batch.sourceId === jobs[0].id) throw new Error('private failed write URL');
+      return { ok: true };
+    }));
+    db.commit.mockImplementation(async () => protectedWrite(() => ({ ok: true })));
+    db.publishSearchVerified.mockImplementation(async () => protectedWrite(() => ({ ok: true })));
+    db.finish.mockImplementation(async () => protectedWrite(() => ({ ok: true })));
+    const provider = vi.fn<ActiveCatalogProvider>(async (operation, params) => {
+      runningProvider++; maximumProvider = Math.max(maximumProvider, runningProvider);
+      await new Promise(resolve => setTimeout(resolve, 1)); runningProvider--;
+      return /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation) ? { items: [], totalCount: 0 }
+        : { items: [row({ bidNtceNo: params.bidNtceNo ?? 'R26LIVESOURCE' })], totalCount: 1 };
+    });
+    const result = await runActiveCatalogWorker(db, { provider, now, maxRequests: 40 });
+    expect(maximumWrites).toBe(1);
+    expect(maximumProvider).toBe(4);
+    expect(result).toMatchObject({ ok: !failIndex, sources: failIndex ? 3 : 4, groups: 8, searchGroups: 8, requests: 28 });
+    const acknowledgedSources = db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(job => job.id);
+    expect(acknowledgedSources.sort()).toEqual(jobs.filter((_, index) => !failIndex || index > 0).map(job => job.id).sort());
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedSources ?? [])).toEqual(failIndex ? [{ id: jobs[0].id, error: expect.any(String) }] : []);
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(8);
+    expect(db.finish).toHaveBeenCalledTimes(1);
+    expect(runningWrites).toBe(0);
+    expect(JSON.stringify(result)).not.toContain('private failed write URL');
+  });
+
   it('publishes a cancellation tombstone from complete history without fetching inactive participant conditions', async () => {
     const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
     const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row(), row({ bidNtceOrd: '001', ntceKindNm: '취소공고' })], totalCount: 2 }));
