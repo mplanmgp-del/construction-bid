@@ -172,6 +172,12 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
 
   const regions = selectedRegions(filters);
   const statuses = selectedStatuses(filters);
+  const deadlinePriority = (bid: BidNotice) => {
+    const phase = noticeState(bid, now).label;
+    if (phase === '마감 임박') return 0;
+    if (phase === '진행중') return timestamp(bid.deadline) > now ? 1 : 2;
+    return phase === '예정' ? 3 : 4;
+  };
 
   return notices.filter(bid => {
     const searchText = cleanText(`${bid.title} ${bid.number} ${bid.agency}`).toLocaleLowerCase('ko-KR');
@@ -204,12 +210,22 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
       if (second === null) return -1;
       return filters.sort === 'amountAsc' ? first - second : second - first;
     }
+    if (filters.sort === 'deadline') {
+      const priority = deadlinePriority(a) - deadlinePriority(b);
+      if (priority) return priority;
+    }
     const first = timestamp(filters.sort === 'newest' ? a.postedAt : a.deadline);
     const second = timestamp(filters.sort === 'newest' ? b.postedAt : b.deadline);
     if (!Number.isFinite(first) && !Number.isFinite(second)) return 0;
     if (!Number.isFinite(first)) return 1;
     if (!Number.isFinite(second)) return -1;
-    return filters.sort === 'newest' ? second - first : first - second;
+    const order = filters.sort === 'newest' ? second - first : first - second;
+    if (order || filters.sort === 'newest') return order;
+    const firstPosted = timestamp(a.postedAt);
+    const secondPosted = timestamp(b.postedAt);
+    if (Number.isFinite(firstPosted) !== Number.isFinite(secondPosted)) return Number.isFinite(firstPosted) ? -1 : 1;
+    if (Number.isFinite(firstPosted) && firstPosted !== secondPosted) return secondPosted - firstPosted;
+    return a.type < b.type ? -1 : a.type > b.type ? 1 : a.number < b.number ? -1 : a.number > b.number ? 1 : 0;
   });
 }
 

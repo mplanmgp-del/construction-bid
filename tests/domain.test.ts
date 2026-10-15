@@ -338,6 +338,31 @@ describe('추정가격 범위와 정렬', () => {
     expect(ids(filterNotices(bids, filters({ sort: 'newest' }), company))).toEqual(['later', 'sooner']);
     expect(ids(bids)).toEqual(['later', 'sooner']);
   });
+
+  it('넓은 조회에서도 마감 임박과 투찰 가능한 진행 공고를 개찰 대기와 예정 공고보다 먼저 보여준다', () => {
+    const now = Date.parse('2026-10-15T10:00:00+09:00');
+    const bids = [
+      notice({ id: 'waiting', deadline: '2026-10-15T09:00:00+09:00', openingAt: '2026-10-15T15:00:00+09:00', postedAt: '2026-10-13T09:00:00+09:00' }),
+      notice({ id: 'scheduled', deadline: '2026-10-15T16:00:00+09:00', openingAt: '2026-10-15T17:00:00+09:00', biddingStartAt: '2026-10-15T11:00:00+09:00', postedAt: '2026-10-15T09:00:00+09:00' }),
+      notice({ id: 'missing', deadline: '', openingAt: '' }),
+      notice({ id: 'active', deadline: '2026-10-19T10:00:00+09:00', openingAt: '2026-10-19T11:00:00+09:00', postedAt: '2026-10-12T09:00:00+09:00' }),
+      notice({ id: 'urgent', deadline: '2026-10-16T06:00:00+09:00', openingAt: '2026-10-16T07:00:00+09:00', postedAt: '1995-10-01T09:00:00+09:00' }),
+    ];
+    expect(ids(filterNotices(bids, filters(), company, now))).toEqual(['urgent', 'active', 'waiting', 'scheduled', 'missing']);
+    expect(ids(filterNotices(bids, filters({ sort: 'newest' }), company, now))).toEqual(['scheduled', 'waiting', 'active', 'missing', 'urgent']);
+    expect(ids(bids)).toEqual(['waiting', 'scheduled', 'missing', 'active', 'urgent']);
+  });
+
+  it('같은 상태와 마감시각이면 최신 게시 공고를 먼저 보여주고 게시일 누락은 마지막에 둔다', () => {
+    const now = Date.parse('2026-10-15T10:00:00+09:00');
+    const bids = [
+      notice({ id: 'missing', number: 'A', postedAt: '' }),
+      notice({ id: 'old', number: 'A', postedAt: '1995-10-01T09:00:00+09:00' }),
+      notice({ id: 'new-service', number: 'B', type: '용역', postedAt: '2026-10-15T09:00:00+09:00' }),
+      notice({ id: 'new-construction', number: 'B', postedAt: '2026-10-15T09:00:00+09:00' }),
+    ];
+    expect(ids(filterNotices(bids, filters(), company, now))).toEqual(['new-construction', 'new-service', 'old', 'missing']);
+  });
 });
 
 describe('화면과 검색이 공유하는 원 단위 금액 검증', () => {
