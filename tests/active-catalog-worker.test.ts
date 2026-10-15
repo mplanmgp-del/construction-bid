@@ -398,6 +398,31 @@ describe('all-age active catalog collection', () => {
     expect(db.commit.mock.calls[0][1].sources?.[0].observed).toHaveLength(999);
   });
 
+  it('checkpoints all 999 raw identities even when a current page has no focused titles', async () => {
+    const db = store([source({ id: 'current-construction', kind: 'current' })], [], []);
+    const rows = Array.from({ length: 999 }, (_, index) => row({ bidNtceNo: `R26RAWONLY${index}`, bidNtceNm: '전산 유지보수' }));
+    const result = await runActiveCatalogWorker(db, { provider: async () => ({ items: rows, totalCount: 1000 }), now });
+    expect(result).toMatchObject({ ok: true, sources: 1, requests: 1 });
+    expect(db.indexUpsert.mock.calls[0][1]).toMatchObject({ notices: [], removed: [], batch: 0, batches: 1 });
+    const completed = db.commit.mock.calls[0][1].sources?.[0];
+    expect(completed).toMatchObject({ receivedCount: 999, totalCount: 1000, complete: false });
+    expect(completed?.rawIdentities).toHaveLength(999);
+    expect(completed?.rawIdentities?.[0]).toBe('R26RAWONLY0:000');
+    expect(completed?.rawIdentities?.[998]).toBe('R26RAWONLY998:000');
+    expect(new Set(completed?.rawIdentities).size).toBe(999);
+  });
+
+  it('keeps both raw revisions of the same number in the current source checkpoint', async () => {
+    const db = store([source({ id: 'current-construction', kind: 'current' })], [], []);
+    const rows = [row({ bidNtceNo: 'R26RAWREVISION', bidNtceOrd: '000', bidNtceNm: '전산 유지보수' }),
+      row({ bidNtceNo: 'R26RAWREVISION', bidNtceOrd: '001', bidNtceNm: '전산 유지보수 변경' })];
+    await runActiveCatalogWorker(db, { provider: async () => ({ items: rows, totalCount: 2 }), now });
+    const completed = db.commit.mock.calls[0][1].sources?.[0];
+    expect(completed?.rawIdentities).toEqual(['R26RAWREVISION:000', 'R26RAWREVISION:001']);
+    expect(completed?.observed).toEqual([expect.objectContaining({ number: 'R26RAWREVISION', revision: '001' })]);
+    expect(completed).toMatchObject({ receivedCount: 2, totalCount: 2, complete: true });
+  });
+
   it.each(['history', 'registered', 'modified'] as const)('keeps unrelated current facts and actual cancellations in the %s source', async kind => {
     const db = store([source({ id: `${kind}-construction`, kind })], [], []);
     const rows = [row({ bidNtceNo: 'R26GENERAL0', bidNtceNm: '전산 유지보수' }),
@@ -405,6 +430,7 @@ describe('all-age active catalog collection', () => {
     await runActiveCatalogWorker(db, { provider: async () => ({ items: rows, totalCount: 2 }), now });
     expect(db.indexUpsert.mock.calls[0][1].notices.map(notice => notice.number)).toEqual(['R26GENERAL0']);
     expect(db.indexUpsert.mock.calls[0][1].removed.map(notice => notice.number)).toEqual(['R26GENERAL1']);
+    expect(db.commit.mock.calls[0][1].sources?.[0]).not.toHaveProperty('rawIdentities');
   });
 
   it('leaves unstarted current pages and remaining verification queued at the shared request cap', async () => {

@@ -274,11 +274,13 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
         if (job.totalCount !== null && job.totalCount !== response.totalCount) throw new SourceSnapshotChanged('조회 도중 전체 건수가 바뀌어 확인 범위를 다시 수집합니다.');
         validPage(response.items, response.totalCount, job.page, job.pageSize);
         const ids = new Set<string>(), observed = new Map<string, ActiveCatalogIdentity>(), items: AlertNotice[] = [];
+        const rawIdentities: string[] = [];
         const indexFacts: AlertNotice[] = [];
         for (const row of response.items) {
           const notice = fact(row, job.type, now);
           if (ids.has(notice.id)) throw new SourceSnapshotChanged('공고 목록의 차수가 중복되어 확인 범위를 다시 수집합니다.');
           ids.add(notice.id);
+          if (job.kind === 'current') rawIdentities.push(`${notice.number}:${notice.revision}`);
           // The current-only sweep completes the four requested work areas
           // first. Unrelated rows are still validated and observed below;
           // omission from this focused index is never a cancellation signal.
@@ -312,6 +314,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
         // Index batches remain unverified until the complete history is published.
         const completed = { id: job.id, page: job.page, totalCount: response.totalCount,
           receivedCount: response.items.length, observed: [...observed.values()], items,
+          ...(job.kind === 'current' ? { rawIdentities } : {}),
           complete: (job.page - 1) * job.pageSize + response.items.length === response.totalCount };
         const stored = await commit({ scopeVersion: claim.scopeVersion, sources: [completed] });
         if (stored.restartRequired) warnings.push('공고 조회 순서가 바뀌어 해당 구간을 처음부터 다시 확인합니다.');
