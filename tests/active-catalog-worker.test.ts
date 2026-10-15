@@ -182,6 +182,29 @@ describe('all-age active catalog collection', () => {
     expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String) });
   });
 
+  it.each([{ count: 32, failFirst: false }, { count: 32, failFirst: true }, { count: 36, failFirst: false }])(
+    'flushes $count failed current/live sources within the sixteen-source RPC fence (first failure: $failFirst)', async ({ count, failFirst }) => {
+      const jobs = Array.from({ length: count }, (_, index) => source({ id: `failed-source-${index}`,
+        kind: count === 36 && index < 4 ? 'registered' : 'current' }));
+      const db = store(jobs, [], []);
+      db.indexUpsert.mockResolvedValue({ ok: false, storageFull: true });
+      db.commit.mockImplementation(async (_lease, payload) => {
+        if ((payload.failedSources?.length ?? 0) > 16) throw new Error('legacy sixteen-source RPC guard');
+        if (failFirst && db.commit.mock.calls.length === 1) throw new Error('private retry storage URL');
+        return { ok: true };
+      });
+      const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [], totalCount: 0 }));
+      const result = await runActiveCatalogWorker(db, { provider, now, maxRequests: 40 });
+      expect(result).toMatchObject({ ok: false, sources: 0, requests: count });
+      expect(db.commit.mock.calls.map(([, payload]) => payload.failedSources?.length)).toEqual(count === 32 ? [16, 16] : [16, 16, 4]);
+      const failedIds = db.commit.mock.calls.flatMap(([, payload]) => payload.failedSources ?? []).map(job => job.id).sort();
+      expect(failedIds).toEqual(jobs.map(job => job.id).sort());
+      expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? [])).toEqual([]);
+      expect(provider).toHaveBeenCalledTimes(count);
+      expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String) });
+      expect(JSON.stringify(result)).not.toContain('private retry storage URL');
+    });
+
   it('publishes a cancellation tombstone from complete history without fetching inactive participant conditions', async () => {
     const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
     const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row(), row({ bidNtceOrd: '001', ntceKindNm: '취소공고' })], totalCount: 2 }));

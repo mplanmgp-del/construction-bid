@@ -341,8 +341,12 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       warnings.push(...failedSources.map(item => item.error));
       // Discovery failure cannot acknowledge its source page or prevent an
       // unrelated verified head from fitting within the unchanged storage caps.
-      try { await commit({ scopeVersion: claim.scopeVersion, sources: [], failedSources }); }
-      catch (error) { warnings.push(safeError(error)); }
+      // Accelerated current claims can contain 32 sources plus live streams;
+      // the existing retry RPC still accepts at most 16 entries per array.
+      for (let offset = 0; offset < failedSources.length; offset += 16) {
+        try { await commit({ scopeVersion: claim.scopeVersion, sources: [], failedSources: failedSources.slice(offset, offset + 16) }); }
+        catch (error) { warnings.push(safeError(error)); }
+      }
     }
   } catch (error) { warnings.push(safeError(error)); }
   const uniqueWarnings = [...new Set(warnings)];
