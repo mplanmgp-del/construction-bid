@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowUpRight, Bookmark, CircleAlert, LoaderCircle, Search } from 'lucide-react';
-import type { BidNotice } from '../types';
+import { NOTICE_REVISION_CONTEXT, type BidNotice } from '../types';
 import { noticeState } from '../notice-status';
 import { currentNotice } from './client';
 import {
@@ -22,6 +22,13 @@ function latestState(notice: BidNotice) {
   if (current.status === '마감') return { label: '입찰 마감', tone: 'closed' };
   const phase = noticeState(current);
   return { label: phase.label === '-' ? '상태 확인 필요' : phase.label, tone: phase.tone };
+}
+
+/** Preserve the original record while carrying its current revision context into the drawer. */
+export function historicNoticeForDetail(notice: BidNotice, latest: BidNotice): BidNotice {
+  if (notice.number !== latest.number || notice.type !== latest.type || Number(latest.revision) <= Number(notice.revision)) return notice;
+  return { ...notice, [NOTICE_REVISION_CONTEXT]: { latestRevision: latest.revision, latestStatus: latest.status,
+    ...(latest.noticeKind ? { latestNoticeKind: latest.noticeKind } : {}) } };
 }
 
 export function NoticeNumberResults({ snapshot, bookmarks, onBookmark, onOpen }: {
@@ -49,7 +56,7 @@ export function NoticeNumberResults({ snapshot, bookmarks, onBookmark, onOpen }:
             const current = item.revision === latest.revision, requested = item.revision === group.requestedRevision;
             return <li key={item.revision} data-revision={item.revision} data-current={current} data-requested={requested} className={requested ? 'is-requested' : undefined}>
               <div><strong>{current ? '최신' : '이전'} {item.revision}차수</strong><span>{item.noticeKind || (item.status === '취소' ? '취소공고' : '등록공고')}{requested ? ' · 입력한 차수' : ''}</span><small>{fullDate(item.postedAt)}{!current ? ' · 현재 상태는 최신 차수 기준' : ''}</small></div>
-              <button type="button" onClick={() => onOpen(item)} aria-label={`${item.number}-${item.revision} ${current ? '최신' : '이전'} 차수 상세보기`}>상세보기<ArrowUpRight size={14} /></button>
+              <button type="button" onClick={() => onOpen(historicNoticeForDetail(item, latest))} aria-label={`${item.number}-${item.revision} ${current ? '최신' : '이전'} 차수 상세보기`}>상세보기<ArrowUpRight size={14} /></button>
             </li>;
           })}</ol>
         </details>

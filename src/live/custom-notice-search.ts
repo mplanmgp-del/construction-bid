@@ -40,6 +40,18 @@ function publicationWindows(from: string, to: string): Pick<CustomNoticeSource, 
   }
   return windows;
 }
+function openingWindows(from: string, to: string): Pick<CustomNoticeSource, 'from' | 'to'>[] {
+  const last = Date.parse(to), windows: Pick<CustomNoticeSource, 'from' | 'to'>[] = [];
+  // Opening-date searches reject some 31-day spans across February. Calendar-contained
+  // windows satisfy the provider's one-month rule for every month, including leap years.
+  for (let start = Date.parse(from); start <= last;) {
+    const date = new Date(start), monthEnd = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0);
+    const end = Math.min(last, monthEnd);
+    windows.push({ from: new Date(start).toISOString().slice(0, 10), to: new Date(end).toISOString().slice(0, 10) });
+    start = end + DAY_MS;
+  }
+  return windows;
+}
 function safeLicenseAxis(values: string[]): string[] {
   const licenses = [...new Set(values.map(plainLicense))];
   // The provider's partial name search does not promise our whitespace/dot/code normalization.
@@ -74,9 +86,8 @@ export function planCustomNoticeSearch(input: CustomNoticeQuery): { query: Custo
     axis.push(...filter.keywords.map(keyword => ({ keyword })), ...filter.keywords.map(agency => ({ agency })),
       ...filter.keywords.map(demandAgency => ({ demandAgency })));
   } else axis.push({});
-  const windows = publicationWindows(query.from, query.to);
   // Active searches start with openings closest to today. Posting searches keep their newest-first order.
-  if (query.basis === 'opening') windows.reverse();
+  const windows = query.basis === 'opening' ? openingWindows(query.from, query.to) : publicationWindows(query.from, query.to);
   const sources = windows.flatMap(window =>
     axis.flatMap(part => filter.types.map(type => ({ ...common, ...window, ...part, type, ...(query.basis ? { basis: query.basis } : {}) }))));
   return { query, sources: [...new Map(sources.map(source => [JSON.stringify(source), source])).values()] };
@@ -316,6 +327,20 @@ export class CustomNoticesController {
           sourceCount++; sourceInFlight++;
           const task = loadSource(cursor).finally(() => { sourceInFlight--; inFlight.delete(task); });
           inFlight.add(task);
+        }
+        if (this.query?.basis === 'opening' && this.pending.length > 1) {
+          const query = this.query, relaxed = { ...query.settings, enabled: true, filter: { ...query.settings.filter, includeUnknown: true } };
+          const now = this.clock();
+          // Faster sources must not spend the entire bounded check budget on old closed
+          // or unrelated rows. This only changes priority: every candidate remains queued
+          // for mandatory latest-version validation, including facts which may have changed.
+          this.pending = this.pending.map((candidate, index) => {
+            const opening = Date.parse(candidate.notice.openingAt);
+            return { candidate, index, rank: matchAlertNotice(candidate.notice, relaxed, query.profile, now).matched ? 0 : 1,
+              opening: Number.isFinite(opening) ? opening : Infinity };
+          }).sort((first, second) => first.rank - second.rank
+            || (first.opening === second.opening ? 0 : first.opening - second.opening) || first.index - second.index)
+            .map(item => item.candidate);
         }
         const detailJobs = take(this.pending, Math.min(CONCURRENCY - detailInFlight, DETAIL_BATCH_LIMIT - detailCount), item => !failedDetails.has(item.key));
         for (const candidate of detailJobs) {

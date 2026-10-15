@@ -133,20 +133,37 @@ describe('custom notice request planning', () => {
 
 describe('active notices use opening dates and verify every latest revision', () => {
   const activeQuery = (filter: Partial<AlertSettings['filter']> = {}): CustomNoticeQuery => ({
-    ...query(filter), basis: 'opening', from: '2026-10-15', to: '2027-10-15',
+    ...query(filter), basis: 'opening', from: '2027-03-01', to: '2027-03-31',
   });
   const oldOpen = (number = 'R26BK01359594', overrides: Partial<AlertNotice> = {}) => notice(number, {
     postedAt: '2026-02-26T17:23:00+09:00', sourceUpdatedAt: '2026-02-26T17:23:00+09:00',
     openingAt: '2027-03-05T11:00:00+09:00', deadline: '2027-03-05T10:00:00+09:00', status: '접수중', ...overrides,
   });
   it('covers 366 inclusive opening days in provider windows and preserves old posting limits', () => {
-    const plan = planCustomNoticeSearch(activeQuery());
+    const yearQuery = { ...activeQuery(), from: '2026-10-15', to: '2027-10-15' };
+    const plan = planCustomNoticeSearch(yearQuery);
     expect(CUSTOM_ACTIVE_MAX_DAYS).toBe(366); expect(plan.query.basis).toBe('opening');
-    expect(plan.sources).toHaveLength(12);
+    expect(plan.sources).toHaveLength(13);
     expect(plan.sources.every(source => source.basis === 'opening' && Date.parse(source.to) - Date.parse(source.from) <= 30 * 86_400_000)).toBe(true);
     expect(plan.sources[0].from).toBe('2026-10-15'); expect(plan.sources.at(-1)?.to).toBe('2027-10-15');
-    expect(() => planCustomNoticeSearch({ ...activeQuery(), to: '2027-10-16' })).toThrow('366일');
+    expect(() => planCustomNoticeSearch({ ...yearQuery, to: '2027-10-16' })).toThrow('366일');
     expect(() => planCustomNoticeSearch({ ...query(), to: '2027-10-15' })).toThrow('90일');
+  });
+  it('keeps opening windows within calendar months because a 31-day February-crossing range is rejected upstream', () => {
+    const plan = planCustomNoticeSearch({ ...activeQuery(), from: '2027-02-09', to: '2027-03-11' });
+    expect(plan.sources.map(({ from, to }) => ({ from, to }))).toEqual([
+      { from: '2027-02-09', to: '2027-02-28' }, { from: '2027-03-01', to: '2027-03-11' },
+    ]);
+    expect(plan.sources.every(source => source.from.slice(0, 7) === source.to.slice(0, 7))).toBe(true);
+  });
+  it('covers leap February and adjacent opening months without missing or duplicating a boundary day', () => {
+    const plan = planCustomNoticeSearch({ ...activeQuery(), from: '2028-01-31', to: '2028-03-01' });
+    expect(plan.sources.map(({ from, to }) => ({ from, to }))).toEqual([
+      { from: '2028-01-31', to: '2028-01-31' }, { from: '2028-02-01', to: '2028-02-29' }, { from: '2028-03-01', to: '2028-03-01' },
+    ]);
+    const days = plan.sources.flatMap(source => Array.from({ length: (Date.parse(source.to) - Date.parse(source.from)) / 86_400_000 + 1 },
+      (_, index) => new Date(Date.parse(source.from) + index * 86_400_000).toISOString().slice(0, 10)));
+    expect(days).toHaveLength(31); expect(new Set(days).size).toBe(31);
   });
   it('propagates opening dates and sends an all-revision number lookup without the original order', async () => {
     vi.mocked(fetchApi).mockResolvedValue(page([]));
@@ -244,7 +261,7 @@ describe('active notices use opening dates and verify every latest revision', ()
     const lookup = vi.fn<NonNullable<CustomNoticeRepository['lookup']>>((bid) => (bid as AlertNotice).revision === '000'
       ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(page([cancelled, original])));
     const controller = new CustomNoticesController({ ...repository(async (_source, currentPage) => page([currentPage === 1 ? original : cancelled], currentPage === 1, currentPage)), lookup }, () => now);
-    controller.setUser('a'); const pending = controller.search({ ...activeQuery(), to: '2026-10-31' });
+    controller.setUser('a'); const pending = controller.search({ ...activeQuery(), from: '2026-10-15', to: '2026-10-31' });
     await vi.waitFor(() => expect(controller.getSnapshot().excludedItems).toHaveLength(1));
     expect(controller.getSnapshot().items).toEqual([]);
     finish(page([original])); await pending;
@@ -257,7 +274,7 @@ describe('active notices use opening dates and verify every latest revision', ()
     const controller = new CustomNoticesController({ ...repository(async (_source, currentPage) => {
       lastPage = currentPage; return page([currentPage < 13 ? original : cancelled], currentPage < 13, currentPage);
     }), lookup: async () => page([lastPage < 13 ? original : cancelled]) }, () => now);
-    controller.setUser('a'); await controller.search({ ...activeQuery(), to: '2026-10-31' });
+    controller.setUser('a'); await controller.search({ ...activeQuery(), from: '2026-10-15', to: '2026-10-31' });
     expect(controller.getSnapshot()).toMatchObject({ items: [expect.any(Object)], hasMore: true });
     await controller.loadMore();
     expect(controller.getSnapshot()).toMatchObject({ items: [], excludedItems: [expect.objectContaining({ revision: '000', status: '취소' })], hasMore: false });
@@ -283,6 +300,55 @@ describe('active notices use opening dates and verify every latest revision', ()
     }), lookup: async bid => { await pause(); return page([bids.find(item => item.number === bid.number)!]); } }, () => now);
     controller.setUser('a'); await controller.search(activeQuery({ licenses: ['철거'], includeUnknown: true }));
     expect(maximum).toBe(4); expect(controller.getSnapshot().items).toHaveLength(8);
+  });
+  it('checks likely active matches before known closed or category mismatches without discarding their potentially updated latest revision', async () => {
+    const closed = Array.from({ length: 20 }, (_, index) => oldOpen(`CLOSED${index}`, { deadline: '2026-10-01T10:00:00+09:00', status: '마감' }));
+    const mismatches = Array.from({ length: 3 }, (_, index) => oldOpen(`OTHER${index}`, { category: '조경' }));
+    const likely = oldOpen('LIKELY', { category: '철거·해체' });
+    const calls: string[] = [];
+    const controller = new CustomNoticesController({ ...repository(async () => page([...closed, ...mismatches, likely])), lookup: async bid => {
+      calls.push(bid.number);
+      return page([bid.number === 'OTHER0' ? oldOpen('OTHER0', { revision: '001', category: '철거·해체' }) : [...closed, ...mismatches, likely].find(item => item.number === bid.number)!]);
+    } }, () => now);
+    controller.setUser('a'); await controller.search(activeQuery({ categories: ['철거·해체'] }));
+    expect(calls[0]).toBe('LIKELY'); expect(controller.getSnapshot().items.map(item => item.number)).toContain('LIKELY');
+    expect(controller.getSnapshot().hasMore).toBe(true);
+    await controller.loadMore();
+    expect(new Set(calls).size).toBe(24); expect(calls).toHaveLength(24);
+    expect(controller.getSnapshot().items.map(item => item.number).sort()).toEqual(['LIKELY', 'OTHER0']);
+    expect(controller.getSnapshot().excludedItems).toHaveLength(20);
+    expect(controller.getSnapshot().hasMore).toBe(false);
+  });
+  it('prioritizes a slower closest-opening source after it arrives ahead of remaining faster far-opening candidates', async () => {
+    const near = oldOpen('NEAR', { openingAt: '2026-10-20T11:00:00+09:00' });
+    const far = Array.from({ length: 25 }, (_, index) => oldOpen(`FAR${index}`, { openingAt: '2026-11-10T11:00:00+09:00' }));
+    let finishNear!: (value: G2bNoticePage) => void;
+    const nearPage = new Promise<G2bNoticePage>(resolve => { finishNear = resolve; });
+    const releaseFar: (() => void)[] = [];
+    const calls: string[] = [];
+    const controller = new CustomNoticesController({ ...repository(async source => source.from === '2026-10-15' ? nearPage : page(far)), lookup: async bid => {
+      calls.push(bid.number);
+      if (calls.length <= 4) await new Promise<void>(resolve => { releaseFar.push(resolve); });
+      return page([bid.number === 'NEAR' ? near : far.find(item => item.number === bid.number)!]);
+    } }, () => now);
+    controller.setUser('a'); const pending = controller.search({ ...activeQuery(), from: '2026-10-15', to: '2026-11-30' });
+    await vi.waitFor(() => expect(calls).toHaveLength(4));
+    finishNear(page([near]));
+    await vi.waitFor(() => expect(controller.getSnapshot().candidateCount).toBe(26));
+    releaseFar.forEach(release => release()); await pending;
+    expect(calls[4]).toBe('NEAR'); expect(calls).toHaveLength(20);
+    expect(controller.getSnapshot().items.map(item => item.number)).toContain('NEAR');
+    await controller.loadMore(); expect(calls).toHaveLength(26); expect(new Set(calls).size).toBe(26);
+  });
+  it('orders otherwise equal-priority candidates by known opening date, keeps ties stable and places unknown openings later', async () => {
+    const bids = [oldOpen('FAR', { openingAt: '2027-03-20T11:00:00+09:00' }), oldOpen('TIE1', { openingAt: '2027-03-10T11:00:00+09:00' }),
+      oldOpen('UNKNOWN', { openingAt: '' }), oldOpen('NEAR', { openingAt: '2027-03-02T11:00:00+09:00' }), oldOpen('TIE2', { openingAt: '2027-03-10T11:00:00+09:00' })];
+    const calls: string[] = [];
+    const controller = new CustomNoticesController({ ...repository(async () => page(bids)), lookup: async bid => {
+      calls.push(bid.number); return page([oldOpen(bid.number, { openingAt: bids.find(item => item.number === bid.number)?.openingAt || '2027-03-30T11:00:00+09:00' })]);
+    } }, () => now);
+    controller.setUser('a'); await controller.search(activeQuery());
+    expect(calls).toEqual(['NEAR', 'TIE1', 'TIE2', 'FAR', 'UNKNOWN']); expect(controller.getSnapshot().items).toHaveLength(5);
   });
 });
 

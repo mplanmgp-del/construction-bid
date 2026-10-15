@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 import { CalendarClock, Check, Download, ExternalLink, FileText, Info, MapPin, ShieldCheck, X } from 'lucide-react';
 import { BookmarkButton } from './BookmarkButton';
 import { assessRegion, daysUntil, formatDateTime, formatPrice } from '../domain';
-import type { BidNotice, CompanyProfile, RegionAssessment } from '../types';
+import { NOTICE_REVISION_CONTEXT, type BidNotice, type CompanyProfile, type RegionAssessment } from '../types';
 import type { G2bNoticeDetail } from '../g2b-types';
 import { currentNotice, fetchApi, koreanToday, safeG2bUrl } from '../live/client';
 import { PublicResults } from '../live/PublicResults';
@@ -39,6 +39,7 @@ export function resolveDisplayedBid(inputBid: BidNotice, loaded: LoadedDetail | 
     detail,
     bid: currentNotice({
       ...(latest ?? inputBid), id: inputBid.id,
+      [NOTICE_REVISION_CONTEXT]: inputBid[NOTICE_REVISION_CONTEXT],
       allowedRegions: detail.regionComplete ? detail.allowedRegions : inputBid.allowedRegions,
       licenses: detail.licenseComplete ? detail.licenses : inputBid.licenses,
       detailUrl: detail.sourceUrl || latest?.detailUrl || inputBid.detailUrl,
@@ -147,7 +148,12 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
   useEffect(() => setActiveTab('overview'), [bid.id]);
 
   const days = daysUntil(bid.deadline, isLive ? koreanToday() : undefined);
-  const state = noticeState(bid, now);
+  const revisionContext = bid[NOTICE_REVISION_CONTEXT];
+  const historical = revisionContext && /^\d{1,3}$/.test(revisionContext.latestRevision)
+    && Number(revisionContext.latestRevision) > Number(bid.revision) ? revisionContext : null;
+  const latestRevisionLabel = historical ? historical.latestStatus === '취소' || historical.latestNoticeKind?.includes('취소')
+    ? '취소공고' : historical.latestNoticeKind || historical.latestStatus : '';
+  const state = historical ? { label: `이전 ${bid.revision}차수`, tone: 'unknown', description: `최신 ${historical.latestRevision}차수 · ${latestRevisionLabel}` } : noticeState(bid, now);
   const deadlineLabel = bid.status === '취소' ? '취소된 공고' : bid.status === '마감' || days < 0 ? '제출 마감'
     : !Number.isFinite(days) ? '마감일 확인 필요' : days === 0 ? '오늘 마감' : `마감 D-${days}`;
   const regionStatusLabel = assessment.status === 'matched' ? '지역 일치' : assessment.status === 'excluded' ? '지역 제외' : '확인 필요';
@@ -185,6 +191,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
           </div>
           <p className="detail-agency">{bid.agency}</p>
           <p className="detail-notice-number">공고번호 <strong>{bid.number}</strong><span>차수 {bid.revision}</span></p>
+          {historical && <div className="detail-warning" role="note" aria-label="이전 차수 공고 안내"><Info size={19} aria-hidden="true" /><div><strong>이전 {bid.revision}차수 · 최신 {historical.latestRevision}차수 · {latestRevisionLabel}</strong><p>이 화면의 일정과 참가조건은 이전 차수의 기록입니다. 현재 공고 상태는 최신 {historical.latestRevision}차수를 기준으로 확인해 주세요.</p></div></div>}
           <div className={`detail-region-assessment detail-region-${assessment.status}`}>
             {assessment.status === 'matched' ? <Check size={19} aria-hidden="true" /> : <Info size={19} aria-hidden="true" />}
             <div><strong>{regionStatusLabel}</strong><p>{assessment.reason}</p></div>
@@ -204,7 +211,7 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
         <div className="detail-content" role="tabpanel" id={`${id}-panel-${activeTab}`} aria-labelledby={`${id}-tab-${activeTab}`} tabIndex={0}>
           {isLive && activeTab === 'results' && <PublicResults bid={bid} />}
           {isLive && activeTab === 'preparation' && preparation}
-          {isLive && activeTab === 'overview' && <div className="detail-live-status"><p role="status">{detailStatus}</p><div><button className="text-button" onClick={() => setDetailRetry(value => value + 1)}>새로 조회</button><a href={`/notice-detail.html?${new URLSearchParams({ number: bid.number, revision: bid.revision, type: bid.type })}`} target="_blank" rel="noopener noreferrer">넓은 화면으로 보기<ExternalLink size={14} /></a></div></div>}
+          {isLive && activeTab === 'overview' && <div className="detail-live-status"><p role="status">{detailStatus}</p><div><button className="text-button" onClick={() => setDetailRetry(value => value + 1)}>새로 조회</button><a href={`/notice-detail.html?${new URLSearchParams({ number: bid.number, revision: historical?.latestRevision ?? bid.revision, type: bid.type })}`} target="_blank" rel="noopener noreferrer">{historical ? '최신 차수 넓은 화면으로 보기' : '넓은 화면으로 보기'}<ExternalLink size={14} /></a></div></div>}
           {activeTab === 'overview' && (isLive ? detailData ? <CompleteNoticeDetails detail={detailData} bid={bid} /> : <PendingNoticeDetails bid={bid} failed={failedRequest === requestKey} /> : <>
             <div className="detail-price-block"><span>추정가격</span><strong>{formatPrice(bid.estimatedPrice)}</strong><p>{bid.estimatedPrice === null ? '이 공고에는 추정가격이 제공되지 않았습니다.' : '금액 검색 및 정렬에 사용하는 추정가격입니다.'}</p></div>
             <section className="detail-section" aria-labelledby={`${id}-base-info`}>
