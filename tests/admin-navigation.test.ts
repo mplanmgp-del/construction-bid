@@ -23,12 +23,12 @@ describe('menu access including direct links', () => {
 });
 
 
-describe('custom notice search access',()=>{
-  it('uses the notices permission for a direct custom-search link',()=>{
-    expect(appViewFromHash('#custom-search')).toBe('custom');
-    expect(appViewHash('custom')).toBe('#custom-search');
-    expect(menuIsLocked('custom',true,false,settings)).toBe(false);
-    expect(menuIsLocked('custom',true,false,settings.map(s=>({...s,locked:true})))).toBe(true);
-    expect(menuIsLocked('custom',false,true,settings)).toBe(true);
+describe('retired custom search links',()=>{
+  it('redirects a retired custom-search link to the notices page and its permissions',()=>{
+    expect(appViewFromHash('#custom-search')).toBe('notices');
+    expect(appViewHash(appViewFromHash('#custom-search'))).toBe('');
+    expect(menuIsLocked(appViewFromHash('#custom-search'),true,false,settings)).toBe(false);
+    expect(menuIsLocked(appViewFromHash('#custom-search'),true,false,settings.map(s=>({...s,locked:true})))).toBe(true);
+    expect(menuIsLocked(appViewFromHash('#custom-search'),false,true,settings)).toBe(true);
   });
 });

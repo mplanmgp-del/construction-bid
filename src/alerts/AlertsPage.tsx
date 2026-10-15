@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Bell, BellRing, CheckCheck, ChevronRight, CircleAlert, Clock3, Save, Search, Settings2 } from 'lucide-react';
+import { Bell, BellRing, CheckCheck, ChevronRight, CircleAlert, Clock3, Save, Settings2 } from 'lucide-react';
 import { CATEGORIES, type Category, type CompanyProfile } from '../types';
 import { formatDateTime, formatPrice } from '../domain';
 import { DEFAULT_ALERT_SETTINGS, type AlertFilter, type AlertNotice, type AlertSettings } from './types';
@@ -31,8 +31,8 @@ function noticeHref(notice: AlertNotice): string {
   return `/notice-detail.html?${new URLSearchParams({ number: notice.number, revision: notice.revision, type: notice.type })}`;
 }
 
-export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin = false, demo = false, initialFilter, onInitialFilterConsumed, openExistingRequest = 0, bookmarks = [], onBookmark, onSearch, initialSettings, onInitialSettingsConsumed }: {
-  alerts: AlertsAccess; signedIn: boolean; onLogin: () => void; profile?: CompanyProfile | null; isAdmin?: boolean; demo?: boolean; initialFilter?: AlertFilter | null; onInitialFilterConsumed?: () => void; openExistingRequest?: number; bookmarks?: string[]; onBookmark?: (notice: AlertNotice) => void; onSearch?: (settings: AlertSettings) => void; initialSettings?: AlertSettings | null; onInitialSettingsConsumed?: () => void;
+export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin = false, demo = false, initialFilter, onInitialFilterConsumed, openExistingRequest = 0, bookmarks = [], onBookmark }: {
+  alerts: AlertsAccess; signedIn: boolean; onLogin: () => void; profile?: CompanyProfile | null; isAdmin?: boolean; demo?: boolean; initialFilter?: AlertFilter | null; onInitialFilterConsumed?: () => void; openExistingRequest?: number; bookmarks?: string[]; onBookmark?: (notice: AlertNotice) => void;
 }) {
   const settings = alerts.overview?.settings ?? DEFAULT_ALERT_SETTINGS;
   const [form, setForm] = useState<AlertForm>(() => formFromSettings(settings));
@@ -58,18 +58,13 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
     dirtyRef.current = true; setDirty(true); editVersion.current++; setFormError('');
     onInitialFilterConsumed?.();
   }, [initialFilter]);
-  useEffect(() => {
-    if (!initialSettings) return;
-    setForm(formFromSettings(initialSettings)); dirtyRef.current = true; setDirty(true); editVersion.current++; setFormError('');
-    onInitialSettingsConsumed?.();
-  }, [initialSettings]);
   const update = <K extends keyof AlertForm>(key: K, value: AlertForm[K]) => { dirtyRef.current = true; setDirty(true); editVersion.current++; setForm(previous => ({ ...previous, [key]: value })); setFormError(''); };
-  function readSettings(forLookup = false): AlertSettings {
+  function readSettings(): AlertSettings {
     const filter: AlertFilter = { keywords: splitValues(form.keywords), excludeKeywords: splitValues(form.excludeKeywords), types: form.types, categories: form.categories,
       regions: splitValues(form.regions), licenses: splitValues(form.licenses), minAmount: form.minAmount.trim() ? Number(form.minAmount) : null, maxAmount: form.maxAmount.trim() ? Number(form.maxAmount) : null,
       includeUnknown: form.includeUnknown, useCompanyRegion: form.useCompanyRegion, regionBasis: form.regionBasis,
       agencies: splitValues(form.agencies), contractMethods: splitValues(form.contractMethods), minDaysUntilDeadline: form.minDaysUntilDeadline.trim() ? Number(form.minDaysUntilDeadline) : null, useCompanyLicenses: form.useCompanyLicenses };
-    const normalized = normalizeAlertSettings({ ...settings, enabled: forLookup || form.enabled, notifyChanges: form.notifyChanges, filter });
+    const normalized = normalizeAlertSettings({ ...settings, enabled: form.enabled, notifyChanges: form.notifyChanges, filter });
     return { ...normalized, enabled: form.enabled };
   }
   function showFormError(error: unknown) { setFormError(error instanceof Error ? error.message : '알림 조건을 확인해 주세요.'); firstInput.current?.focus(); }
@@ -80,7 +75,6 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
     const result = await alerts.save(nextSettings);
     if (result && editVersion.current === submittedVersion) { dirtyRef.current = false; setDirty(false); }
   }
-  function lookup() { try { onSearch?.(readSettings(true)); } catch (error) { showFormError(error); } }
   useEffect(() => {
     if (openExistingRequest <= 0 || !signedIn || demo) return;
     setShowExisting(true);
@@ -154,7 +148,6 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
             <label className="alerts-checkbox"><input type="checkbox" checked={form.notifyChanges} onChange={event => update('notifyChanges', event.target.checked)} /><span>진행중·마감 임박·예정 공고의 중요한 변경도 알림 받기</span></label>
             <p className="alerts-help">검색어·분야·지역·면허·기관·계약방법·가격·남은 일수 중 조건을 하나 이상 정해 주세요. 서로 다른 조건은 모두 충족해야 하며, 같은 입력란의 여러 값은 하나 이상 일치하면 됩니다. 최종 참가 자격과 제출 일정은 공고 원문을 확인해 주세요.</p>
             {formError && <p className="alerts-form-error" role="alert">{formError}</p>}
-            {onSearch && <button type="button" className="button button-secondary alerts-query-button" onClick={lookup}><Search size={16} />맞춤 조회</button>}
             <button type="submit" className="button button-primary alerts-save"><Save size={16} /><span>{alerts.saving ? '저장 중' : '알림 조건 저장'}</span></button>
           </fieldset>
         </form>

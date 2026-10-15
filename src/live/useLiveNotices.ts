@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { G2bNoticePage } from '../g2b-types';
-import { DEFAULT_ALERT_SETTINGS } from '../alerts/types';
 import { deadlineMonthWindow, matchesDeadlineWindow } from '../notice-deadline-window';
-import { CustomNoticesController } from './custom-notice-search';
+import { IndexedNoticesController } from './indexed-notice-search';
 import { NOTICE_CACHE_MAX_AGE_MS, normalizedNoticeQuery, noticeQueryKey } from './notice-cache';
 import type { NoticeQuery } from './notice-search';
 export type { NoticeQuery } from './notice-search';
@@ -17,8 +16,8 @@ export function canRetainNoticePage(page: G2bNoticePage | null | undefined, now 
 export function useLiveNotices(enabled: boolean) {
   const [query, setQuery] = useState<NoticeQuery>(() => ({ type: '공사·용역', ...deadlineMonthWindow(6), keyword: '' }));
   const [version, setVersion] = useState(0);
-  const controllerRef = useRef<CustomNoticesController | null>(null);
-  if (!controllerRef.current) controllerRef.current = new CustomNoticesController();
+  const controllerRef = useRef<IndexedNoticesController | null>(null);
+  if (!controllerRef.current) controllerRef.current = new IndexedNoticesController();
   const controller = controllerRef.current;
   const activeKey = useRef('');
   const [snapshot, setSnapshot] = useState(controller.getSnapshot);
@@ -28,13 +27,7 @@ export function useLiveNotices(enabled: boolean) {
     if (!enabled) { controller.setUser(); return; }
     activeKey.current = key;
     controller.setUser('public-deadline-search');
-    const settings = { ...structuredClone(DEFAULT_ALERT_SETTINGS), enabled: false, filter: {
-      ...structuredClone(DEFAULT_ALERT_SETTINGS.filter), keywords: normalized.keyword ? [normalized.keyword] : [],
-      types: normalized.type === '공사·용역' ? ['공사', '용역'] as ['공사', '용역'] : [normalized.type],
-      categories: [], regions: [], licenses: [], includeUnknown: true, useCompanyRegion: false, useCompanyLicenses: false,
-      minAmount: null, maxAmount: null, minDaysUntilDeadline: null, agencies: [], contractMethods: [],
-    } };
-    void controller.search({ settings, profile: null, from: normalized.from, to: normalized.to, basis: 'deadline', publicKeyword: normalized.keyword });
+    void controller.search(normalized);
     return () => controller.setUser();
   }, [controller, enabled, key, version]);
   const search = useCallback((next: NoticeQuery) => { setQuery(next); setVersion(value => value + 1); }, []);

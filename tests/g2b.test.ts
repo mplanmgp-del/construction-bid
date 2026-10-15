@@ -7,6 +7,12 @@ const record = (extra = {}) => ({ bidNtceNo: 'R26BK01764167', bidNtceOrd: '000',
 const response = (items: unknown[], totalCount = items.length) => new Response(JSON.stringify({ response: { header: { resultCode: '00' }, body: { items, totalCount } } }));
 
 describe('official G2B mapping', () => {
+  it('preserves the source change clock when checking the same revision against the shared index', () => {
+    const fields = { bidNtceDt: '2026-10-01 09:00:00', rgstDt: '2026-10-01 09:01:00', chgDt: '2026-10-15 17:00:00' };
+    expect(mapNotice(record(fields), '공사')).toMatchObject({ postedAt: '2026-10-01T09:00:00+09:00', sourceUpdatedAt: '2026-10-15T17:00:00+09:00' });
+    expect(mapNotice(record({ ...fields, chgDt: '' }), '공사')).toMatchObject({ sourceUpdatedAt: '2026-10-01T09:01:00+09:00' });
+    expect(mapNotice(record({ ...fields, chgDt: '', rgstDt: '' }), '공사')).toMatchObject({ sourceUpdatedAt: '2026-10-01T09:00:00+09:00' });
+  });
   it('uses estimated price only, preserving zero and missing values', () => {
     expect(mapNotice(record({ presmptPrce: '0', bssAmt: '999' }), '공사').estimatedPrice).toBe(0);
     expect(mapNotice(record({ presmptPrce: '', bssAmt: '999', bdgtAmt: '1000' }), '공사').estimatedPrice).toBeNull();
@@ -46,7 +52,7 @@ describe('official G2B mapping', () => {
 describe('G2B request validation', () => {
   it.each([
     { from: '2026-02-30', to: '2026-03-01' }, { from: '2026-10-13', to: '2026-10-12' },
-    { from: '2026-09-01', to: '2026-10-12' }, { page: '0' }, { pageSize: '101' }, { type: '물품' }, { keyword: 'a'.repeat(101) },
+    { from: '2026-09-01', to: '2026-10-12' }, { page: '0' }, { pageSize: '101' }, { type: '물품' }, { keyword: 'a'.repeat(101) }, { basis: 'opening' },
   ])('rejects malformed or unbounded queries %o', change => {
     const values: Record<string, string> = { type: '공사', from: '2026-10-12', to: '2026-10-12' };
     Object.entries(change).forEach(([key, value]) => { if (value !== undefined) values[key] = value; });

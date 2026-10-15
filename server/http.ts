@@ -99,9 +99,7 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
       if (params.get('mode') === 'deadline') {
         // The provider has no submission-deadline range operation. This route
         // reads only the shared deadline index; it never scans posting years.
-        const normalized = new URLSearchParams(params);
-        normalized.set('basis', 'posted');
-        const { type, from, to, keyword, page, pageSize } = parseSearch(normalized, 367);
+        const { type, from, to, keyword, page, pageSize } = parseSearch(params, 367);
         return { status: 200, body: await readDeadlineCatalog({ type, from, to, keyword, page, pageSize }) };
       }
       if (params.get('mode') === 'number') {

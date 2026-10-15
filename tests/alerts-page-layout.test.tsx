@@ -39,9 +39,9 @@ describe('alert settings page after inbox moves to the bell', () => {
 });
 
 
-it('offers a direct custom lookup alongside condition saving',()=>{
-  const html=renderToStaticMarkup(<AlertsPage alerts={access()} signedIn onLogin={()=>{}} onSearch={()=>{}}/>);
-  expect(html).toContain('맞춤 조회');expect(html).toContain('알림 조건 저장');
+it('keeps alert condition saving without a removed custom lookup entry',()=>{
+  const html=renderToStaticMarkup(<AlertsPage alerts={access()} signedIn onLogin={()=>{}}/>);
+  expect(html).not.toContain('맞춤 조회');expect(html).toContain('알림 조건 저장');
 });
 
 it('shows the rolling alarm deadline range while final notice verification is pending', () => {

@@ -2,7 +2,7 @@ import { NoticeList } from './components/NoticeList';
 import { pageGroup } from './pagination';
 import { selectedRegions, selectedStatuses, regionKey, regionLabel } from './search-filters';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Bookmark, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, ExternalLink, FileSearch, Info, LockKeyhole, MapPin, PanelLeftOpen, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Star, UserRound, X } from 'lucide-react';
+import { ArrowRight, Bookmark, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, ExternalLink, FileSearch, Info, LockKeyhole, MapPin, PanelLeftOpen, Search, Settings2, ShieldCheck, SlidersHorizontal, Star, UserRound, X } from 'lucide-react';
 import { CATEGORIES, type BidNotice, type CompanyProfile, type SearchFilters } from './types';
 import { DEFAULT_FILTERS, DEMO_PROFILES, DEMO_TODAY, NOTICES } from './data';
 import { assessRegion, assessSearchRegions, buildBidCsv, daysUntil, filterNotices, formatAmountInput, formatDateTime, formatPrice } from './domain';
@@ -21,7 +21,7 @@ import { useLiveNotices } from './live/useLiveNotices';
 import { useCachedNoticeRegions, useNoticeRegions } from './live/useNoticeRegions';
 import { seedNoticeDetailRegions, selectNoticeRegionTargets } from './live/notice-regions';
 import { LiveSearch } from './live/LiveSearch';
-import { CustomNoticeSearch } from './live/CustomNoticeSearch';
+import { NoticeNumberLookup } from './live/NoticeNumberLookup';
 import { isOngoingNotice } from './notice-deadline-window';
 import { filtersForIndexedSearch } from './live/notice-search';
 import { CompanyDashboard } from './company/CompanyDashboard';
@@ -34,7 +34,7 @@ import { appViewFromHash, appViewHash, menuIsLocked, type AppView } from './admi
 import { AlertsPage } from './alerts/AlertsPage';
 import { AlertMenu } from './alerts/AlertsPopover';
 import { alertFilterFromSearch, useAlerts } from './alerts/useAlerts';
-import type { AlertFilter, AlertSettings } from './alerts/types';
+import type { AlertFilter } from './alerts/types';
 
 type View = AppView;
 const PAGE_SIZE = 30;
@@ -69,21 +69,18 @@ export default function App() {
   const [selectedBid, setSelectedBid] = useState<BidNotice | null>(null);
   const [toast, setToast] = useState('');
   const [existingAlertRequest, setExistingAlertRequest] = useState<{ userId: string; sequence: number } | null>(null);
-  const [customSeed, setCustomSeed] = useState<{ userId: string; settings: AlertSettings } | null>(null);
-  const [alertSettingsSeed, setAlertSettingsSeed] = useState<{ userId: string; settings: AlertSettings } | null>(null);
   const [alertSeed, setAlertSeed] = useState<{ userId: string; filter: AlertFilter } | null>(null);
   const [statusNow, setStatusNow] = useState(() => Date.now());
   const noticeFiltersRef = useRef(filters);
   const bookmarks = mode === 'live' ? member.workspace?.bookmarks ?? [] : state.bookmarks[profile.id] ?? [];
   const availableNotices = mode === 'live' ? live.items : NOTICES;
 
-  useEffect(() => { if (view !== 'custom') setCustomSeed(null); }, [view]);
-  useEffect(() => { setCustomSeed(null); setAlertSettingsSeed(null); }, [member.user?.id, mode]);
   useEffect(() => { if (view !== 'alerts') setExistingAlertRequest(null); }, [view]);
   useEffect(() => { setExistingAlertRequest(null); }, [member.user?.id, mode]);
 
   useEffect(() => {
-    const onHashChange = () => { setView(appViewFromHash(window.location.hash)); setSelectedBid(null); setMobileFilters(false); setPage(1); };
+    const onHashChange = () => { if (window.location.hash === '#custom-search') window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`); setView(appViewFromHash(window.location.hash)); setSelectedBid(null); setMobileFilters(false); setPage(1); };
+    onHashChange();
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
@@ -141,12 +138,6 @@ export default function App() {
     if (next === 'notices') { const saved = noticeFiltersRef.current; setFilters(saved); setSearchInput(mode === 'live' ? live.query.keyword : saved.keyword); }
     setView(next);
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${appViewHash(next)}`);
-  }
-
-  function openCustomSearch(settings?: AlertSettings) {
-    if (settings && member.user) setCustomSeed({ userId: member.user.id, settings });
-    else if (view !== 'custom') setCustomSeed(null);
-    navigate('custom');
   }
 
   function openExistingAlerts() {
@@ -269,14 +260,14 @@ export default function App() {
         const locked = mode === 'live' && access.settings.find(setting => setting.menu_key === menu.key)?.locked;
         const Icon = menu.key === 'notices' ? ClipboardList : menu.key === 'bookmarks' ? Bookmark : menu.key === 'profile' ? UserRound : FileSearch;
         return <button key={menu.key} className={view === menu.key ? 'active' : ''} onClick={() => navigate(menu.key)} title={locked ? access.isAdmin ? '잠금 중 · 관리자 열람 가능' : '현재 점검 중인 메뉴입니다.' : undefined}><Icon size={17} /><span>{menu.label}</span>{locked && <LockKeyhole className="menu-lock-icon" size={12} aria-label="잠금" />}{menu.key === 'bookmarks' && bookmarks.length > 0 && <span className="nav-count">{bookmarks.length}</span>}</button>;
-      })}{mode === 'live' && <button className={view === 'custom' ? 'active' : ''} onClick={() => openCustomSearch()}><Sparkles size={17} /><span>맞춤 조회</span></button>}{mode === 'live' && access.ready && access.isAdmin && <button className={view === 'admin' ? 'active' : ''} onClick={() => navigate('admin')}><ShieldCheck size={17} /><span>관리자</span></button>}</nav>
+      })}{mode === 'live' && access.ready && access.isAdmin && <button className={view === 'admin' ? 'active' : ''} onClick={() => navigate('admin')}><ShieldCheck size={17} /><span>관리자</span></button>}</nav>
       <div className="header-account"><AlertMenu key={`${mode}:${member.user?.id ?? 'guest'}`} alerts={alerts} signedIn={Boolean(member.user)} disabled={mode === 'demo'} contextKey={view} onLogin={() => navigate('account')} onOpenSettings={() => navigate('alerts')} onOpenExisting={openExistingAlerts} bookmarks={bookmarks} onBookmark={notice => toggleBookmark(notice.id, notice)} />{mode === 'live' ? <button className="button button-secondary" onClick={() => navigate('account')}>{member.user ? '내 계정' : '로그인'}</button> : <div className="account-select"><span className="account-avatar">{profile.companyName[0] || '업'}</span><label className="sr-only" htmlFor="demo-profile-switch">테스트 업체 전환</label><select id="demo-profile-switch" value={profile.id} onChange={event => switchProfile(event.target.value)}>{state.profiles.map(item => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select><ChevronDown size={15} /></div>}</div>
     </div></header>
 
     <main className="main-container">
       {mode === 'demo' && storageWarning && <div className="storage-warning" role="status"><Info size={16} />{storageWarning}<button className="icon-button" onClick={() => setStorageWarning(null)} aria-label="안내 닫기"><X size={15} /></button></div>}
       {mode === 'live' && <div className="live-member-status" role="status">{member.user ? `회원 저장: ${member.saveStatus === 'saved' ? '클라우드 저장 완료' : member.saveStatus === 'saving' ? '저장 중' : member.saveStatus === 'error' ? '저장 실패 — 내 정보에서 재시도' : member.loading ? '불러오는 중' : '준비'}` : '로그인하면 내 업체·관심공고·투찰 준비 기록을 기기 간에 이어서 사용할 수 있습니다.'}</div>}
-      {view === 'admin' ? <AdminPage access={access} onLogin={() => navigate('account')} /> : view === 'account' ? <MemberAccess member={member} /> : view === 'alerts' ? <AlertsPage onSearch={openCustomSearch} initialSettings={alertSettingsSeed?.userId === member.user?.id ? alertSettingsSeed?.settings : null} onInitialSettingsConsumed={() => setAlertSettingsSeed(null)} bookmarks={bookmarks} onBookmark={notice => toggleBookmark(notice.id, notice)} key={member.user?.id ?? 'guest'} openExistingRequest={existingAlertRequest?.userId === member.user?.id ? existingAlertRequest?.sequence : 0} alerts={alerts} signedIn={Boolean(member.user)} profile={profile} onLogin={() => navigate('account')} isAdmin={access.isAdmin} demo={mode === 'demo'} initialFilter={alertSeed?.userId === member.user?.id ? alertSeed?.filter : null} onInitialFilterConsumed={() => setAlertSeed(null)} /> : menuDisabled ? <LockedMenu menu={view === 'custom' ? 'notices' : view as MenuKey} setting={access.settings.find(setting => setting.menu_key === (view === 'custom' ? 'notices' : view))} loading={!access.ready && !access.error} onLogin={() => navigate('account')} onRetry={() => { void access.refresh(); }} /> : view === 'custom' ? <CustomNoticeSearch key={member.user?.id ?? 'guest'} userId={member.user?.id} settings={alerts.overview?.settings ?? null} settingsError={alerts.error || member.error || undefined} onRetrySettings={() => { void alerts.refresh(); if (!member.ready) void member.retryLoad(); }} profile={profile} profileReady={member.ready} initialSettings={customSeed?.userId === member.user?.id ? customSeed?.settings : null} bookmarks={bookmarks} onBookmark={notice => toggleBookmark(notice.id, notice)} onOpen={setSelectedBid} onEditConditions={() => { if (customSeed?.userId === member.user?.id) setAlertSettingsSeed(customSeed); navigate('alerts'); }} onGeneralSearch={() => navigate('notices')} onLogin={() => navigate('account')} now={statusNow} /> : view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
+      {view === 'admin' ? <AdminPage access={access} onLogin={() => navigate('account')} /> : view === 'account' ? <MemberAccess member={member} /> : view === 'alerts' ? <AlertsPage bookmarks={bookmarks} onBookmark={notice => toggleBookmark(notice.id, notice)} key={member.user?.id ?? 'guest'} openExistingRequest={existingAlertRequest?.userId === member.user?.id ? existingAlertRequest?.sequence : 0} alerts={alerts} signedIn={Boolean(member.user)} profile={profile} onLogin={() => navigate('account')} isAdmin={access.isAdmin} demo={mode === 'demo'} initialFilter={alertSeed?.userId === member.user?.id ? alertSeed?.filter : null} onInitialFilterConsumed={() => setAlertSeed(null)} /> : menuDisabled ? <LockedMenu menu={view as MenuKey} setting={access.settings.find(setting => setting.menu_key === view)} loading={!access.ready && !access.error} onLogin={() => navigate('account')} onRetry={() => { void access.refresh(); }} /> : view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
         <section className="search-intro"><div><div className="eyebrow"><span className="eyebrow-line" />공공입찰을 더 명확하게</div><h1>{view === 'bookmarks' ? '관심공고' : '철거·공사 입찰공고'}</h1><p>{view === 'bookmarks' ? '저장한 공고를 모아보고, 다음 입찰을 준비하세요.' : '우리 업체의 지역조건에 맞는 공고를 한곳에서 확인하세요.'}</p></div><div className="intro-note"><span className="small-dot" />{mode === 'live' ? '나라장터 공공데이터 연동' : '나라장터 공고 · 예시 데이터'}<span className="intro-date">{mode === 'live' ? `한국시간 ${koreanToday().replaceAll('-', '.')}` : `예시 기준일 ${DEMO_TODAY.replaceAll('-', '.')}`}</span></div></section>
 
         <section className="company-strip" aria-label="내 업체 지역 자동필터"><div className="company-strip-info"><span className="company-icon"><Building2 size={20} /></span><div><div className="company-name">{profile.companyName || '업체 정보 미등록'}<span>내 업체</span></div><div className="company-address"><MapPin size={12} />본점 {profile.province} {profile.district}</div></div><button className="company-edit" aria-label="업체 정보 수정" onClick={() => navigate('profile')}><Settings2 size={14} /><span>업체 정보 수정</span></button></div><div className="auto-filter-control"><div><label className="switch-label"><input type="checkbox" checked={filters.autoRegion} onChange={event => { updateFilter('autoRegion', event.target.checked); updateFilter('regionView', 'all'); }} /><span className="switch-track" /><strong>내 지역 조건에 맞는 공고</strong></label><p>{filters.autoRegion ? '내 업체 지역과 일치하거나 전국인 공고만 표시합니다. 미확인 공고는 자동필터를 끄고 원문을 확인해 주세요.' : '지역조건에 관계없이 모든 공고를 표시하고 있습니다.'}</p></div><span className="filter-state">{filters.autoRegion ? '자동필터 ON' : '자동필터 OFF'}</span></div></section>
@@ -285,7 +276,8 @@ export default function App() {
           {(!sidebarCollapsed || mobileFilters) && <FilterPanel filters={filters} showDeadlineRange={mode !== 'live' || view !== 'notices'} onChange={updateFilter} onReset={resetFilters} onCollapse={() => { setSidebarCollapsed(true); setMobileFilters(false); }} mobileOpen={mobileFilters} onMobileClose={() => setMobileFilters(false)} />}
           <section className="results-panel panel" aria-label="입찰공고 검색 결과">
             <div className="results-search-controls">
-        {mode === 'live' && view === 'notices' && <LiveSearch key={`${live.query.type}-${live.query.from}-${live.query.to}-${live.query.keyword}`} query={live.query} loading={live.loading || live.refreshing} refreshBlocked={live.retryAt > Date.now()} onSearch={query => { live.search(query); resetFilters(); setSearchInput(query.keyword); }} onCustomSearch={() => openCustomSearch()} onRefresh={live.refresh} />}
+        {mode === 'live' && view === 'notices' && <LiveSearch key={`${live.query.type}-${live.query.from}-${live.query.to}-${live.query.keyword}`} query={live.query} loading={live.loading || live.refreshing} refreshBlocked={live.retryAt > Date.now()} onSearch={query => { live.search(query); resetFilters(); setSearchInput(query.keyword); }} onRefresh={live.refresh} />}
+        {mode === 'live' && view === 'notices' && member.user && <NoticeNumberLookup key={member.user.id} userId={member.user.id} bookmarks={bookmarks} onOpen={setSelectedBid} onBookmark={notice => toggleBookmark(notice.id, notice)} />}
         {!(mode === 'live' && view === 'notices') && <form className="search-bar" onSubmit={event => { event.preventDefault(); searchLocalNotices(searchInput); }}><Search size={23} strokeWidth={1.7} /><label className="sr-only" htmlFor="bid-search">공고 검색</label><input id="bid-search" value={searchInput} onChange={event => setSearchInput(event.target.value)} placeholder="공고명, 공고번호, 발주기관을 검색해 보세요" autoComplete="off" /><span className="search-shortcut">목록 검색</span>{searchInput && <button type="button" className="icon-button" aria-label="검색어 지우기" onClick={() => { setSearchInput(''); searchLocalNotices(''); }}><X size={17} /></button>}<button className="button button-primary search-submit" type="submit">검색<ArrowRight size={18} /></button></form>}
 
         <div className="category-tabs" aria-label="작업 분야">{(['전체', ...CATEGORIES] as const).map(category => <button key={category} className={filters.category === category ? 'active' : ''} onClick={() => updateFilter('category', category)}>{category}</button>)}</div>
@@ -312,7 +304,7 @@ export default function App() {
             {visibleNotices.length === 0 && <div className="empty-state"><div className="empty-icon">{view === 'bookmarks' && bookmarks.length === 0 ? <Bookmark size={30} /> : <FileSearch size={32} />}</div><h3>{mode === 'live' && view === 'notices' && live.requiresKeyword ? '검색할 공고명을 입력해 주세요' : mode === 'live' && live.loading ? '공고를 불러오는 중입니다' : mode === 'live' && live.error && view === 'notices' ? '현재 조건의 공고를 조회하지 못했습니다' : view === 'bookmarks' && bookmarks.length === 0 ? '아직 저장한 관심공고가 없습니다' : '조건에 맞는 공고가 없습니다'}</h3><p>{mode === 'live' && view === 'notices' && live.requiresKeyword ? '위 검색창에 철거·석면 등 공고명을 입력해 주세요.' : mode === 'live' && view === 'notices' && live.error ? '조회 상태는 위 안내에서 확인할 수 있습니다.' : view === 'bookmarks' && bookmarks.length === 0 ? '공고 옆 별표를 누르면 이 업체의 관심공고에 저장됩니다.' : '검색어를 바꾸거나 선택한 조건을 조금 넓혀보세요.'}</p><button className="button button-primary" onClick={view === 'bookmarks' && bookmarks.length === 0 ? () => navigate('notices') : resetFilters}>{view === 'bookmarks' && bookmarks.length === 0 ? '입찰공고 둘러보기' : '검색 조건 초기화'}<ArrowRight size={16} /></button></div>}
 
             {filtered.length > 0 && <div className="results-bottom"><span className="result-range">검색 결과 {filtered.length}건 중 {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)}건</span><nav className="pagination" aria-label="검색 결과 페이지"><button aria-label="이전 10페이지" disabled={pagination.previous === null} onClick={() => pagination.previous !== null && setPage(pagination.previous)}><ChevronLeft size={15} /></button><div className="pagination-numbers">{pagination.items.map(number => <button key={number} aria-label={`${number}페이지`} aria-current={safePage === number ? 'page' : undefined} className={safePage === number ? 'active' : ''} onClick={() => setPage(number)}>{number}</button>)}</div><button aria-label="다음 10페이지" disabled={pagination.next === null} onClick={() => pagination.next !== null && setPage(pagination.next)}><ChevronRight size={15} /></button></nav><span className="page-size-label">30개씩 보기</span></div>}
-            {mode === 'live' && view === 'notices' && live.hasMore && <div className="custom-load-more"><button className="button button-secondary" disabled={live.loading} onClick={() => { void live.loadMore(); }}>{live.loading ? '확인 중' : '공고 더 조회'}<ChevronRight size={16} /></button></div>}
+            {mode === 'live' && view === 'notices' && live.hasMore && <div className="notice-load-more"><button className="button button-secondary" disabled={live.loading} onClick={() => { void live.loadMore(); }}>{live.loading ? '확인 중' : '공고 더 조회'}<ChevronRight size={16} /></button></div>}
 
           </section>
         </div>
