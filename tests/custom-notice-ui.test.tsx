@@ -4,6 +4,7 @@ import { CustomNoticeResults, CustomNoticeSearch } from '../src/live/CustomNotic
 import { DEFAULT_ALERT_SETTINGS, type AlertNotice } from '../src/alerts/types';
 import { NOTICES, DEMO_PROFILES } from '../src/data';
 import type { useCustomNotices } from '../src/live/useCustomNotices';
+import { LiveSearch } from '../src/live/LiveSearch';
 
 const now = Date.parse('2026-10-15T03:00:00Z');
 const settings = { ...structuredClone(DEFAULT_ALERT_SETTINGS), enabled: false,
@@ -16,6 +17,10 @@ const results = (state: Partial<typeof search> = {}) => renderToStaticMarkup(<Cu
   profile={DEMO_PROFILES[0]} bookmarks={[bid.id]} onBookmark={() => {}} onOpen={() => {}} now={now} />);
 
 describe('custom lookup result integrity', () => {
+  it('exposes the custom entry point alongside the general search form', () => {
+    const html = renderToStaticMarkup(<LiveSearch query={{ type: '공사·용역', from: '2026-10-09', to: '2026-10-15', keyword: '철거' }} loading={false} onSearch={() => {}} onRefresh={() => {}} onCustomSearch={() => {}} />);
+    expect(html).toContain('맞춤 조회');
+  });
   it('shows matching rows and their saved favorite even while automatic notifications are disabled', () => {
     const html = results();
     expect(html).toContain('학교 철거 공사');
