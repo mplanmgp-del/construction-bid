@@ -32,3 +32,20 @@ it('disables per-notice public result hydration in the ordinary server index lis
   renderToStaticMarkup(<NoticeList bids={[NOTICES[0]]} keyword="" profile={DEMO_PROFILES[0]} bookmarks={[]} selected={[]} onSelect={() => {}} onOpen={() => {}} onBookmark={() => {}} fetchPublicResults={false} />);
   expect(summary).not.toHaveBeenCalled();
 });
+
+it('separates focused actionable coverage from the unfinished historical archive', () => {
+  const currentCoverage = { scope: 'demolition-title-v1', cutoff: page.asOf, checked: 746, pending: 0, verificationPending: 0, complete: true };
+  const html = renderToStaticMarkup(<VerifiedSearchFeedback page={{ ...page, currentCoverage }} loading={false} stale={false} error="" onRestart={() => {}} />);
+  expect(html).toContain('관심 분야 투찰 가능 공고 확인 완료');
+  expect(html).toContain('철거·해체·석면·건설폐기물');
+  expect(html).toContain('공통 색인 최초 수집 중');
+  expect(html).not.toContain('모든 공고 조회 완료');
+});
+it('keeps focused coverage pending until source and participant checks complete', () => {
+  const currentCoverage = { scope: 'demolition-title-v1', cutoff: page.asOf, checked: 20, pending: 726, verificationPending: 67, complete: false };
+  const html = renderToStaticMarkup(<VerifiedSearchFeedback page={{ ...page, currentCoverage }} loading={false} stale={false} error="" onRestart={() => {}} />);
+  expect(html).toContain('관심 분야 투찰 가능 공고 확인 중');
+  expect(html).toContain('남은 726구간');
+  expect(html).toContain('조건 확인 대기 67건');
+  expect(html).not.toContain('관심 분야 투찰 가능 공고 확인 완료');
+});

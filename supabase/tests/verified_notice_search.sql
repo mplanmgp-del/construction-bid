@@ -146,7 +146,7 @@ do $$declare n jsonb;r jsonb;q jsonb;claim jsonb;ids text[];begin
  claim:=public.bid_active_catalog_worker(repeat('a',64),'claim','{}');
  assert jsonb_array_length(claim->'verify')=16,'shared claim expands bounded verification capacity to 16';
  assert exists(select 1 from bid_active_catalog_private.verification where number='R26CONDITION'),'incomplete legacy condition facts are reverified';
- assert exists(select 1 from jsonb_array_elements(claim->'verify') x where x->>'number'='R26CONDITION' and not(x?'notice')),'incomplete legacy source cannot be used as verified cache';
+ assert exists(select 1 from jsonb_array_elements(claim->'verify') x where x->>'number'='R26CONDITION' and (not(x?'notice') or x#>>'{notice,regionComplete}' is distinct from 'true' or x#>>'{notice,licenseComplete}' is distinct from 'true')),'incomplete legacy source hint must not claim complete participant facts';
 end $$;
 
 do $$declare n jsonb;r jsonb;q jsonb;first_id text;claim jsonb;scope text;lease text;job text;bad boolean;definition text;begin

@@ -5,11 +5,13 @@ import './notice-search.css';
 export function VerifiedSearchFeedback({ page, loading, stale, error, onRestart }: {
   page: VerifiedNoticeSearchPage | null; loading: boolean; stale: boolean; error: string; onRestart: () => void;
 }) {
+  const current = page?.currentCoverage?.scope === 'demolition-title-v1' ? page.currentCoverage : null;
   return <div className="live-scope verified-search-status">
     {loading && <p role="status">공고를 불러오고 있습니다.</p>}
     {stale && <div className="verified-search-stale" role="alert"><p>조회 기준 시각이 지났거나 공고가 변경되었습니다.{page ? ' 이전 조회 결과를 표시합니다.' : ''} 현재 기준으로 다시 검색해 주세요.</p><button type="button" className="button button-secondary" disabled={loading} onClick={onRestart}>처음부터 다시 검색</button></div>}
     {error && !stale && <div className="live-error" role="alert"><p>{error}</p>{page && <button type="button" className="button button-secondary" disabled={loading} onClick={onRestart}>다시 검색</button>}</div>}
     {page && <>
+      {current && <p className="live-current-coverage" role="status"><strong>관심 분야 투찰 가능 공고 확인 {current.complete ? '완료' : '중'}</strong> · 철거·해체·석면·건설폐기물{!current.complete && ` · 확인 ${current.checked}구간 · 남은 ${current.pending}구간 · 조건 확인 대기 ${current.verificationPending}건`}{current.complete && current.requiredThrough && ` · 기준 ${formatDateTime(current.requiredThrough, { includeYear: true })} KST`}</p>}
       <div className={`search-data-summary ${page.indexCoverage.complete && page.pendingCount === 0 && page.conditionPendingCount === 0 ? 'is-complete' : ''}`}><span>{!page.indexCoverage.complete || page.pendingCount > 0 || page.conditionPendingCount > 0 ? '자료 수집·확인 중 · 일부 공고가 검색에서 빠질 수 있습니다.' : '수집·확인된 공고를 표시합니다.'}</span><span>자료 기준 {formatDateTime(page.asOf, { includeYear: true })} KST</span></div>
       {page.storage.full && <p className="verified-search-storage-full" role="status">수집 공간 한도 도달 · 추가 수집이 제한됩니다.</p>}
       <details className="search-data-details"><summary>자료 확인 상태</summary>

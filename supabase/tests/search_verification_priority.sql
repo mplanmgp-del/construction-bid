@@ -38,7 +38,7 @@ do $$declare bad boolean:=false;before_count bigint;begin
  assert (select count(*)=before_count from bid_active_catalog_private.verification),'failed authorization/validation has no side effects';
 end $$;
 
-do $$declare n jsonb;r jsonb;c jsonb;again jsonb;scope text:=bid_active_catalog_private.scope_version();first_stamp timestamptz;gen bigint;ids text[];before_total bigint;begin
+do $$declare n jsonb;r jsonb;c jsonb;again jsonb;scope text:=bid_active_catalog_private.scope_version();first_stamp timestamptz;gen bigint;ids text[];before_total bigint;before_keys text[];begin
  delete from bid_active_catalog_private.verification;delete from bid_active_catalog_private.deadline_index;delete from bid_active_catalog_private.groups;
  for i in 1..20 loop
    n:=pg_temp.priority_notice('R26FIFO'||lpad(i::text,3,'0'))||'{"title":"도로 신설 공사"}'::jsonb;
@@ -74,7 +74,7 @@ do $$declare n jsonb;r jsonb;c jsonb;again jsonb;scope text:=bid_active_catalog_
    insert into bid_active_catalog_private.groups(type,number,latest,versions,revision,source_updated_at,next_check_at)
    values('공사',n->>'number',n,jsonb_build_array(n),0,(n->>'sourceUpdatedAt')::timestamptz,now()-interval '1 hour');
  end loop;
- select count(*) into before_total from bid_active_catalog_private.verification;
+ select count(*),array_agg(type||':'||number) into before_total,before_keys from bid_active_catalog_private.verification;
  c:=public.bid_active_catalog_worker(repeat('a',64),'claim','{}');
  assert jsonb_array_length(c->'verify')=16,'claim remains bounded to sixteen';
  assert (select bool_and(v.search_requested_at is not null) from jsonb_array_elements(c->'verify') with ordinality x(n,ord)
@@ -82,7 +82,8 @@ do $$declare n jsonb;r jsonb;c jsonb;again jsonb;scope text:=bid_active_catalog_
  assert (select count(*)=4 from jsonb_array_elements(c->'verify') with ordinality x(item,ord) where ord between 9 and 12 and item->>'number' like 'R26FIFO%'),'four oldest background candidates progress despite demand';
  assert (select count(*)=4 from jsonb_array_elements(c->'verify') with ordinality x(item,ord) where ord between 13 and 16 and item->>'number' like 'R26TRACK%'),'tracked refreshes retain four reserved positions';
  assert not exists(select 1 from jsonb_array_elements(c->'verify') x where x->>'number'='R26DEMAND012'),'priority cannot bypass provider backoff';
- assert (select count(*)=before_total+6 from bid_active_catalog_private.verification),'claim never drops unselected candidates';
+ assert (select count(*)=before_total from bid_active_catalog_private.verification where type||':'||number=any(before_keys)),'claim never drops unselected candidates';
+ assert (select count(*)=6 from bid_active_catalog_private.verification where number like 'R26TRACK%'),'all six legitimate tracked refreshes are queued';
  assert (select count(*)=16 from bid_active_catalog_private.verification where claimed_lease=(c->>'leaseId')::uuid),'exactly selected rows receive lease';
  -- A foreground request during collection must not clear the worker's lease,
  -- even if the raw source was modified since the queued version was stored.
