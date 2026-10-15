@@ -109,6 +109,18 @@ begin
  'regionComplete','licenseComplete','noticeKind','detailUrl','sourceOmittedDigest']);
  return result||'{"description":"","duration":"","requirements":[],"documents":[]}'::jsonb;
 end $$;
+create or replace function bid_active_catalog_private.known_heads()
+returns table(type text,number text,revision integer,source_updated_at timestamptz)
+language sql stable security invoker set search_path='' as $$
+ -- The old notification ledger remains authoritative for already tracked IDs
+ -- until their first complete catalog verification; do not replay raw history.
+ select distinct on(k.type,k.number) k.type,k.number,k.revision,k.source_updated_at from (
+ select c.type,c.number,c.revision,c.source_updated_at from bid_active_catalog_private.groups c
+ union all
+ select o.notice->>'type',o.notice->>'number',o.revision,o.source_updated_at from bid_alert_private.observations o
+ where o.notice->>'type' in ('공사','용역') and o.notice->>'number'~'^[A-Za-z0-9_-]{1,40}$' and o.revision between 0 and 999
+ ) k order by k.type,k.number,k.revision desc,k.source_updated_at desc;
+$$;
 create or replace function bid_active_catalog_private.status()
 returns jsonb language plpgsql stable security invoker set search_path='' as $$
 declare cfg bid_active_catalog_private.runtime%rowtype; covered text;
@@ -257,6 +269,12 @@ begin
    insert into bid_active_catalog_private.verification(type,number,revision,source_updated_at,scope_version)
      select c.type,c.number,c.revision,c.source_updated_at,scope_value from bid_active_catalog_private.groups c where c.next_check_at<=stamp
      and bid_active_catalog_private.active(c.latest) on conflict do nothing;
+   insert into bid_active_catalog_private.verification(type,number,revision,source_updated_at,scope_version)
+     select o.notice->>'type',o.notice->>'number',o.revision,o.source_updated_at,scope_value from bid_alert_private.observations o
+     where bid_active_catalog_private.active(o.notice) and o.notice->>'type' in ('공사','용역')
+     and o.notice->>'number'~'^[A-Za-z0-9_-]{1,40}$' and o.revision between 0 and 999
+     and not exists(select 1 from bid_active_catalog_private.groups c where c.type=o.notice->>'type' and c.number=o.notice->>'number')
+     on conflict do nothing;
    lease:=gen_random_uuid();
    select array_agg(id) into selected_ids from (
      select id from bid_active_catalog_private.sources where scope_version=scope_value and completed_at is null and next_attempt<=stamp
@@ -264,7 +282,7 @@ begin
    ) q;
    select array_agg(type||':'||number) into selected_keys from (
      select v.type,v.number from bid_active_catalog_private.verification v where v.scope_version=scope_value and v.next_attempt<=stamp
-     order by case when exists(select 1 from bid_active_catalog_private.groups known where known.type=v.type and known.number=v.number) then 0 else 1 end,
+     order by case when exists(select 1 from bid_active_catalog_private.known_heads() known where known.type=v.type and known.number=v.number) then 0 else 1 end,
      v.queued_at,v.type,v.number limit 8
    ) q;
    update bid_active_catalog_private.sources set claimed_lease=lease where id=any(coalesce(selected_ids,'{}'::text[]));
@@ -274,7 +292,7 @@ begin
    'page',page,'pageSize',999,'totalCount',expected_total) order by case when kind='history' then 1 else 0 end,from_at desc,type,kind),'[]'::jsonb)
    from bid_active_catalog_private.sources where claimed_lease=lease),'verify',(select coalesce(jsonb_agg(jsonb_build_object('type',v.type,'number',v.number,
    'revision',lpad(v.revision::text,3,'0'),'sourceUpdatedAt',v.source_updated_at,
-   'tracked',exists(select 1 from bid_active_catalog_private.groups k where k.type=v.type and k.number=v.number)) order by v.queued_at,v.type,v.number),'[]'::jsonb)
+   'tracked',exists(select 1 from bid_active_catalog_private.known_heads() k where k.type=v.type and k.number=v.number)) order by v.queued_at,v.type,v.number),'[]'::jsonb)
    from bid_active_catalog_private.verification v where v.claimed_lease=lease),'status',bid_active_catalog_private.status());
  end if;
  begin lease:=(p_payload->>'leaseId')::uuid; exception when others then lease:=null; end;
@@ -345,7 +363,7 @@ begin
      select c.type,c.number,greatest(c.revision,coalesce((n->>'revision')::integer,c.revision)),
      case when (n->>'revision')::integer>c.revision then source_time
        when (n->>'revision')::integer=c.revision then greatest(c.source_updated_at,source_time) else c.source_updated_at end,cfg.scope_version
-     from bid_active_catalog_private.groups c
+     from bid_active_catalog_private.known_heads() c
      where c.type=job.type and c.number=n->>'number'
      on conflict(type,number) do update set scope_version=excluded.scope_version,
        revision=greatest(bid_active_catalog_private.verification.revision,excluded.revision),
@@ -410,7 +428,8 @@ begin
    or (has_prior and exists(select 1 from jsonb_array_elements(prior.versions) old where not (old->>'revision'=any(ids)))) then raise exception 'Stale or incomplete notice history'; end if;
    -- The authenticated server sends only exact rule matches, plus previously
    -- retained heads whose cancellation/closing must reach their existing members.
-   if has_prior or bid_active_catalog_private.active(latest) then
+   if has_prior or bid_active_catalog_private.active(latest) or
+     exists(select 1 from bid_alert_private.observations o where o.notice_key='g2b:'||typ||':'||number_value) then
      insert into bid_active_catalog_private.groups(type,number,latest,versions,revision,source_updated_at,verified_at,published_at,next_check_at)
      values(typ,number_value,latest,compact_versions,revision_value,source_time,stamp,stamp,stamp+interval '1 hour')
      on conflict(type,number) do update set latest=excluded.latest,versions=excluded.versions,revision=excluded.revision,
@@ -473,6 +492,17 @@ do $migration$ declare definition text; begin
  definition:=replace(definition,
  'cfg.last_checked_at<=clock_timestamp()-interval ''9 minutes'' or cfg.last_error is not null)',
  'cfg.last_checked_at<=clock_timestamp()-interval ''9 minutes'' or cfg.last_error is not null or cfg.catalog_delta_through is not null or (cfg.catalog_cursor is distinct from ''__complete__'' and exists(select 1 from bid_active_catalog_private.scopes s where s.version=(select scope_version from bid_active_catalog_private.runtime where singleton))))');
+ execute definition;
+ end if;
+ select pg_get_functiondef('bid_alert_private.overview(uuid,integer,integer)'::regprocedure) into definition;
+ if position('where m.user_id=p_user and m.initial and bid_active_catalog_private.active(o.notice)' in definition)=0 then
+ definition:=replace(definition,'where m.user_id=p_user and m.initial order by',
+ 'where m.user_id=p_user and m.initial and bid_active_catalog_private.active(o.notice) order by');
+ definition:=replace(definition,
+ '''existingHasMore'',(select count(*)>p_existing_offset+30 from bid_alert_private.memberships where user_id=p_user and initial)',
+ '''existingHasMore'',(select count(*)>p_existing_offset+30 from bid_alert_private.memberships m join bid_alert_private.observations o on o.notice_key=m.notice_key where m.user_id=p_user and m.initial and bid_active_catalog_private.active(o.notice))');
+ definition:=replace(definition,'bid_alert_private.inbox_json(q)',
+ 'case when q.kind=''initial'' then bid_alert_private.inbox_json(q)||jsonb_build_object(''existingCount'',(select count(*) from bid_alert_private.memberships m join bid_alert_private.observations o on o.notice_key=m.notice_key where m.user_id=p_user and m.initial and bid_active_catalog_private.active(o.notice))) else bid_alert_private.inbox_json(q) end');
  execute definition;
  end if;
  select pg_get_functiondef('public.bid_alert_user(text,jsonb)'::regprocedure) into definition;

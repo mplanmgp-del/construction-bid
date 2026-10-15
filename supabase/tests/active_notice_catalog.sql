@@ -267,6 +267,40 @@ do $$ declare c jsonb;lease text;old_scope text;new_scope text;old_completed big
  update bid_active_catalog_private.runtime set retry_after_at=null;
 end $$;
 
+-- Legacy alert membership snapshots must join the new collector without replaying source history.
+do $$ declare c jsonb;lease text;result jsonb;before_history bigint;before_events bigint;
+ n0 jsonb:=pg_temp.notice('R26LEGACY0001','000')||'{"sourceUpdatedAt":"2020-01-01T00:00:00Z"}'::jsonb;
+ n1 jsonb:=pg_temp.notice('R26LEGACY0001','001','취소')||'{"sourceUpdatedAt":"2020-01-02T00:00:00Z","noticeKind":"취소공고"}'::jsonb;
+ legacy_key text:='g2b:공사:R26LEGACY0001';begin
+ insert into bid_alert_private.observations(notice_key,notice,fingerprint,version,revision,source_updated_at)
+ values(legacy_key,n0,repeat('d',64),7,0,'2020-01-01T00:00:00Z');
+ insert into bid_alert_private.memberships(user_id,notice_key,last_version,initial)
+ values('33333333-3333-4333-8333-333333333333',legacy_key,7,true);
+ select count(*) into before_history from bid_active_catalog_private.sources where kind='history' and completed_at is not null;
+ c:=public.bid_active_catalog_worker(repeat('a',64),'claim','{}');lease:=c->>'leaseId';
+ assert exists(select 1 from jsonb_array_elements(c->'verify') v where v->>'number'='R26LEGACY0001' and v->>'tracked'='true'),'active legacy observation is imported as tracked verification without a catalog head';
+ perform public.bid_active_catalog_worker(repeat('a',64),'commit',jsonb_build_object('leaseId',lease,'scopeVersion',bid_active_catalog_private.scope_version(),'groups',jsonb_build_array(jsonb_build_array(n0,n1))));
+ assert (select latest->>'status'='취소' and revision=1 from bid_active_catalog_private.groups where number='R26LEGACY0001'),'legacy cancellation publishes even though the latest does not match and has no prior catalog group';
+ assert (select count(*)=before_history from bid_active_catalog_private.sources where kind='history' and completed_at is not null),'legacy import preserves completed raw historical coverage';
+ assert (select fingerprint=repeat('d',64) and version=7 from bid_alert_private.observations where notice_key=legacy_key),'catalog import does not rewrite the legacy alert hash or version';
+ perform public.bid_active_catalog_worker(repeat('a',64),'finish',jsonb_build_object('leaseId',lease));
+ -- This is the planner's existing(initial:false) path for a cancellation predating activation.
+ select count(*) into before_events from public.bid_alert_inbox where notice_key=legacy_key;
+ c:=public.bid_alert_worker(repeat('a',64),'claim','{}');lease:=c->>'leaseId';
+ perform public.bid_alert_worker(repeat('a',64),'commit',jsonb_build_object('leaseId',lease,'observations',jsonb_build_array(jsonb_build_object(
+ 'key',legacy_key,'notice',n1,'fingerprint',repeat('e',64),'version',8)),'events','[]'::jsonb,'existing',jsonb_build_array(jsonb_build_object(
+ 'userId','33333333-3333-4333-8333-333333333333','key',legacy_key,'version',8,'initial',false))));
+ insert into public.bid_alert_inbox(user_id,notice_key,version,kind,message,existing_count)
+ values('33333333-3333-4333-8333-333333333333','@initial',0,'initial','existing summary',999)
+ on conflict(user_id,notice_key,version) do update set existing_count=999;
+ result:=bid_alert_private.overview('33333333-3333-4333-8333-333333333333');
+ assert not exists(select 1 from jsonb_array_elements(result->'existingMatches') n where n->>'number'='R26LEGACY0001'),'legacy cancellation cannot remain a phantom active existing result';
+ assert (select (i->>'existingCount')::integer=(select count(*) from bid_alert_private.memberships m join bid_alert_private.observations o on o.notice_key=m.notice_key where m.user_id='33333333-3333-4333-8333-333333333333' and m.initial and bid_active_catalog_private.active(o.notice)) from jsonb_array_elements(result->'notifications') i where i->>'kind'='initial'),'initial summary reports current active matches instead of its stale historical count';
+ assert (select count(*)=before_events from public.bid_alert_inbox where notice_key=legacy_key),'preactivation legacy cancellation creates no historical alert spam';
+ assert (select last_version=8 from bid_alert_private.memberships where notice_key=legacy_key),'legacy dedup version advances to the cancellation snapshot';
+ perform public.bid_alert_worker(repeat('a',64),'commit',jsonb_build_object('leaseId',lease,'finish',true));
+end $$;
+
 do $$ declare c jsonb;lease text;before_count bigint;groups_count bigint;result jsonb;begin
  c:=public.bid_active_catalog_worker(repeat('a',64),'claim','{}');lease:=c->>'leaseId';
  select count(*) into before_count from bid_active_catalog_private.sources where completed_at is not null;
