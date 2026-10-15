@@ -318,6 +318,24 @@ describe('all-age active catalog collection', () => {
     expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String), retryAfterSeconds: 1800 });
   });
 
+  it('keeps failed live discovery pending while verifying ready notices before history', async () => {
+    const identities = Array.from({ length: 8 }, (_, index) => ({ type: '공사' as const, number: `R26LIVEFAIL${index}` }));
+    const db = store([source(), source({ id: 'registered-construction', kind: 'registered' })], identities, []);
+    db.indexUpsert.mockResolvedValueOnce({ ok: false, storageFull: true });
+    const provider: ActiveCatalogProvider = async (_operation, params) => params.inqryDiv === '2'
+      ? { items: [row({ bidNtceNo: params.bidNtceNo, ntceKindNm: '취소공고' })], totalCount: 1 } : { items: [], totalCount: 0 };
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: false, sources: 1, searchGroups: 8, requests: 10 });
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.sources ?? []).map(item => item.id)).toEqual(['history-construction']);
+    expect(db.commit.mock.calls.flatMap(([, payload]) => payload.failedSources ?? [])).toEqual([
+      { id: 'registered-construction', error: expect.any(String) },
+    ]);
+    expect(db.indexUpsert.mock.invocationCallOrder[0]).toBeLessThan(db.publishSearchVerified.mock.invocationCallOrder[0]);
+    expect(db.publishSearchVerified.mock.invocationCallOrder[3]).toBeLessThan(db.indexUpsert.mock.invocationCallOrder[1]);
+    expect(db.indexUpsert.mock.invocationCallOrder[1]).toBeLessThan(db.publishSearchVerified.mock.invocationCallOrder[4]);
+    expect(db.finish).toHaveBeenCalledWith('lease', { error: expect.any(String) });
+  });
+
   it('discovers a 1995-posted active notice with a 2099 deadline and no opening date', async () => {
     const provider = vi.fn<ActiveCatalogProvider>(async () => ({ items: [row({ bidClseDt: '2099-03-04 10:00:00' })], totalCount: 1 }));
     const db = store([source()]);
