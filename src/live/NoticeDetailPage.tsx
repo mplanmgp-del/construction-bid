@@ -15,6 +15,7 @@ import { FloatingQuickLinks } from '../components/FloatingQuickLinks';
 import { useMenuAccess } from '../admin/useMenuAccess';
 import { LockedMenu } from '../admin/AdminPage';
 import { menuIsLocked } from '../admin/navigation';
+import { browserNoticeNumberRepository, buildNoticeNumberResult, type NoticeNumberRepository } from './notice-number-search';
 
 function queryNotice() {
   const params = new URLSearchParams(window.location.search);
@@ -26,6 +27,56 @@ function queryNotice() {
 
 function emptyNotice(detail: G2bNoticeDetail, type: string): BidNotice {
   return { id: `${detail.number}-${detail.revision}`, number: detail.number, revision: detail.revision, title: '', agency: '', type: type === '용역' ? '용역' : '공사', category: '기타', province: '', district: '', allowedRegions: detail.allowedRegions, estimatedPrice: null, contractMethod: '', status: '확인필요', postedAt: '', deadline: '', openingAt: '', registrationDeadline: '', licenses: detail.licenses, duration: '', description: '', requirements: [], documents: [], revised: false, source: 'live', detailUrl: detail.sourceUrl };
+}
+
+export type NoticeDetailRevisionVerification = { status: 'checking' | 'unavailable' } | { status: 'verified'; latest: BidNotice };
+
+/** A detail response is one revision; only a complete number lookup can establish its current state. */
+export async function verifyNoticeDetailRevision(query: { number: string; revision: string; type: string }, signal: AbortSignal,
+  repository: NoticeNumberRepository = browserNoticeNumberRepository): Promise<NoticeDetailRevisionVerification> {
+  try {
+    if (query.type !== '공사' && query.type !== '용역') return { status: 'unavailable' };
+    const page = await repository(query.number, query.type, signal);
+    const result = buildNoticeNumberResult(page, query, query.type);
+    return result?.requested ? { status: 'verified', latest: result.latest } : { status: 'unavailable' };
+  } catch { return { status: 'unavailable' }; }
+}
+
+function latestRevisionLabel(notice: BidNotice, now: number): string {
+  if (notice.status === '취소' || notice.noticeKind?.includes('취소')) return '취소공고';
+  if (notice.status === '마감') return '입찰 마감';
+  return notice.noticeKind || noticeState(currentNotice(notice, new Date(now)), now).label;
+}
+
+export function noticeDetailDisplayState(bid: BidNotice, verification: NoticeDetailRevisionVerification, now = Date.now()) {
+  if (verification.status !== 'verified') return { label: verification.status === 'checking' ? '최신 차수 확인 중' : '상태 확인 필요',
+    tone: 'unknown', description: '최신 차수를 확인하기 전에는 현재 진행 상태를 확정할 수 없습니다.' };
+  const latest = verification.latest;
+  if (Number(latest.revision) > Number(bid.revision)) return { label: `이전 ${bid.revision}차수`, tone: 'unknown',
+    description: `최신 ${latest.revision}차수 · ${latestRevisionLabel(latest, now)}` };
+  if (latest.status === '취소' || latest.noticeKind?.includes('취소')) return { label: '취소공고', tone: 'unknown', description: '취소된 공고입니다.' };
+  if (latest.status === '마감') return { label: '입찰 마감', tone: 'opened', description: '최신 차수에서 마감된 공고로 확인했습니다.' };
+  return noticeState(currentNotice(latest, new Date(now)), now);
+}
+
+export function NoticeDetailRevisionNotice({ bid, verification, now = Date.now() }: {
+  bid: BidNotice; verification: NoticeDetailRevisionVerification; now?: number;
+}) {
+  if (verification.status === 'verified') {
+    const latest = verification.latest;
+    if (Number(latest.revision) <= Number(bid.revision)) return null;
+    const latestUrl = `/notice-detail.html?${new URLSearchParams({ number: bid.number, revision: latest.revision, type: bid.type })}`;
+    return <aside className="fnd-data-warning" role="note" aria-label="이전 차수 공고 안내"><Info size={18} /><div>
+      <strong>이전 {bid.revision}차수 · 최신 {latest.revision}차수 · {latestRevisionLabel(latest, now)}</strong>
+      <ul><li>이 화면의 일정과 참가조건은 이전 차수의 기록입니다. 현재 공고 상태는 최신 {latest.revision}차수를 기준으로 확인해 주세요.</li>
+        <li><a href={latestUrl}>최신 차수 보기 <ArrowUpRight size={14} /></a></li></ul>
+    </div></aside>;
+  }
+  return <aside className="fnd-data-warning" role="status"><Info size={18} /><div>
+    <strong>{verification.status === 'checking' ? '최신 차수를 확인하고 있습니다' : '최신 차수를 확인하지 못했습니다'}</strong>
+    <ul><li>{verification.status === 'checking' ? '요청한 차수의 공고 상세는 먼저 표시합니다. 현재 진행 상태는 최신 차수 조회가 끝나면 표시합니다.'
+      : '요청한 차수의 기록을 표시하고 있습니다. 다시 조회하거나 나라장터에서 최신 변경·취소 여부를 확인해 주세요.'}</li></ul>
+  </div></aside>;
 }
 
 export function toggleDetailBookmark(current: MemberWorkspace, bid: BidNotice, userId: string): MemberWorkspace {
@@ -73,11 +124,12 @@ export function NoticeDetailPage() {
   const [toast, setToast] = useState('');
   const [statusNow, setStatusNow] = useState(() => Date.now());
   const [showOpeningResults, setShowOpeningResults] = useState(false);
+  const [revisionVerification, setRevisionVerification] = useState<NoticeDetailRevisionVerification>({ status: 'checking' });
   const printRef = useRef<CompleteNoticeDetailsHandle>(null);
   const requestedUrl = safeG2bUrl(`https://www.g2b.go.kr/link/PNPE027_01/?${new URLSearchParams({ bidPbancNo: query.number, bidPbancOrd: query.revision })}`);
   const sourceUrl = safeG2bUrl(detail?.sourceUrl || detail?.notice?.detailUrl) || (query.valid ? requestedUrl : undefined);
   const bid = detail ? currentNotice(detail.notice ?? emptyNotice(detail, query.type)) : null;
-  const state = bid ? noticeState(bid, statusNow) : null;
+  const state = bid ? noticeDetailDisplayState(bid, revisionVerification, statusNow) : null;
 
   useEffect(() => {
     const update = () => setStatusNow(Date.now());
@@ -93,6 +145,16 @@ export function NoticeDetailPage() {
     fetchApi<G2bNoticeDetail>(`/api/detail?${new URLSearchParams({ number: query.number, revision: query.revision, type: query.type })}`, abort.signal)
       .then(value => { if (!abort.signal.aborted) { setDetail(value); setLoading(false); } })
       .catch(reason => { if (!abort.signal.aborted) { setError(reason instanceof Error ? reason.message : '공고 상세정보를 불러오지 못했습니다.'); setLoading(false); } });
+    return () => abort.abort();
+  }, [query, retry, locked]);
+
+  useEffect(() => {
+    if (!query.valid || locked) return;
+    const abort = new AbortController();
+    setRevisionVerification({ status: 'checking' });
+    void verifyNoticeDetailRevision(query, abort.signal).then(value => {
+      if (!abort.signal.aborted) setRevisionVerification(value);
+    });
     return () => abort.abort();
   }, [query, retry, locked]);
 
@@ -120,6 +182,7 @@ export function NoticeDetailPage() {
           <NoticeDetailBookmark bid={bid} member={member} available={Boolean(detail.notice)} />
           <div className="fnd-hero-bottom"><div><MapPin size={16} /><span><b>참가 가능 지역</b> {detail.allowedRegions?.join(' · ') || '-'}</span></div><div><FileText size={16} /><span><b>업종</b> {detail.licenses.join(' · ') || '-'}</span></div></div>
         </section>
+        <NoticeDetailRevisionNotice bid={bid} verification={revisionVerification} now={statusNow} />
         {detail.warnings.length > 0 && <aside className="fnd-data-warning"><Info size={18} /><div><strong>일부 상세 항목은 확인이 필요합니다</strong><ul>{detail.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div></aside>}
         <div className="fnd-opening-launch"><button type="button" aria-expanded={showOpeningResults} onClick={() => setShowOpeningResults(value => !value)}><ListOrdered size={17} />{showOpeningResults ? '투찰업체·개찰순위 닫기' : '투찰업체·개찰순위 조회'}</button><span>이 공고의 입찰분류·재입찰 회차별 공개 결과</span></div>
         {showOpeningResults && <OpeningResultsPanel key={`${bid.type}-${bid.number}-${bid.revision}`} row={bid} onClose={() => setShowOpeningResults(false)} autoFocus={false} />}
