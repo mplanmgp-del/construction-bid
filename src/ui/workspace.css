@@ -44,8 +44,8 @@ input::placeholder,textarea::placeholder { color:#6b7982; }
 .filter-state { font-size:12px;padding:4px 7px;background:#edf5f1;color:#3a6455;white-space:nowrap; }
 .search-workspace { display:grid;grid-template-columns:244px minmax(0,1fr);gap:20px;align-items:start; }
 .search-workspace.sidebar-collapsed { grid-template-columns:minmax(0,1fr); }
-.filter-panel { position:sticky;top:24px;border:1px solid var(--border);box-shadow:none;overflow:hidden; }
-.filter-heading { padding:18px 16px 12px;border-bottom:0; }
+.filter-panel { --filter-panel-top:24px;position:sticky;top:var(--filter-panel-top);max-height:calc(100vh - var(--filter-panel-top) - 24px);max-height:calc(100dvh - var(--filter-panel-top) - 24px);border:1px solid var(--border);box-shadow:none;overflow-x:hidden;overflow-y:auto;scrollbar-gutter:stable;scroll-padding-block:80px 16px; }
+.filter-heading { position:sticky;top:0;z-index:2;background:var(--surface);padding:18px 16px 12px;border-bottom:0; }
 .filter-heading h2 { color:var(--text);font-size:15px;gap:8px; }
 .filter-heading h2 svg { color:var(--blue); }
 .filter-top-line { padding:0 16px 14px;color:var(--muted); }
@@ -187,12 +187,13 @@ input::placeholder,textarea::placeholder { color:#6b7982; }
   .search-workspace { grid-template-columns:228px minmax(0,1fr);gap:16px; }
   .company-strip { padding:14px 16px; }
   .company-name { font-size:14px; }
+  .filter-panel { --filter-panel-top:128px; }
 }
 @media(max-width:1000px) {
   .search-workspace { display:block; }
   .show-filter-button { display:inline-flex!important; }
   .filter-panel { display:none; }
-  .filter-panel.mobile-open { display:block;position:fixed;inset:0 auto 0 0;z-index:101;width:320px;max-width:calc(100vw - 30px);overflow:auto;overscroll-behavior:contain;border-radius:0;border:0;box-shadow:8px 0 40px #11253525; }
+  .filter-panel.mobile-open { display:block;position:fixed;inset:0 auto 0 0;z-index:101;width:320px;max-width:calc(100vw - 30px);max-height:100vh;max-height:100dvh;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scroll-padding-block:88px 92px;border-radius:0;border:0;box-shadow:8px 0 40px #11253525; }
   .filter-backdrop { z-index:100;background:#11253577; }
   .filter-panel .filter-heading { position:sticky;top:0;background:#fff;z-index:2;padding:20px 16px 12px; }
   .filter-panel .mobile-filter-close { min-width:44px;min-height:44px; }
