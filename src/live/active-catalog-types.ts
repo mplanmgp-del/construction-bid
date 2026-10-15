@@ -9,13 +9,20 @@ export interface ActiveCatalogIdentity {
   notice?: AlertNotice;
 }
 export interface ActiveCatalogSourceJob {
-  id: string; type: G2bBusinessType; kind: 'history' | 'registered' | 'modified';
+  id: string; type: G2bBusinessType; kind: 'history' | 'current' | 'registered' | 'modified';
   from: string; to: string; page: number; pageSize: 999; totalCount: number | null;
 }
 export interface ActiveCatalogStatus {
   groupCount: number; activeCount: number; pendingSources: number; pendingVerification: number;
   completedSources: number; coverageFrom: string | null; bootstrapComplete: boolean;
   lastCheckedAt: string | null; error: string | null; storageBytes: number; storageCeiling: number;
+  /** Current-only posting sweep; never substitutes for unfiltered history coverage. */
+  currentCoverage?: CurrentCatalogCoverage;
+}
+export interface CurrentCatalogCoverage {
+  cutoff: string | null; checked: number; pending: number; verificationPending: number;
+  scope?: string; keywords?: string[]; globalUnknownPending?: number; complete: boolean;
+  syncedThrough?: string | null; requiredThrough?: string | null;
 }
 export interface ActiveCatalogGroup extends ActiveCatalogIdentity {
   key: string; latest: AlertNotice; versions: AlertNotice[]; verifiedAt: string;
@@ -30,6 +37,8 @@ export interface ActiveCatalogClaim {
 export interface ActiveCatalogCommit {
   scopeVersion: string;
   sources?: { id: string; page: number; totalCount: number; receivedCount: number;
+    /** Every current raw number:revision, including nonfocus titles, until its source completes. */
+    rawIdentities?: string[];
     /** Raw identities are transient: retained heads are rechecked even after losing eligibility. */
     observed: ActiveCatalogIdentity[]; items: AlertNotice[]; complete: boolean }[];
   groups?: AlertNotice[][];
@@ -66,5 +75,6 @@ export interface VerifiedNoticeSearchPage extends G2bNoticePage {
   sourceSyncedThrough: string | null; verifiedCount: number; pendingCount: number; conditionPendingCount: number;
   storage: { bytes: number; ceiling: number; full: boolean };
   sourceError?: string | null;
+  currentCoverage?: CurrentCatalogCoverage;
 }
 export interface SearchVerifiedBatch { scopeVersion: string; groups: AlertNotice[][] }
