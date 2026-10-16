@@ -185,3 +185,38 @@ export function calculateScenario(input: ScenarioInput): ScenarioResult {
     withinRange,
   };
 }
+
+/** Spread twelve distinct assumptions across the range while retaining all three anchors. */
+export function buildComparisonRates(input: Pick<ScenarioInput, 'rangeMin' | 'rangeMax' | 'noticeRate'>): number[] {
+  if (!Number.isFinite(input.rangeMin) || !Number.isFinite(input.rangeMax) || input.rangeMin <= -100 || input.rangeMax < input.rangeMin) {
+    throw new Error('예가 변동 범위를 확인하세요.');
+  }
+  if (!Number.isFinite(input.noticeRate) || input.noticeRate <= 0) throw new Error('공고 사정률을 확인하세요.');
+  const lower = add(HUNDRED, decimal(input.rangeMin));
+  const upper = add(HUNDRED, decimal(input.rangeMax));
+  const current = decimal(input.noticeRate);
+  if (compare(current, lower) < 0 || compare(current, upper) > 0) throw new Error('공고 사정률이 예가 변동 범위를 벗어났습니다.');
+  const rates = new Set([asNumber(lower), input.noticeRate, asNumber(upper)]);
+  while (rates.size < 12) {
+    const sorted = [...rates].sort((left, right) => left - right);
+    const gaps = sorted.slice(1).map((right, index) => ({ left: sorted[index], right }));
+    gaps.sort((left, right) => (right.right - right.left) - (left.right - left.left));
+    let added = false;
+    for (const gap of gaps) {
+      const midpoint = divide(add(decimal(gap.left), decimal(gap.right)), fraction(2n));
+      for (const digits of [6, 8]) {
+        const scale = 10n ** BigInt(digits);
+        const scaled = multiply(midpoint, fraction(scale));
+        const rounded = (2n * scaled.numerator + scaled.denominator) / (2n * scaled.denominator);
+        const candidate = asNumber(fraction(rounded, scale));
+        if (candidate > gap.left && candidate < gap.right && !rates.has(candidate)) {
+          rates.add(candidate); added = true; break;
+        }
+      }
+      if (added) break;
+    }
+    // An equal or very narrow range cannot provide twelve different rates at input precision.
+    if (!added) break;
+  }
+  return [...rates].sort((left, right) => left - right);
+}

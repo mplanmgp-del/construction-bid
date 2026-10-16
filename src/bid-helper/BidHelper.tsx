@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { BookOpen, Calculator, Check, Copy, Info, RotateCcw } from 'lucide-react';
-import { calculateAnalysis, calculateScenario, type ScenarioInput } from './calculations';
+import { buildComparisonRates, calculateAnalysis, calculateScenario, type ScenarioInput } from './calculations';
 import { BID_GLOSSARY } from './glossary';
 import { clearPendingBidHelperSeed, readPendingBidHelperSeed, type BidHelperSeed } from './notice-seed';
 import { readRate, readWon } from './form';
@@ -12,6 +12,7 @@ const DRAFT_KEY = 'construction-bid:helper-draft:v1';
 const amount = (value: number) => value.toLocaleString('ko-KR', { maximumFractionDigits: 6 });
 const won = (value: number) => `${amount(value)}원`;
 const percent = (value: number) => `${value.toLocaleString('ko-KR', { minimumFractionDigits: 4, maximumFractionDigits: 6 })}%`;
+const comparisonPercent = (value: number) => `${value.toLocaleString('ko-KR', { minimumFractionDigits: 4, maximumFractionDigits: 8 })}%`;
 const difference = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(6)}%p`;
 
 export function BidHelper({ initialSeed, onSeedConsumed }: { initialSeed?: BidHelperSeed; onSeedConsumed?: () => void }) {
@@ -45,7 +46,7 @@ export function BidHelper({ initialSeed, onSeedConsumed }: { initialSeed?: BidHe
       }
       const input: ScenarioInput = { ...common, noticeRate: readRate(fields.noticeRate, '가정 공고 사정률'), targetRate: readRate(fields.targetRate, '목표 투찰률(A)'), rangeMin: readRate(fields.rangeMin, '예가 변동폭 하한'), rangeMax: readRate(fields.rangeMax, '예가 변동폭 상한') };
       const result = calculateScenario(input);
-      const comparisons = [...new Set([100 + input.rangeMin, input.noticeRate, 100 + input.rangeMax])].map(rate => {
+      const comparisons = buildComparisonRates(input).map(rate => {
         try { return { rate, value: calculateScenario({ ...input, noticeRate: rate }), error: '' }; }
         catch (error) { return { rate, value: undefined, error: error instanceof Error ? error.message : '계산 불가' }; }
       });
@@ -99,8 +100,8 @@ export function BidHelper({ initialSeed, onSeedConsumed }: { initialSeed?: BidHe
               {result && <><div className="bh-checks"><span className={result.meetsLowerRate ? 'is-met' : 'is-unmet'}>{result.meetsLowerRate && <Check size={14} />}{result.meetsLowerRate ? '낙찰하한율 이상' : '낙찰하한율 미만'}</span><span className={result.withinPlannedPrice ? 'is-met' : 'is-unmet'}>{result.withinPlannedPrice && <Check size={14} />}{result.withinPlannedPrice ? '예정가격 이하' : '예정가격 초과'}</span></div>{'withinRange' in result && result.withinRange === false && <p className="bh-error" role="alert">가정 공고 사정률이 입력한 예가 변동폭을 벗어났습니다.</p>}</>}
             </section>
             {result && <><section className="bh-metrics panel" aria-label="가격과 사정률 분석"><dl><div><dt>{mode === 'scenario' ? '가정 예정가격' : '개찰 예정가격'}</dt><dd>{won(result.plannedPrice)}</dd></div><div><dt>하한 투찰금액<small>원 미만 올림</small></dt><dd>{won(result.minimumBidAmount)}</dd></div><div><dt>단순 투찰률<small>투찰금액 ÷ 예정가격</small></dt><dd>{percent(result.simpleBidRate)}</dd></div><div><dt>투찰률(A)<small>(투찰금액 − A) ÷ (예정가격 − A)</small></dt><dd>{percent(result.adjustedBidRate)}</dd></div><div><dt>공고 사정률<small>예정가격 ÷ 기초금액</small></dt><dd>{percent(result.noticeRate)}</dd></div><div><dt>업체 사정률<small>하한율로 역산한 회사의 기준</small></dt><dd>{percent(result.companyRate)}</dd></div><div className="bh-metric-wide"><dt>업체 − 공고 사정률 차이</dt><dd>{difference(result.rateDifference)}</dd></div></dl></section>
-              {mode === 'scenario' && <section className="bh-comparison panel"><h2>사정률별 금액 비교</h2><p>입력한 예가 변동폭 양 끝과 현재 가정을 비교합니다.</p><div className="bh-table-scroll" tabIndex={0} role="region" aria-label="사정률 비교 표"><table><thead><tr><th scope="col">가정 사정률</th><th scope="col">가정 예정가격</th><th scope="col">계산 투찰금액</th></tr></thead><tbody>{calculated.comparisons.map(row => <tr key={row.rate} className={row.rate === Number(fields.noticeRate) ? 'is-current' : ''}><th scope="row">{percent(row.rate)}{row.rate === Number(fields.noticeRate) && <span>현재</span>}</th><td>{row.value ? won(row.value.plannedPrice) : '계산 불가'}</td><td>{row.value ? won(row.value.bidAmount) : row.error}</td></tr>)}</tbody></table></div></section>}
-              <details className="bh-formulas panel"><summary>계산식과 반올림 기준 보기</summary><dl><div><dt>가정 예정가격</dt><dd>기초금액 × 공고 사정률 ÷ 100</dd></div><div><dt>예상 투찰금액</dt><dd>(예정가격 − A값) × 목표 투찰률(A) ÷ 100 + A값</dd></div><div><dt>하한 투찰금액</dt><dd>(예정가격 − A값) × 낙찰하한율 ÷ 100 + A값</dd></div><div><dt>업체 사정률</dt><dd>((투찰금액 − A값) ÷ (낙찰하한율 ÷ 100) + A값) ÷ 기초금액 × 100</dd></div></dl><p>가정 예정가격은 중간 반올림 없이 계산하며, 투찰금액과 하한 투찰금액만 원 미만 올림합니다. 표시한 비율은 소수 6자리까지 반올림하며 조건 비교에는 반올림 전 값을 사용합니다.</p></details>
+              {mode === 'scenario' && <section className="bh-comparison panel"><h2>사정률별 금액 비교</h2><p>입력한 예가 범위에서 하한·상한·현재 가정을 포함한 {calculated.comparisons.length}개 사정률을 비교합니다.</p><div className="bh-table-scroll" tabIndex={0} role="region" aria-label="사정률 비교 표"><table><thead><tr><th scope="col">가정 사정률</th><th scope="col">가정 예정가격</th><th scope="col">계산 투찰금액</th></tr></thead><tbody>{calculated.comparisons.map(row => <tr key={row.rate} className={row.rate === Number(fields.noticeRate) ? 'is-current' : ''}><th scope="row">{comparisonPercent(row.rate)}{row.rate === Number(fields.noticeRate) && <span>현재</span>}</th><td>{row.value ? won(row.value.plannedPrice) : '계산 불가'}</td><td>{row.value ? won(row.value.bidAmount) : row.error}</td></tr>)}</tbody></table></div></section>}
+              <details className="bh-formulas panel"><summary>계산식과 반올림 기준 보기</summary><dl><div><dt>가정 예정가격</dt><dd>기초금액 × 공고 사정률 ÷ 100</dd></div><div><dt>예상 투찰금액</dt><dd>(예정가격 − A값) × 목표 투찰률(A) ÷ 100 + A값</dd></div><div><dt>하한 투찰금액</dt><dd>(예정가격 − A값) × 낙찰하한율 ÷ 100 + A값</dd></div><div><dt>업체 사정률</dt><dd>((투찰금액 − A값) ÷ (낙찰하한율 ÷ 100) + A값) ÷ 기초금액 × 100</dd></div></dl><p>가정 예정가격은 중간 반올림 없이 계산하며, 투찰금액과 하한 투찰금액만 원 미만 올림합니다. 분석 비율은 소수 6자리, 비교표의 사정률은 소수 8자리까지 표시하며 조건 비교에는 반올림 전 값을 사용합니다.</p></details>
             </>}
             <div className="bh-note"><Info size={18} /><p>실제 예정가격은 개찰 전 확정할 수 없습니다. 이 계산은 입력한 가격 조건의 비교이며, 순공사원가 98% 조건·적격심사·최종 낙찰 여부는 판정하지 않습니다. 적용 A값과 하한율은 해당 공고를 확인하세요.</p></div>
           </div>
