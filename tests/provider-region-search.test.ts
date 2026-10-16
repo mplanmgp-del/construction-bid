@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createG2bClient, mapNotice } from '../server/g2b';
 import { mapPrivateNotice } from '../server/g2b-private';
 import { compactCatalogNotice } from '../server/active-catalog-worker';
+import { postgresJsonbText } from '../server/notice-region-text';
 
 const identity = { bidNtceNo: 'R26BK01774453', bidNtceOrd: '001' };
 const now = Date.parse('2026-10-16T12:00:00+09:00');
@@ -46,7 +47,7 @@ describe('provider region keyword corpus', () => {
       repeated: '반복 공고', agencyAddress: '강원특별자치도 원주시 단계동',
       nested: Array.from({ length: 200 }, (_, index) => ({ note: `${index}번 기타 내용`.repeat(100) })),
     }, '공사', now);
-    expect(notice.regionSearchText!.length).toBeLessThanOrEqual(16000);
+    expect([...notice.regionSearchText!].length).toBeLessThanOrEqual(3000);
     expect(notice.regionSearchText).toContain('원주시 단계동');
     expect(notice.regionSearchText!.match(/반복 공고/g)).toHaveLength(1);
   });
@@ -56,7 +57,41 @@ describe('provider region keyword corpus', () => {
       largeContent: `${'긴 본문내용 '.repeat(5000)} 현장은 성남시 분당구 파장동이며 서울에서 접수합니다.`,
     }, '공사', now);
     for (const name of ['성남시', '분당구', '파장동', '서울']) expect(notice.regionSearchText).toContain(name);
-    expect(notice.regionSearchText!.length).toBeLessThanOrEqual(16000);
+    expect([...notice.regionSearchText!].length).toBeLessThanOrEqual(3000);
+  });
+
+  it('keeps a long Korean projection within the catalog and automatic observation row budgets', () => {
+    const mapped = mapNotice({ ...identity, bidNtceNm: '학교 철거공사', bidNtceDt: '2026-10-16 10:00:00',
+      largeContent: `${'공고 내용입니다. '.repeat(2000)} 성남시 분당구 파장동`,
+    }, '공사', now);
+    const notice = compactCatalogNotice({ ...mapped, sourceUpdatedAt: new Date(now).toISOString(), regionComplete: false, licenseComplete: false });
+    for (const name of ['성남시', '분당구', '파장동']) expect(notice.regionSearchText).toContain(name);
+    expect(Buffer.byteLength(postgresJsonbText(notice), 'utf8')).toBeLessThanOrEqual(4096);
+    expect(Buffer.byteLength(JSON.stringify(notice), 'utf8')).toBeLessThanOrEqual(16384);
+  });
+
+  it('bounds legacy projections and preserves complete Unicode codepoints in compact rows', () => {
+    const mapped = mapNotice({ ...identity, bidNtceNm: '철거공사' }, '공사', now);
+    const notice = compactCatalogNotice({ ...mapped, regionSearchText: '서울시 강남구 😀 \\ " '.repeat(2000),
+      sourceUpdatedAt: new Date(now).toISOString(), regionComplete: true, licenseComplete: true });
+    expect(Buffer.byteLength(postgresJsonbText(notice), 'utf8')).toBeLessThanOrEqual(4096);
+    expect(notice.regionSearchText).not.toMatch(/[\uD800-\uDBFF]$/u);
+    expect(compactCatalogNotice(notice)).toEqual(notice);
+  });
+
+  it('hashes full sanitized source text independently of key order and condition-dependent prefixes', () => {
+    const raw = { ...identity, bidNtceNm: '철거공사', largeContent: `${'공고 본문입니다. '.repeat(2000)} 서울특별시 강남구` };
+    const first = mapNotice(raw, '공사', now);
+    const reversed = mapNotice(Object.fromEntries(Object.entries(raw).reverse()), '공사', now);
+    const changed = mapNotice({ ...raw, largeContent: `${raw.largeContent} 원문 말미 변경` }, '공사', now);
+    expect(first.regionSearchDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(reversed.regionSearchDigest).toBe(first.regionSearchDigest);
+    expect(changed.regionSearchDigest).not.toBe(first.regionSearchDigest);
+    const initial = compactCatalogNotice({ ...first, sourceUpdatedAt: new Date(now).toISOString(), regionComplete: false, licenseComplete: false });
+    const enriched = compactCatalogNotice({ ...initial, allowedRegions: ['서울특별시 강남구'], licenses: ['구조물해체·비계공사업'], regionComplete: true, licenseComplete: true });
+    expect(enriched.regionSearchText!.length).toBeLessThan(initial.regionSearchText!.length);
+    expect(enriched.regionSearchDigest).toBe(initial.regionSearchDigest);
+    expect(Buffer.byteLength(postgresJsonbText(enriched), 'utf8')).toBeLessThanOrEqual(4096);
   });
 
   it('adds region-bearing text from exact supplementary detail rows', async () => {

@@ -99,7 +99,8 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
           if(!(opening.openingComplete??opening.complete))throw new Error('공고 개찰 상태를 모두 확인하지 못해 다음 확인 때 다시 시도합니다.');
           if(/^(?:개찰\s*완료|유찰)$/.test(opening.result.trim())){notice={...notice,openingCompleted:true};changed=true;}
         }
-        versions=versions.map(item=>item.revision===notice.revision?notice:item);
+        notice=compactCatalogNotice(notice);
+        versions=versions.map(item=>item.revision===notice.revision?notice:compactCatalogNotice(item));
         if(verifyHistory||changed&&catalog.publishVerified) {
           const stored=await catalog.publishVerified?.(versions);
           if(!stored?.ok||stored.storageFull)throw new Error('공고 전체 이력 저장을 확인하지 못했습니다. 다음 확인 때 다시 시도합니다.');

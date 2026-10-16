@@ -8,6 +8,7 @@ import { isCatalogNotice, isOngoingNotice, noticeTimestamp } from '../src/notice
 import type { ActiveCatalogStore } from './active-catalog-store.ts';
 import type { ActiveCatalogCommit, ActiveCatalogIdentity, ActiveCatalogSourceJob } from '../src/live/active-catalog-types.ts';
 import type { AlertNotice, WorkerRule } from '../src/alerts/types.ts';
+import { compactNoticeRegionText } from './notice-region-text.ts';
 
 type Row = Record<string, unknown>;
 class SourceSnapshotChanged extends Error {}
@@ -33,7 +34,7 @@ export function compactCatalogNotice(notice: AlertNotice): AlertNotice {
   const alreadyCompact = notice.description === '' && notice.documents.length === 0 && notice.requirements.length === 0;
   const sourceOmittedDigest = alreadyCompact && supplied && /^[a-f0-9]{64}$/.test(supplied) ? supplied
     : createHash('sha256').update(noticeOmittedContentKey(notice)).digest('hex');
-  return { ...notice, sourceOmittedDigest, description: '', documents: [], requirements: [], duration: '' };
+  return compactNoticeRegionText({ ...notice, sourceOmittedDigest, description: '', documents: [], requirements: [], duration: '' });
 }
 
 export function createActiveCatalogProvider(
@@ -86,7 +87,7 @@ function fact(row: Row, type: ActiveCatalogIdentity['type'], now: number, procur
 
 /** Mirror the database source projection; condition/status enrichment is separate. */
 function sourceProjection(notice: AlertNotice) {
-  const excluded = new Set(['allowedRegions', 'licenses', 'regionComplete', 'licenseComplete', 'openingCompleted', 'status', 'description', 'documents', 'requirements', 'duration']);
+  const excluded = new Set(['allowedRegions', 'licenses', 'regionComplete', 'licenseComplete', 'openingCompleted', 'status', 'description', 'documents', 'requirements', 'duration', 'regionSearchText']);
   return JSON.stringify(Object.fromEntries(Object.entries(notice).filter(([key, value]) => !excluded.has(key) && value !== undefined).sort(([a], [b]) => a.localeCompare(b))));
 }
 
@@ -145,21 +146,22 @@ async function participantConditions(notice: AlertNotice, request: ActiveCatalog
     enriched = { ...enriched, allowedRegions: regions.length || notice.procurementSource !== 'private' ? regions : null, regionComplete: true };
   }
   if (license) enriched = { ...enriched, licenses: await load(`${prefix}LicenseLimit`, 'lcnsLmtNm'), licenseComplete: true };
-  return enriched;
+  return compactCatalogNotice(enriched);
 }
 
 /** Reuse only completed condition facts from the exact unchanged source version. */
 function reuseParticipantConditions(notice: AlertNotice, cached?: AlertNotice): AlertNotice {
   if (!cached || cached.number !== notice.number || cached.type !== notice.type || cached.revision !== notice.revision
-    || cached.sourceUpdatedAt !== notice.sourceUpdatedAt || cached.sourceOmittedDigest !== notice.sourceOmittedDigest) return notice;
+    || cached.sourceUpdatedAt !== notice.sourceUpdatedAt || cached.sourceOmittedDigest !== notice.sourceOmittedDigest
+    || cached.regionSearchDigest !== notice.regionSearchDigest) return notice;
   const sourceKey = (value: AlertNotice) => noticeContentKey({ ...value, allowedRegions: null, licenses: [] });
   if (sourceKey(cached) !== sourceKey(notice)) return notice;
   const names = (values: unknown): values is string[] => Array.isArray(values) && values.every(value => typeof value === 'string' && Boolean(value.trim()));
-  return { ...notice,
+  return compactCatalogNotice({ ...notice,
     ...(cached.regionComplete && (cached.allowedRegions === null || names(cached.allowedRegions))
       ? { allowedRegions: cached.allowedRegions, regionComplete: true } : {}),
     ...(cached.licenseComplete && names(cached.licenses) ? { licenses: cached.licenses, licenseComplete: true } : {}),
-  };
+  });
 }
 
 /** Discover live and current notices, drain their verification, and defer historical backlog. */

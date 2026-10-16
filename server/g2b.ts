@@ -11,7 +11,7 @@ import { createOpeningResultsLoader, createOpeningSummaryLoader } from './g2b-re
 import { startSearchWindows } from '../src/live/start-range.ts';
 import { ProviderQuotaError, providerRetryAfter } from './provider-quota.ts';
 import { PRIVATE_BID_BASE, PRIVATE_NOTICE_DIVISIONS, mapPrivateDetailSections, mapPrivateNotice, matchesPrivateNotice, privateConditionParams, privateNoticeOperation } from './g2b-private.ts';
-import { noticeRegionSearchText } from './notice-region-text.ts';
+import { noticeRegionSearchFacts, noticeRegionSearchText } from './notice-region-text.ts';
 
 type Row = Record<string, unknown>;
 const BID_BASE = 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/';
@@ -109,7 +109,7 @@ export function mapNotice(row: Row, type: G2bBusinessType, now = Date.now()): Bi
     agency: text(row.ntceInsttNm) || text(row.dminsttNm) || '기관 미제공', type,
     demandAgency: text(row.dminsttNm), noticeKind: text(row.ntceKindNm),
     category: categoryFromTitle(title), province: site[0] || '', district: site.slice(1).join(' '),
-    regionSearchText: noticeRegionSearchText(row),
+    ...noticeRegionSearchFacts(row),
     allowedRegions: null,
     // presmptPrce is the official estimated-price field. Never fall back to budget/base price.
     estimatedPrice: money(row.presmptPrce), plannedAmount: money(row.bdgtAmt), contractMethod: text(row.cntrctCnclsMthdNm) || '미제공', status,

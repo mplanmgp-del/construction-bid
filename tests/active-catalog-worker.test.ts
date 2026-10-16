@@ -5,6 +5,7 @@ import type { ActiveCatalogClaim, ActiveCatalogCommit, ActiveCatalogSourceJob, S
 import { mapNotice } from '../server/g2b';
 import { DEFAULT_ALERT_SETTINGS, type WorkerRule } from '../src/alerts/types';
 import { ProviderQuotaError } from '../server/provider-quota';
+import { postgresJsonbText } from '../server/notice-region-text';
 
 const now = Date.parse('2026-10-15T15:30:00+09:00');
 const row = (patch: Record<string, unknown> = {}) => ({ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', bsnsDivNm: '공사', bidNtceNm: '구조물 철거공사', bidNtceDt: '1995-10-02 00:00:00', rgstDt: '1995-10-02 00:00:00', bidBeginDt: '2026-02-27 10:00:00', bidClseDt: '2026-10-20 10:00:00', ...patch });
@@ -812,6 +813,23 @@ describe('all-age active catalog collection', () => {
     const compact = compactCatalogNotice({ ...mapped, description: 'large'.repeat(10000), requirements: ['large'], documents: [{ name: 'large', size: 'large' }], sourceUpdatedAt: mapped.postedAt, regionComplete: true, licenseComplete: true });
     expect(compact).toMatchObject({ description: '', requirements: [], documents: [], duration: '', title: mapped.title, regionComplete: true, licenseComplete: true });
     expect(Buffer.byteLength(JSON.stringify(compact))).toBeLessThan(2000);
+  });
+
+  it('publishes large region text after participant enrichment within the unchanged compact row budget', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }]);
+    db.publishSearchVerified.mockImplementation(async (_lease, batch) => {
+      for (const notice of batch.groups.flat()) expect(Buffer.byteLength(postgresJsonbText(notice), 'utf8')).toBeLessThanOrEqual(4096);
+      return { ok: true };
+    });
+    const provider: ActiveCatalogProvider = async operation => /PrtcptPsblRgn$/.test(operation)
+      ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', prtcptPsblRgnNm: '서울특별시 강남구' }], totalCount: 1 }
+      : /LicenseLimit$/.test(operation)
+        ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', lcnsLmtNm: '구조물해체·비계공사업' }], totalCount: 1 }
+        : { items: [row({ largeContent: `${'공고 본문입니다. '.repeat(2000)} 서울특별시 강남구` })], totalCount: 1 };
+    const result = await runActiveCatalogWorker(db, { provider, now });
+    expect(result).toMatchObject({ ok: true, searchGroups: 1 });
+    expect(db.publishSearchVerified).toHaveBeenCalledOnce();
+    expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({ allowedRegions: ['서울특별시 강남구'], licenses: ['구조물해체·비계공사업'] });
   });
 
   it('keeps an omitted-content digest before dropping large bodies and preserves it on repeated compaction', () => {

@@ -26,6 +26,7 @@ export interface BidNotice {
   plannedAmount?: number | null;
   demandAgency?: string;
   regionSearchText?: string;
+  regionSearchDigest?: string;
   noticeKind?: string;
   contractMethod: string; status: BidStatus;
   postedAt: string; deadline: string; openingAt: string; registrationDeadline: string;

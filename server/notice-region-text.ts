@@ -1,5 +1,46 @@
+import { createHash } from 'node:crypto';
+
 /** Keep a small, plain-text search corpus without persisting raw provider objects. */
-export const REGION_SEARCH_TEXT_LIMIT = 16_000;
+export const REGION_SEARCH_TEXT_LIMIT = 3_000;
+export const COMPACT_NOTICE_BYTE_LIMIT = 4_096;
+
+/** PostgreSQL jsonb::text adds spaces after object colons and all commas. */
+export function postgresJsonbText(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(item => postgresJsonbText(item)).join(', ')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value).filter(([, item]) => item !== undefined)
+    .map(([key, item]) => `${JSON.stringify(key)}: ${postgresJsonbText(item)}`).join(', ')}}`;
+  return JSON.stringify(value) ?? 'null';
+}
+
+function unicodePrefix(value: string, limit: number): string[] {
+  const characters: string[] = [];
+  for (const character of value) {
+    if (characters.length >= limit) break;
+    characters.push(character);
+  }
+  return characters;
+}
+
+/** Match the catalog's existing 4 KiB jsonb row cap, including JSON escaping. */
+export function compactNoticeRegionText<T extends { regionSearchText?: string; regionSearchDigest?: string }>(notice: T): T {
+  const { regionSearchText, regionSearchDigest, ...rest } = notice;
+  const base = { ...rest, ...(typeof regionSearchDigest === 'string' && /^[a-f0-9]{64}$/.test(regionSearchDigest) ? { regionSearchDigest } : {}) };
+  if (typeof regionSearchText !== 'string') return base as T;
+  const empty = { ...base, regionSearchText: '' };
+  const emptyBytes = Buffer.byteLength(postgresJsonbText(empty), 'utf8');
+  // The optional field must not make an otherwise valid existing notice fail.
+  if (emptyBytes > COMPACT_NOTICE_BYTE_LIMIT) return base as T;
+  const characters = unicodePrefix(regionSearchText, REGION_SEARCH_TEXT_LIMIT);
+  let low = 0, high = characters.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const text = characters.slice(0, middle).join('');
+    const textBytes = Buffer.byteLength(JSON.stringify(text), 'utf8') - 2;
+    if (emptyBytes + textBytes <= COMPACT_NOTICE_BYTE_LIMIT) low = middle;
+    else high = middle - 1;
+  }
+  return { ...base, regionSearchText: characters.slice(0, low).join('') } as T;
+}
 
 const privateField = /(?:service.?key|api.?key|authorization|password|passwd|secret|token|credential|email|e.?mail|tel(?:no)?|phone|fax|url|uri|href|link)/i;
 const usefulField = /(?:addr|adres|address|rgn|region|plce|place|site|instt|agency|ntce.?nm|title|dtllist)/i;
@@ -21,7 +62,7 @@ function plainText(value: string): string {
  * works list. Only Korean-bearing text is useful for the Korean region filter;
  * numeric codes, credentials, contacts and URLs never enter this corpus.
  */
-export function noticeRegionSearchText(...sources: unknown[]): string {
+export function noticeRegionSearchFacts(...sources: unknown[]): { regionSearchText: string; regionSearchDigest: string } {
   const fragments: { text: string; priority: number }[] = [];
   const regionalWords = new Set<string>();
   const seen = new Set<object>();
@@ -55,6 +96,10 @@ export function noticeRegionSearchText(...sources: unknown[]): string {
     }
   };
   for (const source of sources) visit(source);
+  // Hash full sanitized source text independently of the display/storage prefix
+  // and raw object key order. Participant enrichment must not change this hash.
+  const hash = createHash('sha256');
+  for (const text of [...new Set(fragments.map(fragment => fragment.text))].sort()) hash.update(JSON.stringify(text)).update('\n');
   for (const text of regionalWords) fragments.push({ text, priority: -1 });
   const unique = new Set<string>();
   const output: string[] = [];
@@ -65,9 +110,12 @@ export function noticeRegionSearchText(...sources: unknown[]): string {
     const remaining = REGION_SEARCH_TEXT_LIMIT - length - (output.length ? 1 : 0);
     if (remaining <= 0) break;
     // Keep space for other fields when a provider sends a very large body.
-    const part = text.slice(0, Math.min(remaining, 4_000));
+    const characters = unicodePrefix(text, remaining);
+    const part = characters.join('');
     output.push(part);
-    length += part.length + (output.length > 1 ? 1 : 0);
+    length += characters.length + (output.length > 1 ? 1 : 0);
   }
-  return output.join('\n');
+  return { regionSearchText: output.join('\n'), regionSearchDigest: hash.digest('hex') };
 }
+
+export function noticeRegionSearchText(...sources: unknown[]): string { return noticeRegionSearchFacts(...sources).regionSearchText; }

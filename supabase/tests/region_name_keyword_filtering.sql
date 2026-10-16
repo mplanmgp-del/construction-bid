@@ -77,10 +77,11 @@ do $$declare n jsonb:=pg_temp.keyword_notice();row record;alias text;selection j
    pg_temp.keyword_filters('{"regions":[],"autoRegion":true}'),'{"province":"서울특별시","district":"강남구"}',now())='match','company filter ignores structured-condition completeness';
 
  compacted:=bid_active_catalog_private.compact(n||jsonb_build_object('regionSearchText',repeat('서',16010)||'울','description','large omitted body'));
- assert length(compacted->>'regionSearchText')=16000,'provider projection remains bounded';
+ assert length(compacted->>'regionSearchText')<=3000 and octet_length(compacted::text)<=4096,'provider projection fits the existing compact byte allowance';
  assert compacted->>'description'='' and compacted->'documents'='[]'::jsonb,'full document bodies stay omitted';
- version:=bid_active_catalog_private.source_version(bid_active_catalog_private.compact(n||'{"regionSearchText":"서울"}'));
- assert version<>bid_active_catalog_private.source_version(bid_active_catalog_private.compact(n||'{"regionSearchText":"부산"}')),'region source projection participates in source version';
+ version:=bid_active_catalog_private.source_version(bid_active_catalog_private.compact(n||jsonb_build_object('regionSearchText','서울','regionSearchDigest',repeat('a',64))));
+ assert version=bid_active_catalog_private.source_version(bid_active_catalog_private.compact(n||jsonb_build_object('regionSearchText','서','regionSearchDigest',repeat('a',64)))),'a shorter visible prefix does not change the source version';
+ assert version<>bid_active_catalog_private.source_version(bid_active_catalog_private.compact(n||jsonb_build_object('regionSearchText','서울','regionSearchDigest',repeat('b',64)))),'stable provider digest participates in the source version';
  assert not bid_active_catalog_private.compact(n||'{"regionSearchText":null}')?'regionSearchText','invalid optional text is not retained';
 end $$;
 

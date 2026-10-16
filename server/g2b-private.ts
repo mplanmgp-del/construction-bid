@@ -1,7 +1,7 @@
 import type { BidNotice } from '../src/types.ts';
 import type { G2bBusinessType, G2bDetailField, G2bDetailSection } from '../src/g2b-types.ts';
 import { mapNotice, money } from './g2b.ts';
-import { noticeRegionSearchText } from './notice-region-text.ts';
+import { noticeRegionSearchFacts } from './notice-region-text.ts';
 
 type Row = Record<string, unknown>;
 const text = (value: unknown): string => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
@@ -37,7 +37,7 @@ export function mapPrivateNotice(row: Row, type: G2bBusinessType, now = Date.now
   }
   const notice = mapNotice(normalized, type, now);
   return { ...notice, procurementSource: 'private', bidMethod: text(row.bidMethdNm),
-    regionSearchText: noticeRegionSearchText(row),
+    ...noticeRegionSearchFacts(row),
     description: '누리장터 민간 입찰공고입니다. 제출 방법과 참가조건은 첨부파일 또는 나라장터의 누리장터 민간입찰 메뉴에서 공고번호로 조회해 확인해 주세요.',
     requirements: [...notice.requirements, ...[text(row.bidQlfctNm), text(row.rgnLmtDivNm)].filter(Boolean)],
     // This service does not supply a notice detail URL. Its authenticated
