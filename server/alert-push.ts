@@ -1,4 +1,4 @@
-import { createECDH, ECDH } from 'node:crypto';
+import { createECDH, createHash, ECDH } from 'node:crypto';
 import webpush from 'web-push';
 import type { AlertInboxItem, BrowserPushSubscription } from '../src/alerts/types.ts';
 
@@ -83,6 +83,10 @@ function pushPayload(notification: AlertInboxItem) {
   return JSON.stringify({ eventId: notification.id.slice(0, 120), title: (source?.title || '공사입찰 맞춤 알림').slice(0, 100),
     body: notification.message.slice(0, 240), notice });
 }
+function pushTopic(eventId: string): string {
+  return /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(eventId) ? eventId.toLowerCase().replace(/-/g, '')
+    : createHash('sha256').update(eventId).digest('base64url').slice(0, 32);
+}
 export async function sendAlertPush(subscription: BrowserPushSubscription, notification: AlertInboxItem,
   config: AlertPushConfig | null = readAlertPushConfig()): Promise<AlertPushResult> {
   if (!config) return { status: 'failed' };
@@ -92,7 +96,8 @@ export async function sendAlertPush(subscription: BrowserPushSubscription, notif
   try {
     // web-push uses node:https directly; non-2xx responses, including redirects,
     // are rejected rather than followed to an unvalidated destination.
-    await webpush.sendNotification(safe, pushPayload(notification), { vapidDetails: config,
+    // Collapse pending retries of this event only; distinct changes retain distinct topics.
+    await webpush.sendNotification(safe, pushPayload(notification), { vapidDetails: config, topic: pushTopic(notification.id),
       contentEncoding: 'aes128gcm', TTL: 3600, urgency: 'normal', timeout: 10_000 });
     return { status: 'sent' };
   } catch (error) {

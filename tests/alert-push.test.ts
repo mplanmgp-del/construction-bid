@@ -52,6 +52,23 @@ describe('push send outcome', () => {
     expect(JSON.parse(transport.send.mock.calls[0][1])).toMatchObject({ eventId: item.id, body: item.message, notice: null });
     expect(transport.send.mock.calls[0][2]).toMatchObject({ contentEncoding: 'aes128gcm', vapidDetails: config, TTL: 3600 });
   });
+  it('uses the same bounded transport topic for retries of one UUID event and distinct topics for different events', async () => {
+    transport.send.mockResolvedValue({ statusCode: 201 });
+    const first = { ...item, id: '1601DB2E-5BCC-4BFD-981A-0B951F1DE785' };
+    await sendAlertPush(subscription, first, config);
+    await sendAlertPush(subscription, { ...first, id: first.id.toLowerCase() }, config);
+    await sendAlertPush(subscription, { ...first, id: '1601db2e-5bcc-4bfd-981a-0b951f1de786', kind: 'changed' }, config);
+    const topics = transport.send.mock.calls.map(call => call[2].topic);
+    expect(topics).toEqual(['1601db2e5bcc4bfd981a0b951f1de785', '1601db2e5bcc4bfd981a0b951f1de785', '1601db2e5bcc4bfd981a0b951f1de786']);
+  });
+  it('hashes legacy event IDs into stable, safe topics without exposing their contents', async () => {
+    transport.send.mockResolvedValue({ statusCode: 201 });
+    await sendAlertPush(subscription, item, config); await sendAlertPush(subscription, item, config);
+    await sendAlertPush(subscription, { ...item, id: 'notification-2' }, config);
+    const topics = transport.send.mock.calls.map(call => call[2].topic);
+    expect(topics[0]).toMatch(/^[A-Za-z0-9_-]{32}$/); expect(topics[0]).toBe(topics[1]); expect(topics[0]).not.toBe(topics[2]);
+    expect(topics[0]).not.toContain(item.id);
+  });
   it.each([404, 410])('marks unavailable subscriptions expired after HTTP %i', async statusCode => {
     transport.send.mockRejectedValue({ statusCode });
     expect(await sendAlertPush(subscription, item, config)).toEqual({ status: 'expired' });
