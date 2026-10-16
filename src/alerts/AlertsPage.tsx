@@ -7,7 +7,6 @@ import type { AlertsAccess } from './useAlerts';
 import { BrowserPushControls } from './BrowserPushControls';
 import { BookmarkButton } from '../components/BookmarkButton';
 import { matchAlarmNotice, normalizeAlertSettings } from './domain';
-import { deadlineDayWindow } from '../notice-deadline-window';
 import './alerts.css';
 
 interface AlertForm {
@@ -87,17 +86,17 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
   const overview = alerts.overview;
   const status = overview?.status;
   const busy = alerts.saving || alerts.settingUp;
-  const now=Date.now(),alarmWindow=deadlineDayWindow(7,now);
+  const now=Date.now();
   const existingMatches=overview?.existingMatches.filter(notice=>matchAlarmNotice(notice,settings,profile,now).matched)??[];
   const existingCount = existingMatches.length;
   return <section className="alerts-page">
-    <div className="alerts-page-heading"><div><div className="eyebrow">내 업체에 맞는 공고를 자동으로</div><h1>알림 조건</h1><p>제출 마감일이 오늘 앞뒤 7일인 진행중·마감 임박·예정 공고를 약 10분마다 확인합니다. 개찰이 완료된 공고는 새 알림에서 제외합니다.</p></div></div>
+    <div className="alerts-page-heading"><div><div className="eyebrow">내 업체에 맞는 공고를 자동으로</div><h1>알림 조건</h1><p>마감일 제한 없이 내 조건에 맞는 마감 임박·진행중·입찰 시작 예정 공고를 약 10분마다 확인합니다. 취소되거나 개찰이 완료된 공고는 새 알림에서 제외합니다.</p></div></div>
     {alerts.error && <div className="alerts-feedback alerts-feedback-error" role="alert"><CircleAlert size={17} /><span>{alerts.error}</span></div>}
     {alerts.message && !alerts.error && <div className="alerts-feedback" role="status"><CheckCheck size={17} /><span>{alerts.message}</span></div>}
     {!overview && <div className="alerts-loading panel" role="status">{alerts.loading ? '회원의 알림 정보를 불러오고 있습니다.' : '알림 정보를 불러오지 못했습니다. 잠시 후 자동으로 다시 확인합니다.'}</div>}
     {status && <div className={`alerts-service-status panel${status.paused || status.error || !status.configured ? ' alerts-service-attention' : ''}`}>
       <div><span className={`alerts-status-dot${status.configured && settings.enabled && !status.paused && !status.error ? ' is-active' : ''}`} /><strong>{!status.configured ? '서버 알림 설정 필요' : !settings.enabled ? '내 알림 꺼짐' : status.paused ? '수집 일시 중지' : status.error ? '공고 확인 지연' : !status.lastCheckedAt ? '첫 공고 확인 대기' : '서버에서 공고 확인 중'}</strong></div>
-      <dl><div><dt>마지막 확인</dt><dd>{timeLabel(status.lastCheckedAt)}</dd></div><div><dt>확인 범위</dt><dd>제출 마감 기준 {alarmWindow.from} ~ {alarmWindow.to}</dd></div></dl>
+      <dl><div><dt>마지막 확인</dt><dd>{timeLabel(status.lastCheckedAt)}</dd></div><div><dt>확인 범위</dt><dd>마감일 제한 없이 진행중·마감 임박·입찰 시작 예정 공고</dd></div></dl>
       {status.catalog && <p>완료한 구간 {status.catalog.completedSources.toLocaleString()}개 · 남은 구간 {status.catalog.pendingSources.toLocaleString()}개 · 상세 확인 대기 {status.catalog.pendingVerification.toLocaleString()}건</p>}
       {status.backfillPending && <p>약 1,000건씩 읽어 조건에 맞는 공고만 보관합니다. 완료한 구간부터 기존 공고에 표시하며, 중단되어도 처리 위치에서 이어집니다.</p>}
       {status.error && <p role="status">{status.error}</p>}
@@ -108,7 +107,7 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
       <div className="alerts-main">
         <details ref={existingRef} className="alerts-existing panel" open={showExisting} onToggle={event => setShowExisting(event.currentTarget.open)}>
           <summary><div><Clock3 size={18} /><strong>조건에 맞는 기존 공고</strong><span>{existingCount}건{overview?.existingHasMore ? '+' : ''}</span></div><ChevronRight size={17} /></summary>
-          <div className="alerts-existing-body"><p className="alerts-help">오늘 앞뒤 7일의 제출 마감 범위에서 개찰 전 공고를 확인합니다. 제출은 마감되었어도 개찰을 기다리는 공고는 포함됩니다.</p>
+          <div className="alerts-existing-body"><p className="alerts-help">마감일 제한 없이 조건에 맞는 개찰 전 공고를 확인합니다. 제출은 마감되었어도 개찰을 기다리는 공고는 포함됩니다.</p>
             {existingMatches.length === 0 && <p className="alerts-help">{status?.backfillPending ? '기존 공고 확인이 진행 중입니다.' : '현재 저장한 조건에 맞는 기존 공고가 없습니다.'}</p>}
             {existingMatches.map(notice => {
               const comparison=matchAlarmNotice(notice,settings,profile,now);
@@ -140,7 +139,6 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
             <label className="alerts-field"><span>계약방법 <small>쉼표로 구분 · 방법명 일치</small></span><input className="field" name="contractMethods" value={form.contractMethods} maxLength={1000} placeholder="제한경쟁, 일반경쟁, 수의계약" onChange={event => update('contractMethods', event.target.value)} /></label>
             <div className="alerts-field"><span>추정가격 범위</span><div className="alerts-amounts"><label><span className="sr-only">최소 추정가격</span><input className="field" type="number" name="minAmount" min="0" step="1" value={form.minAmount} placeholder="최소 금액" onChange={event => update('minAmount', event.target.value)} /></label><span>~</span><label><span className="sr-only">최대 추정가격</span><input className="field" type="number" name="maxAmount" min="0" step="1" value={form.maxAmount} placeholder="최대 금액" onChange={event => update('maxAmount', event.target.value)} /></label><span>원</span></div></div>
             <label className="alerts-field"><span>제출 마감까지 최소 남은 일수 <small>0~365일 · 비워두면 제한 없음</small></span><input className="field" type="number" name="minDaysUntilDeadline" min="0" max="365" step="1" value={form.minDaysUntilDeadline} placeholder="예: 3" onChange={event => update('minDaysUntilDeadline', event.target.value)} /></label>
-            {Number(form.minDaysUntilDeadline)>7&&<p className="alerts-form-error" role="status">최소 남은 일수가 7일을 초과하면 자동 알림의 앞뒤 7일 범위에 맞는 공고가 없습니다. 알림을 받으려면 이 조건을 7일 이하로 조정하거나 비워 주세요.</p>}
             <label className="alerts-checkbox"><input type="checkbox" checked={form.useCompanyRegion} onChange={event => update('useCompanyRegion', event.target.checked)} /><span>등록한 내 업체 소재지로 참가 지역 비교</span></label>
             <label className="alerts-checkbox"><input type="checkbox" name="useCompanyLicenses" checked={form.useCompanyLicenses} onChange={event => update('useCompanyLicenses', event.target.checked)} aria-describedby="alerts-license-help" /><span>등록한 내 업체 보유 면허와 관련 있는 공고 비교</span></label>
             <p id="alerts-license-help" className="alerts-help">보유 면허 중 하나가 관련 있는 공고를 찾습니다. 복수 면허 조합 등 최종 참가 자격은 공고 원문을 확인해 주세요.</p>

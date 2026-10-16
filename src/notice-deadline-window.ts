@@ -48,5 +48,5 @@ export function matchesDeadlineWindow(notice: BidNotice, window: NoticeDeadlineW
 }
 
 export function isAlarmEligible(notice: BidNotice, now = Date.now()): boolean {
-  return matchesDeadlineWindow(notice, deadlineDayWindow(7, now), now);
+  return isOngoingNotice(notice, now);
 }

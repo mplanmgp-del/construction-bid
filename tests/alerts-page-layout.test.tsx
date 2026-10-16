@@ -44,26 +44,26 @@ it('keeps alert condition saving without a removed custom lookup entry',()=>{
   expect(html).not.toContain('맞춤 조회');expect(html).toContain('알림 조건 저장');
 });
 
-it('shows the rolling alarm deadline range while final notice verification is pending', () => {
+it('shows ongoing alarms without a fixed deadline range while final notice verification is pending', () => {
   const state=access();
   state.overview!.status={...state.overview!.status,backfillPending:true,catalog:{groupCount:3,activeCount:3,pendingSources:0,pendingVerification:1,completedSources:746,coverageFrom:'1995-10-01',bootstrapComplete:true,lastCheckedAt:null,error:null,storageBytes:65536,storageCeiling:16777216}};
   const html=renderToStaticMarkup(<AlertsPage alerts={state} signedIn onLogin={()=>{}} />);
-  expect(html).toContain('제출 마감 기준');
-  expect(html).toContain('앞뒤 7일');
+  expect(html).toContain('마감일 제한 없이');
+  expect(html).not.toContain('앞뒤 7일');
   expect(html).not.toContain('전체 제공 연도');
   expect(html).toContain('상세 확인 대기 1건');
 });
 
 afterEach(()=>vi.useRealTimers());
-it('hides cached existing notices once opening completes or the deadline leaves the alarm window',()=>{
+it('hides opened cached notices while retaining matching ongoing notices beyond seven days',()=>{
   vi.useFakeTimers();vi.setSystemTime('2026-10-15T10:00:00+09:00');
   const state=access(),base=state.overview!.existingMatches[0];
   state.overview!.existingMatches=[base,{...base,id:'opened',title:'이미 개찰한 공고',openingAt:'2026-10-15T09:00:00+09:00'},
-    {...base,id:'outside',title:'7일 범위 밖 공고',deadline:'2026-10-23T10:00:00+09:00',openingAt:'2026-10-24T11:00:00+09:00'}];
+    {...base,id:'future',title:'내년 석면 해체공사',deadline:'2027-10-23T10:00:00+09:00',openingAt:'2027-10-24T11:00:00+09:00'}];
   const html=renderToStaticMarkup(<AlertsPage alerts={state} signedIn onLogin={()=>{}} />);
   expect(html).toContain('설정에 맞는 기존 공고');
   expect(html).not.toContain('이미 개찰한 공고');
-  expect(html).not.toContain('7일 범위 밖 공고');
+  expect(html).toContain('내년 석면 해체공사');
 });
 
 it('hides cached existing cards that no longer match the saved personal conditions',()=>{
@@ -73,9 +73,9 @@ it('hides cached existing cards that no longer match the saved personal conditio
   expect(html).not.toContain('현재 조건과 관련 없는 사무용품 구매');
 });
 
-it('explains a saved minimum lead time greater than the fixed alarm window',()=>{
+it('preserves a saved minimum lead time without an obsolete seven-day warning',()=>{
   const state=access();state.overview!.settings.filter.minDaysUntilDeadline=365;
   const html=renderToStaticMarkup(<AlertsPage alerts={state} signedIn onLogin={()=>{}} />);
-  expect(html).toContain('최소 남은 일수가 7일을 초과');
+  expect(html).not.toContain('최소 남은 일수가 7일을 초과');
   expect(html).toContain('value="365"');
 });

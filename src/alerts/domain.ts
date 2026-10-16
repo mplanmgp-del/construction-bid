@@ -185,7 +185,7 @@ export function matchAlertNotice(notice: AlertNotice, settings: AlertSettings, p
   return {matched:true,reasons:[...reasons,...missing],needsReview:missing.length>0};
 }
 
-/** Automatic delivery has a fixed rolling deadline window; manual searches keep their chosen range. */
+/** Automatic delivery includes ongoing notices without a fixed deadline range. */
 export function matchAlarmNotice(notice:AlertNotice,settings:AlertSettings,profile:CompanyProfile|null,now=Date.now()):AlertMatch {
   return isAlarmEligible(notice,now)?matchAlertNotice(notice,settings,profile,now):{matched:false,reasons:[],needsReview:false};
 }

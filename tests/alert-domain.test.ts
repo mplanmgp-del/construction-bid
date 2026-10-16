@@ -14,13 +14,16 @@ const notice = (patch: Partial<AlertNotice> = {}): AlertNotice => ({
 });
 const settings = () => structuredClone(DEFAULT_ALERT_SETTINGS);
 describe('personalized alert content and matching',()=>{
-  it('limits automatic alarms to seven KST calendar days without narrowing manual condition matching',()=>{
+  it('matches ongoing alarms beyond seven days and keeps the saved minimum lead time',()=>{
     const s=settings();s.enabled=true;
     const future=notice({deadline:'2026-11-20T10:00:00+09:00',openingAt:'2026-11-20T11:00:00+09:00'});
     expect(matchAlertNotice(future,s,null,now).matched).toBe(true);
-    expect(matchAlarmNotice(future,s,null,now).matched).toBe(false);
+    expect(matchAlarmNotice(future,s,null,now).matched).toBe(true);
     expect(matchAlarmNotice(notice({deadline:'2026-10-22T23:59:59+09:00',openingAt:'2026-10-23T10:00:00+09:00'}),s,null,now).matched).toBe(true);
-    expect(matchAlarmNotice(notice({deadline:'2026-10-23T00:00:00+09:00',openingAt:'2026-10-23T10:00:00+09:00'}),s,null,now).matched).toBe(false);
+    expect(matchAlarmNotice(notice({deadline:'2026-10-23T00:00:00+09:00',openingAt:'2026-10-23T10:00:00+09:00'}),s,null,now).matched).toBe(true);
+    s.filter.minDaysUntilDeadline=30;
+    expect(matchAlarmNotice(future,s,null,now).matched).toBe(true);
+    expect(matchAlarmNotice(notice(),s,null,now).matched).toBe(false);
   });
   it('excludes opened notices and accepts submission-closed notices still waiting for opening',()=>{
     const s=settings();s.enabled=true;
