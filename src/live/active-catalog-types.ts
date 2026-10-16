@@ -88,4 +88,13 @@ export interface VerifiedNoticeSearchPage extends VerifiedNoticeSearchResults, V
 export interface VerifiedNoticeSearchView extends VerifiedNoticeSearchResults {
   status: VerifiedNoticeSearchStatus | null; statusLoading: boolean; statusError: string;
 }
-export interface SearchVerifiedBatch { scopeVersion: string; groups: AlertNotice[][] }
+export interface SearchVerifiedBatch {
+  scopeVersion: string; groups: AlertNotice[][];
+  /** Exact locked source version, only after fresh listing/history agreement. */
+  expectedSourceVersion?: string;
+}
+export interface SearchPublicationResult {
+  ok: boolean; storageFull?: boolean; retryRequired?: boolean; reason?: 'source_changed';
+  conflict?: 'older_revision' | 'older_source_time' | 'same_clock_content';
+  changedFields?: string[]; indexedHead?: AlertNotice; sourceVersion?: string;
+}

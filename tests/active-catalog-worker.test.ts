@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { compactCatalogNotice, createActiveCatalogProvider, runActiveCatalogWorker, type ActiveCatalogProvider } from '../server/active-catalog-worker';
 import type { ActiveCatalogStore } from '../server/active-catalog-store';
-import type { ActiveCatalogClaim, ActiveCatalogCommit, ActiveCatalogSourceJob } from '../src/live/active-catalog-types';
+import type { ActiveCatalogClaim, ActiveCatalogCommit, ActiveCatalogSourceJob, SearchPublicationResult } from '../src/live/active-catalog-types';
 import { mapNotice } from '../server/g2b';
 import { DEFAULT_ALERT_SETTINGS, type WorkerRule } from '../src/alerts/types';
 import { ProviderQuotaError } from '../server/provider-quota';
@@ -19,6 +19,75 @@ function store(sources: ActiveCatalogSourceJob[] = [], verify: ActiveCatalogClai
 }
 
 describe('all-age active catalog collection', () => {
+  const digestConflict = (): SearchPublicationResult => ({ ok: false, retryRequired: true, reason: 'source_changed', conflict: 'same_clock_content',
+    changedFields: ['sourceOmittedDigest'], sourceVersion: 'a'.repeat(64),
+    indexedHead: { ...compactCatalogNotice({ ...mapNotice(row(), '공사', now), sourceUpdatedAt: '1995-10-02T00:00:00+09:00', regionComplete: false, licenseComplete: false }), sourceOmittedDigest: 'b'.repeat(64) } });
+  const repairProvider = (mismatch = false) => vi.fn<ActiveCatalogProvider>(async (operation, params) => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
+    ? { items: [], totalCount: 0 }
+    : { items: [row(params.inqryDiv === '1' && mismatch ? { bidNtceNm: '조회 도중 달라진 철거공사' } : {})], totalCount: 1 });
+
+  it('repairs only a digest conflict after fresh listing and repeated complete history agree under the indexed CAS', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }]);
+    db.publishSearchVerified.mockResolvedValueOnce(digestConflict());
+    const provider = repairProvider();
+    expect(await runActiveCatalogWorker(db, { provider, now })).toMatchObject({ ok: true, searchGroups: 1, reconciledGroups: 1, requests: 5 });
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(2);
+    expect(db.publishSearchVerified.mock.calls[0][1]).not.toHaveProperty('expectedSourceVersion');
+    expect(db.publishSearchVerified.mock.calls[1][1]).toMatchObject({ expectedSourceVersion: 'a'.repeat(64) });
+    expect(provider.mock.calls.filter(([, p]) => p.inqryDiv === '1')[0][1]).toMatchObject({ inqryBgnDt: '199510020000', inqryEndDt: '199510020001' });
+    expect(provider.mock.calls.filter(([, p]) => p.inqryDiv === '2' && p.bidNtceNo)).toHaveLength(4);
+    expect(db.commit.mock.calls.flatMap(([, p]) => p.groups ?? [])).toHaveLength(1);
+    expect(db.commit.mock.calls.flatMap(([, p]) => p.failedGroups ?? [])).toEqual([]);
+  });
+
+  it.each(['fresh listing changes', 'CAS loses'])('keeps a source conflict queued when %s without hiding unrelated storage errors', async mode => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }]);
+    db.publishSearchVerified.mockResolvedValue(digestConflict());
+    const result = await runActiveCatalogWorker(db, { provider: repairProvider(mode === 'fresh listing changes'), now });
+    expect(result).toMatchObject({ ok: true, searchGroups: 0, deferredGroups: 1 });
+    expect(db.commit.mock.calls.flatMap(([, p]) => p.groups ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, p]) => p.rejectedGroups ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, p]) => p.failedGroups ?? [])).toEqual([expect.objectContaining({ number: 'R26BK01359594' })]);
+    expect(db.finish).toHaveBeenCalledWith('lease', {});
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(mode === 'CAS loses' ? 2 : 1);
+  });
+
+  it.each(['older_revision', 'older_source_time', 'price'] as const)('defers %s without attempting digest reconciliation or queue acknowledgement', async reason => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }]);
+    db.publishSearchVerified.mockResolvedValue({ ...digestConflict(), conflict: reason === 'price' ? 'same_clock_content' : reason,
+      changedFields: reason === 'price' ? ['amount', 'sourceOmittedDigest'] : [] });
+    const provider = repairProvider();
+    expect(await runActiveCatalogWorker(db, { provider, now })).toMatchObject({ ok: true, searchGroups: 0, deferredGroups: 1, requests: 3 });
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(1);
+    expect(db.commit.mock.calls.flatMap(([, p]) => p.groups ?? [])).toEqual([]);
+    expect(db.commit.mock.calls.flatMap(([, p]) => p.rejectedGroups ?? [])).toEqual([]);
+  });
+
+  it('keeps a digest conflict queued when the bounded provider budget cannot confirm it', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }]);
+    db.publishSearchVerified.mockResolvedValueOnce(digestConflict());
+    expect(await runActiveCatalogWorker(db, { provider: repairProvider(), now, maxRequests: 3 })).toMatchObject({ ok: true, searchGroups: 0, deferredGroups: 1, requests: 3 });
+    expect(db.publishSearchVerified).toHaveBeenCalledTimes(1);
+    expect(db.commit.mock.calls.flatMap(([, p]) => p.rejectedGroups ?? [])).toEqual([]);
+  });
+
+  it('acknowledges the same refreshed full revision history that passed public reconciliation', async () => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594', tracked: true }]);
+    const head = row({ bidNtceOrd: '001' });
+    db.publishSearchVerified.mockResolvedValueOnce({ ...digestConflict(), indexedHead: { ...digestConflict().indexedHead!, revision: '001' } });
+    let histories = 0;
+    const provider: ActiveCatalogProvider = async (operation, params) => {
+      if (/(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)) return { items: [], totalCount: 0 };
+      if (params.inqryDiv === '1') return { items: [head], totalCount: 1 };
+      histories++;
+      return { items: [row({ bidNtceNm: histories === 1 ? '처음 확인한 철거 이력' : '다시 확인한 철거 이력' }), head], totalCount: 2 };
+    };
+    expect(await runActiveCatalogWorker(db, { provider, now })).toMatchObject({ ok: true, reconciledGroups: 1 });
+    const refreshed = db.publishSearchVerified.mock.calls[1][1].groups;
+    expect(refreshed[0][0].title).toBe('다시 확인한 철거 이력');
+    expect(db.commit.mock.calls.find(([, p]) => p.groups?.length)?.[1].groups).toEqual(refreshed);
+  });
+
   it.each(['개찰완료', '유찰'])('excludes an actually %s notice awaiting a future scheduled opening', async state => {
     const db = store([], [{ type: '공사', number: 'R26BK01359594' }], []);
     const provider = vi.fn<ActiveCatalogProvider>(async operation => operation === 'getOpengResultListInfoCnstwk'
@@ -611,7 +680,7 @@ describe('all-age active catalog collection', () => {
     expect(provider).toHaveBeenCalledWith('getBidPblancListInfoCnstwkPPSSrch', expect.objectContaining({ inqryDiv: '1', inqryBgnDt: '199510010000', inqryEndDt: '199510312359', pageNo: '1', numOfRows: '999' }));
     expect(provider.mock.calls[0][1]).not.toHaveProperty('bidClseExcpYn');
     expect(db.indexUpsert).toHaveBeenCalledWith('lease', expect.objectContaining({ notices: [expect.objectContaining({ postedAt: '1995-10-02T00:00:00+09:00', deadline: '2099-03-04T10:00:00+09:00', openingAt: '' })] }));
-    expect(db.commit.mock.calls[0][1].sources?.[0].items).toEqual([]);
+    expect(db.commit.mock.calls[0][1].sources?.[0].items).toEqual([expect.objectContaining({ deadline: '2099-03-04T10:00:00+09:00' })]);
     expect(result).toMatchObject({ ok: true, sources: 1, requests: 1 });
   });
 

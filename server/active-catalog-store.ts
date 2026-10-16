@@ -1,6 +1,6 @@
 import { AlertError } from './alert-store.ts';
 import type { AlertNotice } from '../src/alerts/types.ts';
-import type { ActiveCatalogClaim, ActiveCatalogCommit, ActiveCatalogPage, ActiveCatalogPageQuery, DeadlineCatalogPage, DeadlineCatalogQuery, DeadlineIndexBatch, SearchVerifiedBatch, VerifiedNoticeSearchPage, VerifiedNoticeSearchQuery, VerifiedNoticeSearchResults, VerifiedNoticeSearchStatus, VerifiedNoticeSearchStatusQuery } from '../src/live/active-catalog-types.ts';
+import type { ActiveCatalogClaim, ActiveCatalogCommit, ActiveCatalogPage, ActiveCatalogPageQuery, DeadlineCatalogPage, DeadlineCatalogQuery, DeadlineIndexBatch, SearchVerifiedBatch, SearchPublicationResult, VerifiedNoticeSearchPage, VerifiedNoticeSearchQuery, VerifiedNoticeSearchResults, VerifiedNoticeSearchStatus, VerifiedNoticeSearchStatusQuery } from '../src/live/active-catalog-types.ts';
 
 /** Server-only catalog access. The shared worker token never reaches browser clients. */
 export function createActiveCatalogStore(options: { url?: string; key?: string; token?: string; fetcher?: typeof fetch } = {}) {
@@ -44,7 +44,7 @@ export function createActiveCatalogStore(options: { url?: string; key?: string; 
     searchPage: (query: VerifiedNoticeSearchQuery) => rpc<VerifiedNoticeSearchPage>('search_page', query),
     searchResults: (query: VerifiedNoticeSearchQuery) => rpc<VerifiedNoticeSearchResults>('search_results', query),
     searchStatus: (query: VerifiedNoticeSearchStatusQuery) => rpc<VerifiedNoticeSearchStatus>('search_status', query),
-    publishSearchVerified: (leaseId: string, batch: SearchVerifiedBatch) => rpc<{ok: boolean; storageFull?: boolean}>('search_publish', {leaseId, ...batch}),
+    publishSearchVerified: (leaseId: string, batch: SearchVerifiedBatch) => rpc<SearchPublicationResult>('search_publish', {leaseId, ...batch}),
     indexUpsert: (leaseId: string, batch: DeadlineIndexBatch) => rpc<{ ok: boolean; storageFull?: boolean }>('index_upsert', { leaseId, ...batch }),
     publishVerified: (notices: AlertNotice[]) => rpc<{ ok: boolean; storageFull?: boolean }>('publish_verified', { notices }),
     enrich: (notice: AlertNotice) => rpc<{ ok: boolean }>('enrich', { notice }),

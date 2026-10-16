@@ -2,7 +2,7 @@ import { matchAlarmNotice } from '../src/alerts/domain.ts';
 import type { AlertNotice, WorkerRule } from '../src/alerts/types.ts';
 import type { ActiveCatalogPage, ActiveCatalogPageQuery, ActiveCatalogStatus } from '../src/live/active-catalog-types.ts';
 import type { AlertProvider } from './alert-collector.ts';
-import { deadlineDayWindow, noticeTimestamp } from '../src/notice-deadline-window.ts';
+import { noticeTimestamp } from '../src/notice-deadline-window.ts';
 import { createG2bClient, koreanTimestamp, mapNotice } from './g2b.ts';
 import { compactCatalogNotice } from './active-catalog-worker.ts';
 import type { G2bResultSummary } from '../src/g2b-types.ts';
@@ -21,7 +21,6 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
   scope: AlarmScanScope = {}) {
   let cursor = initialCursor, requests = 0, processed = 0, status: ActiveCatalogStatus | null = null;
   const result = (complete: boolean, error?: string) => ({ cursor, complete, processed, requests, status, ...(error ? { error } : {}) });
-  const window=deadlineDayWindow(7,now);
   const resultClient=createG2bClient({serviceKey:process.env.G2B_SERVICE_KEY,fetcher:async(input,init)=>{
     const remaining=deadline-15_000-Date.now();
     if(remaining<1_000||requests>=maxRequests)throw new Error('공고 개찰 상태 확인을 다음 확인 때 이어갑니다.');
@@ -32,7 +31,7 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
   const seen = new Set<string>();
   while (Date.now() < deadline - 15_000) {
     const page = await (catalog.alarmPage??catalog.page)({changedSince:scope.changedSince,changedThrough:scope.changedThrough,
-      deadlineFrom:window.from,deadlineTo:window.to,includeIndex:true,cursor,limit:100,includeInactive:true}); status = page.status;
+      includeIndex:true,cursor,limit:100,includeInactive:true}); status = page.status;
     if (!Array.isArray(page.groups) || page.nextCursor && seen.has(page.nextCursor)) throw new Error('전체 공고 비교 위치를 확인하지 못했습니다.');
     const pending: AlertNotice[] = []; let last = cursor, stop = false, error = '';
     for (const group of page.groups) {

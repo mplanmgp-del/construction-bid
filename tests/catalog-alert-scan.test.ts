@@ -4,6 +4,7 @@ import { DEFAULT_ALERT_SETTINGS } from '../src/alerts/types';
 import type { AlertNotice, WorkerRule } from '../src/alerts/types';
 import { NOTICES } from '../src/data';
 import type { G2bResultSummary } from '../src/g2b-types';
+import type { ActiveCatalogPageQuery } from '../src/live/active-catalog-types';
 
 const notice = (revision: string) => ({ ...NOTICES[0], source: 'live' as const, number: 'OLD1995', revision, postedAt: '1995-10-01T00:00:00+09:00',
   deadline: new Date(Date.now()+2*86400000).toISOString(),openingAt:new Date(Date.now()+3*86400000).toISOString(), sourceUpdatedAt: '2026-10-15T10:00:00+09:00', regionComplete: false, licenseComplete: false, documents: [], description: '', requirements: [] });
@@ -14,13 +15,15 @@ const rule: WorkerRule = { userId: 'a', profile: null, settings: { ...structured
 describe('same catalog feeds all-age alerts', () => {
   it('uses the alarm page and verifies every revision before publishing an unverified index candidate',async()=>{
     const item=group('R26BK00000001');item.verifiedAt='';item.latest.revision='000';item.versions=[item.latest];
-    const page=vi.fn(),alarmPage=vi.fn(async()=>({groups:[item],nextCursor:null,status})),publishVerified=vi.fn(async(_notices:AlertNotice[])=>({ok:true}));
+    const page=vi.fn(),alarmPage=vi.fn(async(_query:ActiveCatalogPageQuery={})=>({groups:[item],nextCursor:null,status})),publishVerified=vi.fn(async(_notices:AlertNotice[])=>({ok:true}));
     const provider=vi.fn(async()=>['000','001'].map(bidNtceOrd=>({bidNtceNo:item.number,bidNtceOrd,bidNtceNm:'철거 공사',bidNtceDt:'2026-10-15 10:00:00',
       rgstDt:'2026-10-15 10:00:00',bidClseDt:'2026-10-20 10:00:00',opengDt:'2026-10-20 11:00:00'})));
     const commit=vi.fn();
     const result=await scanCatalogForAlerts({page,alarmPage,publishVerified},provider,[rule],null,commit,Date.now()+30000,Date.parse('2026-10-15T10:00:00+09:00'));
     expect(result.complete).toBe(true);expect(page).not.toHaveBeenCalled();
-    expect(alarmPage.mock.calls[0]).toEqual([expect.objectContaining({deadlineFrom:'2026-10-08',deadlineTo:'2026-10-22',includeIndex:true})]);
+    expect(alarmPage.mock.calls[0]).toEqual([expect.objectContaining({includeIndex:true,includeInactive:true})]);
+    expect(alarmPage.mock.calls[0][0]).not.toHaveProperty('deadlineFrom');
+    expect(alarmPage.mock.calls[0][0]).not.toHaveProperty('deadlineTo');
     expect(provider.mock.calls[0]).toEqual(['getBidPblancListInfoCnstwk',{inqryDiv:'2',bidNtceNo:item.number}]);
     expect(publishVerified.mock.calls[0][0].map(notice=>notice.revision)).toEqual(['000','001']);
     expect(commit.mock.calls[0][0].map((notice:{revision:string})=>notice.revision)).toEqual(['000','001']);

@@ -45,8 +45,6 @@ describe('durable alert event planning',()=>{
     expect(muted.events).toEqual([]);expect(muted.existing[0]).toMatchObject({version:2,initial:false});
   });
   it.each([
-    ['outside the future alarm window',{deadline:'2026-10-23T10:00:00+09:00',openingAt:'2026-10-23T11:00:00+09:00'}],
-    ['outside the past alarm window',{deadline:'2026-10-07T10:00:00+09:00',openingAt:'2026-10-16T11:00:00+09:00'}],
     ['already opened',{openingAt:'2026-10-15T09:00:00+09:00'}],
     ['without a submission deadline',{deadline:''}],
   ] as const)('keeps observed changes without notifying %s',(_reason,patch)=>{
@@ -66,9 +64,21 @@ describe('durable alert event planning',()=>{
     const rows=[notice(),notice({revision:'001',status:'취소'})];
     expect(planAlertChanges([rows[0]],[],[],[rule],now,rows).events).toEqual([]);
   });
-  it('keeps an unopened notice whose submission deadline passed within the previous seven days',()=>{
+  it('keeps an unopened notice whose submission deadline passed without a seven-day cutoff',()=>{
     const plan=planAlertChanges([notice({status:'마감',deadline:'2026-10-14T10:00:00+09:00',openingAt:'2026-10-16T11:00:00+09:00'})],[],[],[rule],now);
     expect(plan.events).toEqual([expect.objectContaining({kind:'new'})]);
+  });
+  it.each([
+    {deadline:'2027-11-20T10:00:00+09:00',openingAt:'2027-11-20T11:00:00+09:00'},
+    {deadline:'2026-10-01T10:00:00+09:00',openingAt:'2026-10-16T11:00:00+09:00'},
+  ])('notifies new and changed notices outside the old seven-day range only once',patch=>{
+    const incoming=notice(patch),first=planAlertChanges([incoming],[],[],[rule],now),fact=first.observations[0];
+    expect(first.events).toEqual([expect.objectContaining({kind:'new'})]);
+    expect(planAlertChanges([incoming],[fact],member(fact),[rule],now).events).toEqual([]);
+    const changed={...incoming,estimatedPrice:200,sourceUpdatedAt:'2026-10-15T10:01:00+09:00'};
+    const second=planAlertChanges([changed],[fact],member(fact),[rule],now),next=second.observations[0];
+    expect(second.events).toEqual([expect.objectContaining({kind:'changed',version:2})]);
+    expect(planAlertChanges([changed],[next],member(next),[rule],now).events).toEqual([]);
   });
   it('ignores old revisions but alerts once for a higher revision with identical content',()=>{
     const fact=planAlertChanges([notice({revision:'002'})],[],[],[rule],now).observations[0];

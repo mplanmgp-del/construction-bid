@@ -61,8 +61,8 @@ export async function runAlertWorker(store:AlertStore,{dispatchOnly=false,provid
           checkpoint.catalogDeltaFrom=new Date(Math.max(0,Date.parse(through)-2*60_000)).toISOString();
           checkpoint.catalogDeltaThrough=null;checkpoint.catalogDeltaCursor=null;
           await dispatch();
-          // An unchanged source head can enter the rolling deadline range as the KST day advances.
-          // Recheck this bounded index range each cycle; the membership/version ledger suppresses repeats.
+          // Schedule phases can change even when source content is unchanged.
+          // Recheck the full ongoing index over bounded pages; the version ledger suppresses repeats.
           const scan=await scanCatalogForAlerts(catalog,provider,claim.rules,claim.catalogCursor==='__complete__'?null:claim.catalogCursor??null,commitNotices,deadline,now);
           checkpoint.catalogCursor=scan.complete&&scan.status?.bootstrapComplete&&scan.status.pendingVerification===0?'__complete__':scan.cursor;
           checkpoint.coverageFrom=scan.status?.coverageFrom??checkpoint.coverageFrom;

@@ -24,8 +24,8 @@ describe('push delivery uses the current alarm deadline and phase',()=>{
       deliveries:vi.fn(async()=>({deliveries:queued.map(notification=>({id:notification.id,notification,subscription:{}}))})),
       settle,commit:async()=>({})} as unknown as AlertStore;
     await runAlertWorker(store,{dispatchOnly:true,now,deadline:now+45000});
-    expect(transport.send.mock.calls.map(call=>(call as unknown as [unknown,AlertInboxItem])[1].id)).toEqual(['active','test','digest']);
+    expect(transport.send.mock.calls.map(call=>(call as unknown as [unknown,AlertInboxItem])[1].id)).toEqual(['outside','active','test','digest']);
     const results=settle.mock.calls.flatMap(call=>(call as unknown as [unknown,{id:string;status:string}[]])[1]);
-    expect(results.filter(result=>result.status==='failed').map(result=>result.id)).toEqual(['opened','outside','cancelled','deleted']);
+    expect(results.filter(result=>result.status==='failed').map(result=>result.id)).toEqual(['opened','cancelled','deleted']);
   });
 });

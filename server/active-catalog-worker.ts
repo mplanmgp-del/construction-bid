@@ -11,6 +11,9 @@ import type { AlertNotice, WorkerRule } from '../src/alerts/types.ts';
 type Row = Record<string, unknown>;
 class SourceSnapshotChanged extends Error {}
 class WorkerBudgetExhausted extends Error {}
+class SourcePublicationDeferred extends Error {
+  constructor() { super('공고 원천 자료가 조회 도중 달라져 같은 공고를 다시 확인합니다.'); }
+}
 export type ActiveCatalogProvider = (operation: string, params: Record<string, string>, options?: { service: 'opening' }) => Promise<{ items: Row[]; totalCount: number }>;
 export const CURRENT_NOTICE_KEYWORDS = ['철거', '해체', '석면', '건설폐기물'] as const;
 const str = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
@@ -77,6 +80,12 @@ function fact(row: Row, type: ActiveCatalogIdentity['type'], now: number): Alert
   const sourceUpdatedAt = koreanTimestamp(row.chgDt) || koreanTimestamp(row.rgstDt) || notice.postedAt;
   if (!notice.postedAt || !sourceUpdatedAt) throw new Error('공고 일시가 불완전하여 확인 범위를 유지합니다.');
   return compactCatalogNotice({ ...notice, sourceUpdatedAt, regionComplete: false, licenseComplete: false });
+}
+
+/** Mirror the database source projection; condition/status enrichment is separate. */
+function sourceProjection(notice: AlertNotice) {
+  const excluded = new Set(['allowedRegions', 'licenses', 'regionComplete', 'licenseComplete', 'openingCompleted', 'status', 'description', 'documents', 'requirements', 'duration']);
+  return JSON.stringify(Object.fromEntries(Object.entries(notice).filter(([key, value]) => !excluded.has(key) && value !== undefined).sort(([a], [b]) => a.localeCompare(b))));
 }
 
 function validPage(items: Row[], total: number, page: number, size: number) {
@@ -153,7 +162,8 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   const maximum = Math.min(40, Math.max(0, options.maxRequests ?? 40));
   // Reserve one store commit and lease release (each RPC has an 8s timeout).
   const provider = options.provider ?? createActiveCatalogProvider(undefined, undefined, { deadline, clock });
-  let requests = 0, sources = 0, groups = 0, versions = 0, searchGroups = 0;
+  let requests = 0, sources = 0, groups = 0, versions = 0, searchGroups = 0, reconciledGroups = 0;
+  const deferredIdentities = new Set<string>();
   const warnings: string[] = [];
   const claim = await store.claim();
   if (!claim.leaseId) return { ok: true, skipped: true, sources, groups, versions, requests };
@@ -205,13 +215,12 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
     if (!groupPayload.failedGroups!.length && !groupPayload.rejectedGroups!.length) return;
     const payload = { ...groupPayload, failedGroups: [...groupPayload.failedGroups!], rejectedGroups: [...groupPayload.rejectedGroups!] };
     groupPayload.failedGroups = []; groupPayload.rejectedGroups = [];
-    warnings.push(...payload.failedGroups.map(item => item.error));
+    warnings.push(...payload.failedGroups.filter(item => !deferredIdentities.has(`${item.type}:${item.number}`)).map(item => item.error));
     // Failed retry/acknowledgment writes leave these identities queued. Other
     // claimed identities still get their own checked, bounded storage requests.
     try { await commit(payload); } catch (error) { warnings.push(safeError(error)); }
   };
-  const verifyIdentity = async (identity: ActiveCatalogIdentity) => {
-    try {
+  const completeHistory = async (identity: ActiveCatalogIdentity) => {
       let total: number | undefined;
       const all: AlertNotice[] = [];
       for (let page = 1; page <= 2; page++) {
@@ -234,6 +243,12 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
           && Date.parse(latest.sourceUpdatedAt) < Date.parse(identity.sourceUpdatedAt))) {
         throw new Error('공고 전체 이력이 이미 확인한 변경·취소 정보보다 오래되어 다시 확인합니다.');
       }
+      return all;
+  };
+  const verifyIdentity = async (identity: ActiveCatalogIdentity) => {
+    try {
+      let all = await completeHistory(identity);
+      const latest = all.at(-1)!;
       let checked = reuseParticipantConditions(latest, identity.notice);
       if (isOngoingNotice(checked, now) && noticeTimestamp(checked.deadline) <= now && noticeTimestamp(checked.openingAt) > now) {
         const completion = await openingSummary({ number: checked.number, revision: checked.revision, type: checked.type });
@@ -250,7 +265,39 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       // Only after it succeeds may private retention acknowledge the verification job.
       const payload = { scopeVersion: claim.scopeVersion, groups: [all] };
       if (Buffer.byteLength(JSON.stringify(payload)) > 2_800_000) throw new Error('공고 차수의 저장 응답이 너무 커서 확인 범위를 유지합니다.');
-      const published = await write(() => store.publishSearchVerified(leaseId, payload));
+      let published = await write(() => store.publishSearchVerified(leaseId, payload));
+      if (!published.ok && published.retryRequired === true && published.reason === 'source_changed') {
+        const indexed = published.indexedHead;
+        // A same-clock attachment change can leave an old hash permanently queued.
+        // Require two newly fetched official views to agree, then let the SQL CAS
+        // validate the unchanged indexed/lease-owned version atomically.
+        if (published.conflict === 'same_clock_content' && published.changedFields?.length === 1
+          && published.changedFields[0] === 'sourceOmittedDigest' && /^[a-f0-9]{64}$/.test(published.sourceVersion ?? '')
+          && indexed?.type === checked.type && indexed.number === checked.number && indexed.revision === checked.revision
+          && Date.parse(indexed.sourceUpdatedAt) === Date.parse(checked.sourceUpdatedAt)) {
+          try {
+            const listing = await request(`getBidPblancListInfo${identity.type === '공사' ? 'Cnstwk' : 'Servc'}`, {
+              inqryDiv: '1', inqryBgnDt: minuteKst(checked.postedAt),
+              inqryEndDt: minuteKst(new Date(Date.parse(checked.postedAt) + 60_000).toISOString()), pageNo: '1', numOfRows: '999',
+            });
+            validPage(listing.items, listing.totalCount, 1, 999);
+            if (listing.totalCount > 999) throw new SourcePublicationDeferred();
+            const targets = listing.items.filter(row => str(row.bidNtceNo) === checked.number
+              && str(row.bidNtceOrd).padStart(3, '0') === checked.revision).map(row => fact(row, identity.type, now));
+            if (targets.length !== 1 || sourceProjection(targets[0]) !== sourceProjection(checked)) throw new SourcePublicationDeferred();
+            const refreshed = await completeHistory(identity);
+            if (sourceProjection(refreshed.at(-1)!) !== sourceProjection(checked)) throw new SourcePublicationDeferred();
+            // Enriched participant conditions belong to these exact same source facts.
+            refreshed[refreshed.length - 1] = checked;
+            published = await write(() => store.publishSearchVerified(leaseId, { ...payload, groups: [refreshed], expectedSourceVersion: published.sourceVersion }));
+            if (published.ok) { all = refreshed; reconciledGroups++; }
+          } catch (error) {
+            if (error instanceof WorkerBudgetExhausted) throw new SourcePublicationDeferred();
+            throw error;
+          }
+        }
+        if (!published.ok && published.retryRequired === true && published.reason === 'source_changed') throw new SourcePublicationDeferred();
+      }
       if (published.storageFull) throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
       if (!published.ok) throw new Error('공고 검색 색인 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
       searchGroups++;
@@ -259,7 +306,10 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
         await commit({ scopeVersion: claim.scopeVersion, groups: [all] });
         groups++; versions += all.length;
       } else groupPayload.rejectedGroups!.push({ type: identity.type, number: identity.number });
-    } catch (error) { if (!(error instanceof WorkerBudgetExhausted)) groupPayload.failedGroups!.push({ type: identity.type, number: identity.number, error: safeError(error) }); }
+    } catch (error) {
+      if (error instanceof SourcePublicationDeferred) deferredIdentities.add(`${identity.type}:${identity.number}`);
+      if (!(error instanceof WorkerBudgetExhausted)) groupPayload.failedGroups!.push({ type: identity.type, number: identity.number, error: safeError(error) });
+    }
   };
   try {
     if (!claim.scopeVersion) throw new Error('공고 알림 조건의 수집 범위를 확인하지 못했습니다.');
@@ -362,6 +412,6 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
   try { await write(() => store.finish(leaseId, { ...(uniqueWarnings.length ? { error: uniqueWarnings[0] } : {}),
     ...(quotaFailure?.retryAfterSeconds ? { retryAfterSeconds: quotaFailure.retryAfterSeconds } : {}) })); }
   catch (error) { uniqueWarnings.push(safeError(error)); }
-  return { ok: uniqueWarnings.length === 0, sources, groups, versions, searchGroups, requests, ...(restartRequired ? { restartRequired: true } : {}),
+  return { ok: uniqueWarnings.length === 0, sources, groups, versions, searchGroups, reconciledGroups, deferredGroups: deferredIdentities.size, requests, ...(restartRequired ? { restartRequired: true } : {}),
     ...(uniqueWarnings.length ? { error: uniqueWarnings[0], warnings: uniqueWarnings } : {}) };
 }
