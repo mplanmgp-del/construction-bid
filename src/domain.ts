@@ -1,7 +1,8 @@
 import type { BidNotice, CompanyProfile, RegionAssessment, SearchFilters, SearchRegion } from './types.ts';
 import { DEMO_TODAY, DISTRICTS } from './data.ts';
+import { assessCompanyRegionKeywords, assessKeywordRegions } from './region-keywords.ts';
 import { noticeState } from './notice-status.ts';
-import { canonicalProvince, canonicalSearchProvince, normalizeSearchRegion, selectedRegions, selectedStatuses } from './search-filters.ts';
+import { canonicalProvince, selectedRegions, selectedStatuses } from './search-filters.ts';
 
 const cleanText = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ');
 const canonicalLicense = (value: string) => cleanText(value.replace(/[ㆍ・ᆞ]/g, '·')).replace(/\/\d+$/, '').replace(/\s+/g, '');
@@ -65,69 +66,8 @@ function amountBound(value: string): number | null {
   return Number.isSafeInteger(number) && number >= 0 ? number : Number.NaN;
 }
 
-type SearchRegionPath = { province: string; parts: string[] } | { nationwide: true };
-
-const administrativePart = /^[가-힣A-Za-z0-9·.,]+(?:시|군|구|읍|면|동|가|리)$/;
-const startsWithParts = (parts: string[], prefix: string[]) => prefix.length <= parts.length && prefix.every((part, index) => parts[index] === part);
-
-/** Parse explicit administrative paths only, never titles, agencies, or inferred locations. */
-function parseSearchRegionPath(value: string): SearchRegionPath | null {
-  const text = cleanText(value);
-  if (text === '전국') return { nationwide: true };
-  const parts = text.split(' ');
-  const province = canonicalSearchProvince(parts[0]);
-  if (province) {
-    const children = parts.slice(province === '세종특별자치시' && parts[1] === '세종시' ? 2 : 1);
-    if (!children.length) return { province, parts: [] };
-    // An explicit province plus administrative units may include newer subdivisions.
-    return children.every(part => administrativePart.test(part)) ? { province, parts: children } : null;
-  }
-  // A bare district is only usable when its parent province is unambiguous.
-  const candidates = Object.entries(DISTRICTS).flatMap(([parent, districts]) => districts
-    .filter(district => startsWithParts(parts, district.split(' ')))
-    .map(() => canonicalSearchProvince(parent) ?? parent));
-  const parents = [...new Set(candidates)];
-  return parents.length === 1 && parts.every(part => administrativePart.test(part)) ? { province: parents[0], parts } : null;
-}
-
-function assessOneSearchRegion(bid: BidNotice, selected: SearchRegion): RegionAssessment {
-  const normalized = normalizeSearchRegion(selected);
-  const province = canonicalSearchProvince(normalized.province);
-  if (!province) return { status: 'excluded', reason: '검색할 시·도를 확인해 주세요.' };
-  const selectedParts = [normalized.district, normalized.locality].filter(Boolean).join(' ').split(' ').filter(Boolean);
-  if (bid.type === '공사') {
-    if (canonicalSearchProvince(bid.province) !== province) {
-      return { status: 'excluded', reason: '공사 현장 위치가 선택한 시·도와 일치하지 않거나 확인되지 않았습니다.' };
-    }
-    if (!selectedParts.length) return { status: 'matched', reason: '공사 현장 위치가 선택한 시·도와 일치합니다.' };
-    const source = parseSearchRegionPath(`${bid.province} ${bid.district}`);
-    if (!source || 'nationwide' in source || startsWithParts(selectedParts, source.parts) && source.parts.length < selectedParts.length) {
-      return { status: 'review', reason: '공사 현장의 하위 지역 정보가 충분하지 않습니다. 선택한 시·군·구 또는 읍·면·동에 해당하는지 원문을 확인해 주세요.' };
-    }
-    return startsWithParts(source.parts, selectedParts)
-      ? { status: 'matched', reason: '공사 현장 위치가 선택한 지역 또는 그 하위 지역에 해당합니다.' }
-      : { status: 'excluded', reason: '공사 현장 위치가 선택한 하위 지역과 일치하지 않습니다.' };
-  }
-  const regions = bid.allowedRegions?.map(parseSearchRegionPath);
-  if (!regions?.length || regions.some(region => region === null)) {
-    return { status: 'review', reason: '용역의 참가 가능 지역을 확인하지 못했습니다. 지역 검색 결과에 함께 표시하며 참가 가능 여부는 원문에서 확인해 주세요.' };
-  }
-  const overlaps = regions.some(region => region && ('nationwide' in region || region.province === province &&
-    (startsWithParts(region.parts, selectedParts) || startsWithParts(selectedParts, region.parts))));
-  return overlaps
-    ? { status: 'matched', reason: '용역의 참가 가능 지역이 선택한 지역과 겹치거나 전국으로 명시되어 있습니다. 실제 참가자격은 별도로 확인해 주세요.' }
-    : { status: 'excluded', reason: '용역의 참가 가능 지역에 선택한 지역이 없습니다.' };
-}
-
-/** Search scope only: service participation regions are not construction site locations. */
-export function assessSearchRegions(bid: BidNotice, regions: SearchRegion[]): RegionAssessment {
-  if (!regions.length) return { status: 'matched', reason: '전체 지역을 검색합니다.' };
-  const assessments = regions.map(region => assessOneSearchRegion(bid, region));
-  return assessments.find(assessment => assessment.status === 'matched')
-    ?? assessments.find(assessment => assessment.status === 'review')
-    ?? assessments[0];
-}
-
+/** Search every available notice text field for the selected region names. */
+export const assessSearchRegions = assessKeywordRegions;
 /** Retain the single-province API for existing saved searches and callers. */
 export function assessSearchRegion(bid: BidNotice, selectedProvince: string): RegionAssessment {
   return assessSearchRegions(bid, [{ province: selectedProvince }]);
@@ -198,7 +138,7 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
     const deadlineDate = koreanDate(bid.deadline);
     if (filters.deadlineFrom && (!deadlineDate || deadlineDate < filters.deadlineFrom)) return false;
     if (filters.deadlineTo && (!deadlineDate || deadlineDate > filters.deadlineTo)) return false;
-    const region = assessRegion(bid, profile).status;
+    const region = assessCompanyRegionKeywords(bid, profile).status;
     if (filters.regionView !== 'all') return region === filters.regionView;
     return !filters.autoRegion || region === 'matched';
   }).sort((a, b) => {

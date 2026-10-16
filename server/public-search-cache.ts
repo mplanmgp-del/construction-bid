@@ -11,7 +11,7 @@ export const SEARCH_CACHE_QUOTA_WARNING = '공공데이터 API 호출 한도로 
 export const SEARCH_CACHE_FAILURE_WARNING = '최신 자료 갱신에 실패하여 저장된 공고를 표시합니다. 잠시 후 다시 검색해 주세요.';
 const MAX_BYTES = 2_000_000;
 const MAX_PENDING = 128;
-const SCHEMA = 1;
+const SCHEMA = 2;
 
 export interface PublicSearchCache {
   get(key: string): Promise<unknown>;
@@ -31,7 +31,7 @@ const unavailableCache: PublicSearchCache = { get: async () => undefined, set: a
 function defaultCache(): PublicSearchCache {
   // Hobby Runtime Cache can be shared by projects. Include the project and schema in the namespace.
   // Preserve the SHA-256 below; the SDK's default hash would reduce it to 32 bits.
-  try { return runtimeCache ??= getCache({ namespace: 'construction-bid:public-start-v1', keyHashFunction: key => key }); }
+  try { return runtimeCache ??= getCache({ namespace: 'construction-bid:public-start-v2', keyHashFunction: key => key }); }
   catch { return unavailableCache; }
 }
 function completePage(value: unknown): value is G2bNoticePage {

@@ -13,7 +13,7 @@ function fixture(initial?: G2bNoticePage) {
     get: vi.fn(async key => {
       if (!key.startsWith('failure:') && !seeded) {
         seeded = true;
-        if (initial) { stored = { schema: 1, body: initial }; entries.set(key, stored); }
+        if (initial) { stored = { schema: 2, body: initial }; entries.set(key, stored); }
       }
       return entries.get(key);
     }),
@@ -153,6 +153,14 @@ it('ignores persisted failure markers from an older deployment', async () => {
   vi.mocked(f.cache.get).mockImplementation(async key => key.startsWith('failure:')
     ? { schema: 1, retryAt: now + 300_000, quota: true } : undefined);
   expect((await loadPublicSearch('old-lockout', async () => page(), f.options)).status).toBe('MISS');
+});
+
+it('refreshes old mapped cache entries that predate the region keyword corpus', async () => {
+  const f = fixture();
+  vi.mocked(f.cache.get).mockResolvedValue({ schema: 1, body: page(1234) });
+  const loader = vi.fn(async () => page());
+  expect((await loadPublicSearch('old-region-corpus', loader, f.options)).status).toBe('MISS');
+  expect(loader).toHaveBeenCalledOnce();
 });
 
 it('ignores malformed, future-dated and expired cache entries', async () => {

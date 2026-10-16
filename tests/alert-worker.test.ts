@@ -16,7 +16,7 @@ describe('durable alert event planning',()=>{
     const n=notice({province:'',district:''});
     const plan=planAlertChanges([n],[],[],[s],now);
     expect(plan.events[0].message).toContain('확인 필요');expect(plan.events[0].message).toContain('관심 검색어 일치');
-    expect(plan.events[0].message).toContain('현장·수행 위치 확인 필요');
+    expect(plan.events[0].message).toContain('지역명 확인 필요');
     const again=planAlertChanges([n],plan.observations,member(plan.observations[0]),[s],now);
     expect(again.events).toEqual([]);
   });

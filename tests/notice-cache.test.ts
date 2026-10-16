@@ -80,6 +80,17 @@ it('rejects a cached malformed procurement source rather than routing it as a pu
   expect(readNoticeCache(query, now, storage)).toBeNull();
 });
 
+it('preserves bounded source region keywords across cache reloads and rejects malformed values', () => {
+  const storage = store(); const result = page();
+  result.items[0].regionSearchText = '원본 현장주소 강원도 춘천시';
+  writeNoticeCache(query, result, now, storage);
+  expect(readNoticeCache(query, now, storage)?.page.items[0].regionSearchText).toBe('원본 현장주소 강원도 춘천시');
+  const entries = JSON.parse(storage.getItem(NOTICE_CACHE_KEY)!);
+  entries[0].page.items[0].regionSearchText = '가'.repeat(16001);
+  storage.setItem(NOTICE_CACHE_KEY, JSON.stringify(entries));
+  expect(readNoticeCache(query, now, storage)).toBeNull();
+});
+
 it('bounds storage to six successful searches and keeps unrelated account preferences', () => {
   const storage = store(); storage.setItem('account-preferences', 'keep');
   for (let i = 0; i < 8; i++) writeNoticeCache({ ...query, keyword: `검색${i}` }, page(), now + i, storage);

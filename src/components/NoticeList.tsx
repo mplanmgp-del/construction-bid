@@ -1,5 +1,6 @@
 import { BookmarkButton } from './BookmarkButton';
-import { assessRegion, assessSearchRegions, formatDateTime, formatPrice } from '../domain';
+import { assessSearchRegions, formatDateTime, formatPrice } from '../domain';
+import { assessCompanyRegionKeywords } from '../region-keywords';
 import type { BidNotice, CompanyProfile, NoticeStatus, SearchFilters, SearchRegion } from '../types';
 import { noticeState } from '../notice-status';
 export { noticeState } from '../notice-status';
@@ -38,17 +39,17 @@ export function NoticeList({ bids, keyword, profile, bookmarks, selected, onSele
         const state = noticeState(bid, now);
         const submission = noticeSubmissionMessage(bid, now);
         const deadline = formatDateTime(bid.deadline, { includeYear: true });
-        const region = assessRegion(bid, profile);
+        const region = assessCompanyRegionKeywords(bid, profile);
         const regionPending = needsNoticeRegions(bid) && regionLookup?.pendingKeys.has(noticeRegionKey(bid));
         const regionFailed = needsNoticeRegions(bid) && regionLookup?.failedKeys.has(noticeRegionKey(bid));
-        const regionLabel = region.status === 'matched' ? '지역 일치' : region.status === 'excluded' ? '지역 제외'
-          : regionPending ? '지역 조회 중' : regionFailed ? '지역 조회 실패' : '지역 확인 필요';
+        const regionLabel = region.status === 'matched' ? '내 지역 키워드 일치' : region.status === 'excluded' ? '내 지역 키워드 없음'
+          : regionPending ? '지역 조회 중' : regionFailed ? '지역 조회 실패' : '지역명 확인 필요';
         const searchRegion = selectedRegions.length ? assessSearchRegions(bid, selectedRegions) : null;
         const saved = bookmarks.includes(bid.id);
         const resultHref = `/notice-detail.html?${new URLSearchParams({ number: bid.number, revision: bid.revision, type: bid.type })}#results`;
         return <tr key={bid.id} className={selected.includes(bid.id) ? 'is-selected' : ''}>
           <td className="nl-select"><label className="nl-checkbox"><input type="checkbox" aria-label={`${bid.title} 선택`} checked={selected.includes(bid.id)} onChange={() => select(bid.id)} /></label></td>
-          <td className="nl-title"><div className="nl-meta"><span>{noticeWorkLabel(bid)}{bid.bidMethod ? ` · ${bid.bidMethod}` : ''} · {bid.noticeKind || (bid.revised ? '정정공고' : '-')} · {bid.number}-{bid.revision}</span><BookmarkButton noticeTitle={bid.title} saved={saved} onToggle={() => onBookmark(bid.id)} /></div><button type="button" className="nl-title-button" onClick={() => onOpen(bid)}><HighlightTitle title={bid.title} keyword={keyword} /></button><div className="nl-region-line"><span className={`nl-region is-${region.status}`} title={regionPending ? '참가 가능 지역을 조회하고 있습니다.' : region.reason}>{regionLabel}</span>{[bid.province, bid.district].filter(Boolean).length > 0 && <span className="nl-site-region">현장 {[bid.province, bid.district].filter(Boolean).join(' ')}</span>}</div>{!regionPending && !regionFailed && searchRegion && (searchRegion.status === 'review' || bid.type === '용역') && <span className={`nl-service-region is-${searchRegion.status}`} title={searchRegion.reason}>{searchRegion.status === 'review' ? bid.type === '용역' ? '참가 가능 지역 확인 필요' : '현장 세부 지역 확인 필요' : `참가 가능 지역 · ${bid.allowedRegions?.join(' · ')}`}</span>}{bid.source === 'live' && <a className="nl-results-link" href={resultHref} target="_blank" rel="noopener noreferrer" aria-label={`${bid.title} 개찰·낙찰 결과 새 탭에서 보기`}>개찰·낙찰 결과 <span aria-hidden="true">↗</span></a>}</td>
+          <td className="nl-title"><div className="nl-meta"><span>{noticeWorkLabel(bid)}{bid.bidMethod ? ` · ${bid.bidMethod}` : ''} · {bid.noticeKind || (bid.revised ? '정정공고' : '-')} · {bid.number}-{bid.revision}</span><BookmarkButton noticeTitle={bid.title} saved={saved} onToggle={() => onBookmark(bid.id)} /></div><button type="button" className="nl-title-button" onClick={() => onOpen(bid)}><HighlightTitle title={bid.title} keyword={keyword} /></button><div className="nl-region-line"><span className={`nl-region is-${region.status}`} title={regionPending && region.status === 'review' ? '추가 지역 정보를 조회하고 있습니다.' : region.reason}>{regionLabel}</span>{[bid.province, bid.district].filter(Boolean).length > 0 && <span className="nl-site-region">현장 {[bid.province, bid.district].filter(Boolean).join(' ')}</span>}</div>{searchRegion && <span className={`nl-service-region is-${searchRegion.status}`} title={searchRegion.reason}>{searchRegion.status === 'review' ? '검색 지역명 확인 필요' : searchRegion.status === 'matched' ? '검색 지역 키워드 일치' : '검색 지역 키워드 없음'}</span>}{bid.source === 'live' && <a className="nl-results-link" href={resultHref} target="_blank" rel="noopener noreferrer" aria-label={`${bid.title} 개찰·낙찰 결과 새 탭에서 보기`}>개찰·낙찰 결과 <span aria-hidden="true">↗</span></a>}</td>
           <td className="nl-agency" data-label="수요기관">{bid.demandAgency || '-'}</td>
           <td className="nl-deadline" data-label="제출 마감">{deadline === '일정 미제공' ? <span className="nl-missing">{bid.procurementSource === 'private' ? '공고서 확인' : '제출 마감일 확인 필요'}</span> : <time dateTime={bid.deadline}>{deadline}</time>}{submission && submission !== '취소된 공고' && deadline !== '일정 미제공' && <small className="nl-submission">{submission}</small>}</td>
           <td className="nl-status" data-label="상태"><span className={`nl-state is-${state.tone}`} title={state.description}>{noticeVisibleStateLabel(bid, state.label)}</span>{submission === '취소된 공고' && <small className="nl-cancelled">{submission}</small>}</td>

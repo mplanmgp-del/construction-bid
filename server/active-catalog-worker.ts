@@ -108,9 +108,12 @@ async function parallel<T>(items: T[], work: (item: T) => Promise<void>) {
 }
 
 /** Unknown participant facts remain candidates until the exact conditions are fetched. */
-function potentialRules(notice: AlertNotice, rules: WorkerRule[], now: number) {
+export function potentialCatalogRules(notice: AlertNotice, rules: WorkerRule[], now: number) {
   return rules.filter(rule => matchAlarmNotice(notice,
-    { ...rule.settings, filter: { ...rule.settings.filter, includeUnknown: true } }, rule.profile, now).matched);
+    { ...rule.settings, filter: { ...rule.settings.filter, includeUnknown: true,
+      // A matching name can still exist only in the unfetched participant rows.
+      ...(!notice.regionComplete ? { regions: [], useCompanyRegion: false } : {}),
+    } }, rule.profile, now).matched);
 }
 
 async function participantConditions(notice: AlertNotice, request: ActiveCatalogProvider): Promise<AlertNotice> {
@@ -309,7 +312,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       if (published.storageFull) throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');
       if (!published.ok) throw new Error('공고 검색 색인 저장을 확인하지 못했습니다. 확인 범위를 유지합니다.');
       searchGroups++;
-      const matched = potentialRules(checked, rules, now).some(rule => matchAlarmNotice(checked, rule.settings, rule.profile, now).matched);
+      const matched = potentialCatalogRules(checked, rules, now).some(rule => matchAlarmNotice(checked, rule.settings, rule.profile, now).matched);
       if (matched || identity.tracked) {
         await commit({ scopeVersion: claim.scopeVersion, groups: [all], refreshMatching: matched });
         groups++; versions += all.length;
@@ -363,7 +366,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
             observed.set(key, { type: notice.type, number: notice.number, revision: notice.revision, sourceUpdatedAt: notice.sourceUpdatedAt,
               ...(privateSource ? { procurementSource: 'private' as const } : {}) });
           }
-          if (potentialRules(notice, rules, now).length) items.push(notice);
+          if (potentialCatalogRules(notice, rules, now).length) items.push(notice);
         }
         // Store the small common index in bounded batches before acknowledging
         // the raw page. Closed/cancelled bodies are discarded; their minimal

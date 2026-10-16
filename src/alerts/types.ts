@@ -13,7 +13,7 @@ export interface AlertFilter {
   maxAmount: number | null;
   includeUnknown: boolean;
   useCompanyRegion: boolean;
-  /** Absent fields in saved settings keep the previous matching behavior. */
+  /** Retained for saved-setting compatibility; all values now use region keywords. */
   regionBasis?: AlertRegionBasis;
   agencies?: string[];
   contractMethods?: string[];

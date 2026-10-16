@@ -45,12 +45,12 @@ describe('personalized alert content and matching',()=>{
     const s=settings();s.enabled=true;Object.assign(s.filter,{regionBasis:'auto'});s.filter.regions=['경기'];s.filter.licenses=['석면해체ㆍ제거업'];
     expect(matchAlertNotice(notice({type:'용역'}),s,null,now).matched).toBe(true);
     s.filter.regions=['서울'];
-    expect(matchAlertNotice(notice({type:'용역'}),s,null,now).matched).toBe(false);
+    expect(matchAlertNotice(notice({type:'용역'}),s,null,now).matched).toBe(true);
     expect(matchAlertNotice(notice(),s,null,now).matched).toBe(true);
   });
   it('keeps unknown conditions explicit and allows users to exclude them',()=>{
     const s=settings();s.enabled=true;s.filter.regions=['경기'];s.filter.minAmount=1;
-    const missing=notice({type:'용역',allowedRegions:null,regionComplete:false,estimatedPrice:null});
+    const missing=notice({type:'용역',province:'',district:'',allowedRegions:null,regionComplete:false,estimatedPrice:null});
     expect(matchAlertNotice(missing,s,null,now)).toMatchObject({matched:true,needsReview:true});
     s.filter.includeUnknown=false;
     expect(matchAlertNotice(missing,s,null,now).matched).toBe(false);
@@ -78,25 +78,25 @@ describe('expanded construction and service alert comparison',()=>{
   const rule=(filter:Record<string,unknown>={})=>{
     const s=settings();s.enabled=true;Object.assign(s.filter,filter);return s;
   };
-  it.each(['공사','용역'] as const)('compares both region sources for %s without substituting one for the other',type=>{
+  it.each(['공사','용역'] as const)('searches both region sources for %s regardless of saved legacy basis',type=>{
     const n=notice({type});
     expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'participation'}),null,now)).toMatchObject({matched:true,needsReview:false});
-    expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'site'}),null,now).matched).toBe(false);
+    expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'site'}),null,now).matched).toBe(true);
     expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'either'}),null,now)).toMatchObject({matched:true,needsReview:false});
-    expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'both'}),null,now).matched).toBe(false);
+    expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'both'}),null,now).matched).toBe(true);
     expect(matchAlertNotice(n,rule({regions:['서울','경기'],regionBasis:'both'}),null,now)).toMatchObject({matched:true,needsReview:false});
   });
-  it.each(['공사','용역'] as const)('keeps an absent %s site reviewable and obeys the unknown switch',type=>{
-    const n=notice({type,province:'',district:''});
+  it.each(['공사','용역'] as const)('keeps absent %s region keywords reviewable and obeys the unknown switch',type=>{
+    const n=notice({type,province:'',district:'',allowedRegions:null});
     expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'site'}),null,now)).toMatchObject({matched:true,needsReview:true});
     expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'site',includeUnknown:false}),null,now).matched).toBe(false);
-    expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'either',includeUnknown:false}),null,now)).toMatchObject({matched:true,needsReview:false});
+    expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'either',includeUnknown:false}),null,now).matched).toBe(false);
     expect(matchAlertNotice(n,rule({regions:['경기'],regionBasis:'both'}),null,now)).toMatchObject({matched:true,needsReview:true});
   });
-  it('does not discard unknown provider regions or call incomplete matches confirmed',()=>{
+  it('matches a visible region keyword even while additional provider regions are incomplete',()=>{
     const partial=notice({allowedRegions:['경기'],regionComplete:false});
-    expect(matchAlertNotice(partial,rule({regions:['서울'],regionBasis:'participation'}),null,now)).toMatchObject({matched:true,needsReview:true});
-    expect(matchAlertNotice(partial,rule({regions:['서울'],regionBasis:'both'}),null,now)).toMatchObject({matched:true,needsReview:true});
+    expect(matchAlertNotice(partial,rule({regions:['서울'],regionBasis:'participation'}),null,now)).toMatchObject({matched:true,needsReview:false});
+    expect(matchAlertNotice(partial,rule({regions:['서울'],regionBasis:'both'}),null,now)).toMatchObject({matched:true,needsReview:false});
     expect(matchAlertNotice(partial,rule({regions:['서울'],regionBasis:'either',includeUnknown:false}),null,now)).toMatchObject({matched:true,needsReview:false});
     expect(matchAlertNotice(notice({type:'용역',allowedRegions:['전국']}),rule({regions:['제주'],regionBasis:'participation'}),null,now)).toMatchObject({matched:true,needsReview:false});
   });

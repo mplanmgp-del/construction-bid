@@ -31,8 +31,15 @@ export function mergeNoticeDetail(notice: BidNotice, detail: G2bNoticeDetail): B
   if (notice.number !== detail.number || notice.revision !== detail.revision) return notice;
   const allowedRegions = detail.regionComplete ? detail.allowedRegions : notice.allowedRegions;
   const licenses = detail.licenseComplete ? detail.licenses : notice.licenses;
-  if (JSON.stringify(allowedRegions) === JSON.stringify(notice.allowedRegions) && JSON.stringify(licenses) === JSON.stringify(notice.licenses)) return notice;
-  return { ...notice, allowedRegions, licenses };
+  const incoming = [detail.notice?.regionSearchText, ...(detail.sections ?? []).flatMap(section => section.fields.map(field => field.value))]
+    .filter((value): value is string => typeof value === 'string' && !!value.trim())
+    .map(value => value.normalize('NFKC').trim().replace(/\s+/g, ' '));
+  const previous = notice.regionSearchText ?? '';
+  const additions = [...new Set(incoming)].filter(value => !previous.includes(value));
+  const regionSearchText = additions.length ? [...additions, previous].filter(Boolean).join(' ').slice(0, 16_000) : notice.regionSearchText;
+  if (JSON.stringify(allowedRegions) === JSON.stringify(notice.allowedRegions) && JSON.stringify(licenses) === JSON.stringify(notice.licenses)
+    && regionSearchText === notice.regionSearchText) return notice;
+  return { ...notice, allowedRegions, licenses, ...(regionSearchText === undefined ? {} : { regionSearchText }) };
 }
 
 export function emptyMemberWorkspace(userId: string, email = ''): MemberWorkspace {
@@ -53,6 +60,7 @@ function validNoticeSnapshot(value: unknown): value is BidNotice {
     && (notice.estimatedPrice === null || (typeof notice.estimatedPrice === 'number' && Number.isFinite(notice.estimatedPrice) && notice.estimatedPrice >= 0))
     && stringArray(notice.licenses) && stringArray(notice.requirements)
     && Array.isArray(notice.documents) && notice.documents.every(item => item && typeof item.name === 'string' && typeof item.size === 'string' && (item.url === undefined || typeof item.url === 'string'))
+    && (notice.regionSearchText === undefined || typeof notice.regionSearchText === 'string')
     && (notice.detailUrl === undefined || typeof notice.detailUrl === 'string');
 }
 

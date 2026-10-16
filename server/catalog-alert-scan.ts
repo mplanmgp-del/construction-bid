@@ -5,7 +5,7 @@ import type { AlertProvider } from './alert-collector.ts';
 import { noticeTimestamp } from '../src/notice-deadline-window.ts';
 import { createG2bClient, koreanTimestamp, mapNotice } from './g2b.ts';
 import { mapPrivateNotice, matchesPrivateNotice, PRIVATE_NOTICE_DIVISIONS, privateNoticeOperation } from './g2b-private.ts';
-import { compactCatalogNotice } from './active-catalog-worker.ts';
+import { compactCatalogNotice, potentialCatalogRules } from './active-catalog-worker.ts';
 import type { G2bResultSummary } from '../src/g2b-types.ts';
 
 export interface CatalogReader {
@@ -38,8 +38,7 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
     for (const group of page.groups) {
       if (Date.now() > deadline - 15_000) { stop = true; break; }
       let notice = group.latest,versions=group.versions,changed=false;
-      const potential=(candidate:AlertNotice)=>rules.filter(rule=>matchAlarmNotice(candidate,
-        {...rule.settings,filter:{...rule.settings.filter,includeUnknown:true}},rule.profile,now).matched);
+      const potential=(candidate:AlertNotice)=>potentialCatalogRules(candidate,rules,now);
       const verifyHistory=!group.verifiedAt&&potential(notice).length>0;
       try {
         if(verifyHistory) {
@@ -66,9 +65,8 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
         }
         let region=false,license=false;
         for(const rule of potential(notice)) {
-          const filter=rule.settings.filter,basis=filter.regionBasis??'auto';
-          region ||= !notice.regionComplete&&(filter.useCompanyRegion||filter.regions.length>0
-            &&(basis==='participation'||basis==='either'||basis==='both'||basis==='auto'&&notice.type==='용역'));
+          const filter=rule.settings.filter;
+          region ||= !notice.regionComplete&&(filter.useCompanyRegion||filter.regions.length>0);
           license ||= !notice.licenseComplete&&(filter.licenses.length>0||filter.useCompanyLicenses===true);
         }
         const needed=Number(region)+Number(license);

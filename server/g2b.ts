@@ -11,6 +11,7 @@ import { createOpeningResultsLoader, createOpeningSummaryLoader } from './g2b-re
 import { startSearchWindows } from '../src/live/start-range.ts';
 import { ProviderQuotaError, providerRetryAfter } from './provider-quota.ts';
 import { PRIVATE_BID_BASE, PRIVATE_NOTICE_DIVISIONS, mapPrivateDetailSections, mapPrivateNotice, matchesPrivateNotice, privateConditionParams, privateNoticeOperation } from './g2b-private.ts';
+import { noticeRegionSearchText } from './notice-region-text.ts';
 
 type Row = Record<string, unknown>;
 const BID_BASE = 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/';
@@ -108,6 +109,7 @@ export function mapNotice(row: Row, type: G2bBusinessType, now = Date.now()): Bi
     agency: text(row.ntceInsttNm) || text(row.dminsttNm) || '기관 미제공', type,
     demandAgency: text(row.dminsttNm), noticeKind: text(row.ntceKindNm),
     category: categoryFromTitle(title), province: site[0] || '', district: site.slice(1).join(' '),
+    regionSearchText: noticeRegionSearchText(row),
     allowedRegions: null,
     // presmptPrce is the official estimated-price field. Never fall back to budget/base price.
     estimatedPrice: money(row.presmptPrce), plannedAmount: money(row.bdgtAmt), contractMethod: text(row.cntrctCnclsMthdNm) || '미제공', status,
@@ -364,7 +366,8 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     const licenseRows = licenseComplete && licenses.status === 'fulfilled' ? licenses.value.items : [];
     const names = unique(regionRows.map(row => text(row.prtcptPsblRgnNm)));
     const licenseNames = unique(licenseRows.map(row => text(row.lcnsLmtNm)));
-    const notice = { ...found, allowedRegions: names.length ? names : null, licenses: licenseNames };
+    const notice = { ...found, allowedRegions: names.length ? names : null, licenses: licenseNames,
+      regionSearchText: noticeRegionSearchText(noticeRow, regionRows, licenseRows) };
     return { number, revision, notice, allowedRegions: notice.allowedRegions, licenses: licenseNames,
       regionComplete, licenseComplete, fetchedAt: new Date(now()).toISOString(), sourceUrl: notice.detailUrl,
       sections: mapPrivateDetailSections(noticeRow, regionRows, licenseRows), warnings: [
@@ -404,7 +407,8 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     const names = unique(regionRows.map(row => text(row.prtcptPsblRgnNm)));
     const licenseNames = unique(licenseRows.map(row => text(row.lcnsLmtNm)));
     const sourceUrl = `https://www.g2b.go.kr/link/PNPE027_01/?${new URLSearchParams({ bidPbancNo: number, bidPbancOrd: revision })}`;
-    const notice = noticeRow ? { ...mapNotice(noticeRow, type, now()), allowedRegions: names.length ? names : null, licenses: licenseNames, detailUrl: sourceUrl } : undefined;
+    const notice = noticeRow ? { ...mapNotice(noticeRow, type, now()), allowedRegions: names.length ? names : null, licenses: licenseNames, detailUrl: sourceUrl,
+      regionSearchText: noticeRegionSearchText(noticeRow, baseRows, regionRows, licenseRows) } : undefined;
     return { number, revision, allowedRegions: names.length ? names : null, licenses: licenseNames,
       regionComplete, licenseComplete, fetchedAt: new Date(now()).toISOString(),
       ...(notice ? { notice } : {}), sourceUrl,

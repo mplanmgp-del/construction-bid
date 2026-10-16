@@ -68,15 +68,28 @@ describe('same catalog feeds all-age alerts', () => {
     expect(page.mock.calls[0][0]).toMatchObject({ includeInactive: true });
     expect(provider).not.toHaveBeenCalled();
   });
-  it('loads only necessary missing conditions once and writes compact enrichment for later search and alerts', async () => {
+  it.each(['auto', 'site', 'participation', 'either', 'both'] as const)('loads missing region facts for a saved %s basis before matching all region keywords', async basis => {
     const page = vi.fn().mockResolvedValue({ groups: [group()], nextCursor: null, status }), enrich = vi.fn().mockResolvedValue({ ok: true });
     const provider = vi.fn().mockResolvedValue([{ bidNtceNo: 'OLD1995', bidNtceOrd: '001', prtcptPsblRgnNm: '서울특별시' }]);
     const commit = vi.fn().mockResolvedValue(undefined), regionalRule = structuredClone(rule);
-    regionalRule.settings.filter.regions = ['서울특별시']; regionalRule.settings.filter.regionBasis = 'participation';
+    regionalRule.settings.filter.regions = ['서울특별시']; regionalRule.settings.filter.regionBasis = basis;
     await scanCatalogForAlerts({ page, enrich }, provider, [regionalRule], null, commit, Date.now() + 30000);
     expect(provider).toHaveBeenCalledOnce(); expect(provider.mock.calls[0][1]).toMatchObject({ inqryDiv: '2', bidNtceNo: 'OLD1995', bidNtceOrd: '001' });
     expect(enrich.mock.calls[0][0]).toMatchObject({ revision: '001', allowedRegions: ['서울특별시'], regionComplete: true, documents: [] });
     expect(commit.mock.calls[0][0][1].allowedRegions).toEqual(['서울특별시']);
+  });
+  it('verifies missing participant regions even when other known region keywords do not match yet', async () => {
+    const item = group();
+    item.latest = { ...item.latest, title: '부산광역시 학교 철거공사', agency: '부산교육청', demandAgency: '', province: '부산광역시', district: '해운대구',
+      allowedRegions: null, regionComplete: false };
+    item.versions = [item.latest];
+    const page = vi.fn(async () => ({ groups: [item], nextCursor: null, status })), enrich = vi.fn(async () => ({ ok: true }));
+    const provider = vi.fn(async () => [{ bidNtceNo: item.number, bidNtceOrd: '001', prtcptPsblRgnNm: '서울특별시' }]);
+    const regionalRule = structuredClone(rule); regionalRule.settings.filter.regions = ['서울특별시']; regionalRule.settings.filter.regionBasis = 'site';
+    const commit = vi.fn();
+    await scanCatalogForAlerts({ page, enrich }, provider, [regionalRule], null, commit, Date.now() + 30000);
+    expect(provider).toHaveBeenCalledOnce();
+    expect(commit.mock.calls[0][0][0].allowedRegions).toEqual(['서울특별시']);
   });
   it('keeps its cursor before a failed group while committing earlier verified groups', async () => {
     const page = vi.fn().mockResolvedValue({ groups: [group('A'), group('B')], nextCursor: null, status });

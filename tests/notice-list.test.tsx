@@ -4,12 +4,12 @@ import { HighlightTitle, NoticeList, noticeState } from '../src/components/Notic
 import { NOTICES, DEMO_PROFILES } from '../src/data';
 describe('notice list presentation', () => {
   it('distinguishes an in-flight participation-region lookup from a genuinely unconfirmed region', () => {
-    const bid = { ...NOTICES[0], source: 'live' as const, allowedRegions: null };
+    const bid = { ...NOTICES[0], source: 'live' as const, allowedRegions: null, province: '', district: '' };
     const props = { bids: [bid], keyword: '', profile: DEMO_PROFILES[0], bookmarks: [], selected: [], onSelect: () => {}, onOpen: () => {}, onBookmark: () => {} };
     const key = `${bid.type}:${bid.number}:${bid.revision}`;
     const html = renderToStaticMarkup(<NoticeList {...props} regionLookup={{ pendingKeys: new Set([key]), failedKeys: new Set(), loading: true, retry: () => {}, retryAt: 0 }} />);
     expect(html).toContain('>지역 조회 중</span>');
-    expect(html).not.toContain('>지역 확인 필요</span>');
+    expect(html).not.toContain('>지역명 확인 필요</span>');
     const failed = renderToStaticMarkup(<NoticeList {...props} regionLookup={{ pendingKeys: new Set(), failedKeys: new Set([key]), loading: false, retry: () => {}, retryAt: 0 }} />);
     expect(failed).toContain('>지역 조회 실패</span>');
     expect(failed).not.toContain('참가 지역 다시 조회');
@@ -21,8 +21,8 @@ describe('notice list presentation', () => {
     const bid = { ...NOTICES[0], allowedRegions: ['서울특별시', '인천광역시', '경기도'], specialRegionCondition: true };
     const profile = { ...DEMO_PROFILES[0], province: '서울특별시', district: '강남구' };
     const html = renderToStaticMarkup(<NoticeList bids={[bid]} keyword="" profile={profile} bookmarks={[]} selected={[]} onSelect={() => {}} onOpen={() => {}} onBookmark={() => {}} />);
-    expect(html).toMatch(/class="nl-region is-matched"[^>]*>지역 일치<\/span>/);
-    expect(html).toContain('별도 참가조건');
+    expect(html).toMatch(/class="nl-region is-matched"[^>]*>내 지역 키워드 일치<\/span>/);
+    expect(html).toContain('실제 현장과 참가자격은 공고 원문');
   });
   it('highlights literal queries safely without treating input as markup or regex', () => {
     expect(renderToStaticMarkup(<HighlightTitle title="[철거] 철거공사" keyword="[철거]" />)).toBe('<mark>[철거]</mark> 철거공사');

@@ -66,6 +66,19 @@ describe('member workspace isolation and persistence', () => {
     expect(mergeNoticeDetail(enriched, detail)).toBe(enriched);
     expect(mergeNoticeDetail(notice, { ...detail, number: 'OTHER' })).toBe(notice);
   });
+  it('retains detailed location keywords when a saved notice is reopened', () => {
+    const notice = { ...NOTICES[0], regionSearchText: '기존 주소 서울특별시' };
+    const detail: G2bNoticeDetail = { number: notice.number, revision: notice.revision, allowedRegions: notice.allowedRegions,
+      licenses: notice.licenses, regionComplete: false, licenseComplete: false, fetchedAt: '', warnings: [],
+      notice: { ...notice, regionSearchText: '현장 주소 경기도 성남시 야탑동' },
+      sections: [{ id: 'site', label: '현장', fields: [{ key: 'address', label: '주소', value: '부산광역시 강서구' }] }] };
+    const enriched = mergeNoticeDetail(notice, detail);
+    expect(enriched.regionSearchText).toContain('성남시');
+    expect(enriched.regionSearchText).toContain('부산광역시');
+    const restored = validateWorkspace({ ...emptyMemberWorkspace('a'), noticeSnapshots: { [notice.id]: enriched } }, 'a');
+    expect(restored.noticeSnapshots[notice.id].regionSearchText).toEqual(enriched.regionSearchText);
+    expect(mergeNoticeDetail(enriched, detail)).toBe(enriched);
+  });
   it('queues writes serially and sends the newest edit using the preceding server version', async () => {
     const first = deferred<string>();
     const repository = repo();

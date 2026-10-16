@@ -71,7 +71,7 @@ describe('exact current-rule matches for recurring verification priority', () =>
     const strict = structuredClone(rule);
     strict.settings.filter.regions = ['경기']; strict.settings.filter.regionBasis = 'participation';
     strict.settings.filter.includeUnknown = false;
-    const plan = planAlertChanges([notice({ allowedRegions: null, regionComplete: false })], [], [], [strict], now);
+    const plan = planAlertChanges([notice({ province: '', district: '', allowedRegions: null, regionComplete: false })], [], [], [strict], now);
     expect(plan).not.toHaveProperty('matchingKeys');
   });
 

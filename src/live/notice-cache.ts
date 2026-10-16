@@ -32,7 +32,7 @@ function cachedNotice(bid: BidNotice): BidNotice {
     type: bid.type, category: bid.category, province: bid.province, district: bid.district,
     procurementSource: bid.procurementSource, bidMethod: bid.bidMethod,
     allowedRegions: bid.allowedRegions, estimatedPrice: bid.estimatedPrice, plannedAmount: bid.plannedAmount,
-    demandAgency: bid.demandAgency, noticeKind: bid.noticeKind, contractMethod: bid.contractMethod,
+    demandAgency: bid.demandAgency, regionSearchText: bid.regionSearchText, noticeKind: bid.noticeKind, contractMethod: bid.contractMethod,
     status: bid.status, postedAt: bid.postedAt, deadline: bid.deadline, openingAt: bid.openingAt, sourceUpdatedAt: bid.sourceUpdatedAt,
     registrationDeadline: bid.registrationDeadline, biddingStartAt: bid.biddingStartAt,
     ...(bid.openingCompleted !== undefined ? { openingCompleted: bid.openingCompleted } : {}),
@@ -51,6 +51,7 @@ function isCompletePage(value: unknown): value is G2bNoticePage {
     && page.items.every(item => item && typeof item.id === 'string' && typeof item.title === 'string'
       && typeof item.number === 'string' && typeof item.revision === 'string'
       && (item.procurementSource === undefined || ['public', 'private'].includes(item.procurementSource))
+      && (item.regionSearchText === undefined || typeof item.regionSearchText === 'string' && item.regionSearchText.length <= 16000)
       && ['공사', '용역'].includes(item.type) && Array.isArray(item.documents)
       && Array.isArray(item.licenses) && Array.isArray(item.requirements)
       && (item.allowedRegions === null || Array.isArray(item.allowedRegions)))

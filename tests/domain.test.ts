@@ -105,7 +105,7 @@ describe('지역 검색과 검색조건', () => {
   const regions = [
     notice({ id: 'match' }),
     notice({ id: 'exclude', allowedRegions: ['부산'] }),
-    notice({ id: 'review', allowedRegions: null }),
+    notice({ id: 'review', province: '', district: '', allowedRegions: null }),
     notice({ id: 'national', allowedRegions: ['전국'] }),
   ];
 
@@ -123,9 +123,9 @@ describe('지역 검색과 검색조건', () => {
     expect(ids(filterNotices(regions, filters({ autoRegion: true, regionView: 'review' }), company))).toEqual(['review']);
   });
 
-  it('현장 위치는 참가 가능 지역과 별도 조건으로 검색한다', () => {
+  it('현장 위치와 참가 가능 지역 모두 지역 키워드로 검색한다', () => {
     expect(ids(filterNotices(regions, filters({ siteProvince: '경기', autoRegion: true }), company))).toEqual(['match', 'national']);
-    expect(filterNotices(regions, filters({ siteProvince: '서울특별시' }), company)).toHaveLength(0);
+    expect(ids(filterNotices(regions, filters({ siteProvince: '서울특별시' }), company))).toEqual(['match', 'review', 'national']);
   });
 
   it('현장 위치가 없는 서울 참가 대상 용역과 취소 차수도 지역 검색에 포함한다', () => {
@@ -137,9 +137,9 @@ describe('지역 검색과 검색조건', () => {
     expect(ids(filterNotices(bids, filters({ siteProvince: '서울특별시' }), company))).toEqual(['service', 'cancelled']);
   });
 
-  it('용역의 지역은 기관명이나 현장 위치 대신 참가 가능 지역을 기준으로 한다', () => {
+  it('용역도 기관명과 현장 위치 및 참가 가능 지역을 모두 검색한다', () => {
     const bid = notice({ type: '용역', agency: '서울시청', province: '서울특별시', allowedRegions: ['경기도'] });
-    expect(filterNotices([bid], filters({ siteProvince: '서울특별시' }), company)).toHaveLength(0);
+    expect(filterNotices([bid], filters({ siteProvince: '서울특별시' }), company)).toHaveLength(1);
     expect(filterNotices([bid], filters({ siteProvince: '경기도' }), company)).toHaveLength(1);
   });
 
@@ -151,8 +151,8 @@ describe('지역 검색과 검색조건', () => {
     expect(ids(filterNotices(bids, filters({ siteProvince: '서울' }), company))).toEqual(['national', 'district']);
   });
 
-  it.each([{ allowedRegions: null }, { allowedRegions: [] }, { allowedRegions: ['서울특별시 외 지역'] }])('미확인 용역 지역 %j는 숨기거나 일치로 단정하지 않는다', ({ allowedRegions }) => {
-    const bid = notice({ type: '용역', province: '', allowedRegions });
+  it.each([{ allowedRegions: null }, { allowedRegions: [] }])('지역명 근거가 없는 용역 %j는 미확인 옵션에 따라 검색한다', ({ allowedRegions }) => {
+    const bid = notice({ type: '용역', province: '', district: '', allowedRegions });
     expect(filterNotices([bid], filters({ siteProvince: '서울특별시' }), company)).toHaveLength(1);
     expect(assessSearchRegion(bid, '서울특별시').status).toBe('review');
     expect(filterNotices([bid], filters({ siteProvince: '서울특별시', autoRegion: true }), company)).toHaveLength(0);
@@ -213,7 +213,7 @@ describe('복수 상태와 하위 지역의 조합 검색', () => {
     const bids = [
       notice({ id: 'active-seoul', province: '서울', district: '강서구' }),
       notice({ id: 'urgent-gyeonggi', province: '경기도', deadline: '2026-10-13T18:00:00+09:00' }),
-      notice({ id: 'active-busan', province: '부산', district: '강서구' }),
+      notice({ id: 'active-busan', province: '부산', district: '강서구', allowedRegions: ['부산'] }),
       notice({ id: 'scheduled-seoul', province: '서울', biddingStartAt: '2026-10-15T10:00:00+09:00' }),
       notice({ id: 'opened-gyeonggi', openingAt: '2026-10-12T10:00:00+09:00' }),
     ];
@@ -225,13 +225,13 @@ describe('복수 상태와 하위 지역의 조합 검색', () => {
     expect(filterNotices([notice()], filters({ status: '예정', statuses: [], siteProvince: '부산', regions: [] }), company, now)).toHaveLength(1);
   });
 
-  it('같은 시도 하위 지역은 포함하되 같은 이름의 다른 시도는 제외한다', () => {
+  it('같은 이름의 하위 지역은 시도에 관계없이 키워드로 검색한다', () => {
     const bids = [
       notice({ id: 'seoul', province: '서울', district: '강서구 등촌1동' }),
       notice({ id: 'busan', province: '부산', district: '강서구 대저1동' }),
       notice({ id: 'other', province: '서울', district: '강남구 삼성1동' }),
     ];
-    expect(ids(filterNotices(bids, filters({ regions: [gangseo] }), company))).toEqual(['seoul']);
+    expect(ids(filterNotices(bids, filters({ regions: [gangseo] }), company))).toEqual(['seoul', 'busan']);
   });
 
   it('동 및 시·구 경계를 정확한 토큰으로 비교한다', () => {
@@ -241,44 +241,44 @@ describe('복수 상태와 하위 지역의 조합 검색', () => {
     expect(assessSearchRegions(notice({ province: '서울', district: '강남구 삼성1동' }), [{ province: '서울', district: '강남구', locality: '삼성동' }]).status).toBe('excluded');
   });
 
-  it('하위 지역이 누락된 공사는 확인 필요로 분류하고 명시적 옵션을 켜야 포함한다', () => {
+  it('다른 지역 정보만 있고 선택한 하위 지역명이 없으면 미확인 옵션과 관계없이 제외한다', () => {
     const bid = notice({ province: '서울', district: '강서구' });
     const regions = [{ ...gangseo, locality: '등촌1동' }];
-    expect(assessSearchRegions(bid, regions).status).toBe('review');
+    expect(assessSearchRegions(bid, regions).status).toBe('excluded');
     expect(filterNotices([bid], filters({ regions }), company)).toHaveLength(0);
-    expect(filterNotices([bid], filters({ regions, includeUnknownRegions: true }), company)).toHaveLength(1);
-    expect(assessSearchRegions(notice({ province: '서울', district: '' }), [gangseo]).status).toBe('review');
+    expect(filterNotices([bid], filters({ regions, includeUnknownRegions: true }), company)).toHaveLength(0);
+    expect(assessSearchRegions(notice({ province: '서울', district: '' }), [gangseo]).status).toBe('excluded');
   });
 
   it('알려진 현장 지역이 다른 공고는 미확인 포함 옵션으로 추가하지 않는다', () => {
     expect(filterNotices([notice({ province: '서울', district: '강남구' })], filters({ regions: [gangseo], includeUnknownRegions: true }), company)).toHaveLength(0);
   });
 
-  it('용역은 전국과 상위 참가 지역 또는 선택 영역에 포함된 하위 참가 지역을 함께 검색한다', () => {
+  it('용역도 전국 또는 선택한 마지막 지역명 키워드가 있는 공고를 검색한다', () => {
     const bids = [
       notice({ id: 'nationwide', type: '용역', allowedRegions: ['전국'] }),
       notice({ id: 'province', type: '용역', allowedRegions: ['서울'] }),
       notice({ id: 'child', type: '용역', allowedRegions: ['서울 강서구 등촌1동'] }),
       notice({ id: 'other', type: '용역', allowedRegions: ['서울 강남구'] }),
     ];
-    expect(ids(filterNotices(bids, filters({ regions: [gangseo] }), company))).toEqual(['nationwide', 'province', 'child']);
-    expect(assessSearchRegions(bids[1], [{ ...gangseo, locality: '등촌2동' }]).status).toBe('matched');
+    expect(ids(filterNotices(bids, filters({ regions: [gangseo] }), company))).toEqual(['nationwide', 'child']);
+    expect(assessSearchRegions(bids[1], [{ ...gangseo, locality: '등촌2동' }]).status).toBe('excluded');
   });
 
   it('새 지역 검색의 미확인 용역은 기본 제외하고 이전 검색의 포함 정책은 보존한다', () => {
-    const bid = notice({ type: '용역', allowedRegions: null });
+    const bid = notice({ type: '용역', province: '', district: '', allowedRegions: null });
     expect(assessSearchRegions(bid, [seoul]).status).toBe('review');
     expect(filterNotices([bid], filters({ regions: [seoul] }), company)).toHaveLength(0);
     expect(filterNotices([bid], filters({ regions: [seoul], includeUnknownRegions: true }), company)).toHaveLength(1);
     expect(filterNotices([bid], filters({ siteProvince: '서울' }), company)).toHaveLength(1);
   });
 
-  it('모호한 동명·설명문은 일치로 단정하거나 공고명과 기관명에서 추정하지 않는다', () => {
+  it('공고명과 기관명 및 모호한 참가조건 문구에서도 검색 키워드는 찾되 참가자격을 판정하지 않는다', () => {
     const bid = notice({ title: '서울특별시 강서구 등촌1동 철거', agency: '서울특별시 강서구', type: '용역', province: '서울', district: '강서구 등촌1동', allowedRegions: ['서울 외 지역'] });
-    expect(assessSearchRegions(bid, [gangseo]).status).toBe('review');
-    expect(assessSearchRegions({ ...bid, allowedRegions: ['강서구'] }, [gangseo]).status).toBe('review');
-    expect(assessSearchRegions({ ...bid, allowedRegions: ['부산 강서구'] }, [gangseo]).status).toBe('excluded');
-    expect(assessSearchRegions({ ...bid, type: '공사', province: '부산' }, [gangseo]).status).toBe('excluded');
+    expect(assessSearchRegions(bid, [gangseo]).status).toBe('matched');
+    expect(assessSearchRegions({ ...bid, allowedRegions: ['강서구'] }, [gangseo]).status).toBe('matched');
+    expect(assessSearchRegions({ ...bid, allowedRegions: ['부산 강서구'] }, [gangseo]).status).toBe('matched');
+    expect(assessSearchRegions({ ...bid, type: '공사', province: '부산' }, [gangseo]).status).toBe('matched');
   });
 
   it('여러 선택지 중 정확히 일치한 지역이 있으면 다른 선택지의 미확인보다 우선한다', () => {

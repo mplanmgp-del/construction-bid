@@ -1,6 +1,6 @@
 import { CATEGORIES, type CompanyProfile, type RegionAssessment } from '../types.ts';
-import { assessRegion, assessSearchRegions } from '../domain.ts';
-import { canonicalProvince, canonicalSearchProvince } from '../search-filters.ts';
+import { assessCompanyRegionKeywords, assessKeywordRegions } from '../region-keywords.ts';
+import { canonicalProvince } from '../search-filters.ts';
 import { DEFAULT_ALERT_SETTINGS, type AlertNotice, type AlertSettings, type AlertMatch, type AlertRegionBasis } from './types.ts';
 import { isAlarmEligible, isOngoingNotice, noticeTimestamp } from '../notice-deadline-window.ts';
 
@@ -16,23 +16,13 @@ const region = (value: string) => {
 const regionBases: AlertRegionBasis[] = ['auto', 'site', 'participation', 'either', 'both'];
 const provided = (value: string | undefined) => Boolean(value?.trim()) && !/^(?:기관 미제공|미제공|원문 확인|확인 필요|없음|-)$/u.test(clean(value!));
 
-/** Preference matching only; geography and license overlap do not establish eligibility. */
-function assessAlertRegions(notice: AlertNotice, values: string[], basis: AlertRegionBasis): RegionAssessment {
-  const selected = values.map(value => { const parts=clean(value).split(' '); return {province:parts[0],district:parts[1],locality:parts.slice(2).join(' ')}; });
-  const site = (): RegionAssessment => canonicalSearchProvince(notice.province)
-    ? assessSearchRegions({...notice,type:'공사'},selected)
-    : {status:'review',reason:'현장·수행 위치 확인 필요'};
-  const participation = (): RegionAssessment => notice.regionComplete
-    ? assessSearchRegions({...notice,type:'용역'},selected)
-    : {status:'review',reason:'참가 가능 지역 확인 필요'};
-  if(basis==='auto')return notice.type==='공사'?site():participation();
-  if(basis==='site')return site();
-  if(basis==='participation')return participation();
-  const assessments=[site(),participation()];
-  const priority=basis==='both'?['excluded','review','matched'] as const:['matched','review','excluded'] as const;
-  return priority.map(status=>assessments.find(item=>item.status===status)).find(item=>item!==undefined)!;
+/** Saved legacy basis values remain compatible; every region now searches all notice text. */
+function assessAlertRegions(notice: AlertNotice, values: string[]): RegionAssessment {
+  return assessKeywordRegions(notice, values.map(value => {
+    const parts = clean(value).split(' ');
+    return { province: parts[0], district: parts[1], locality: parts.slice(2).join(' ') };
+  }));
 }
-
 /** Keep this legacy fingerprint stable; revision advances are tracked separately by the planner. */
 function content(notice: AlertNotice): Record<string, unknown> {
   return {
@@ -131,19 +121,17 @@ export function matchAlertNotice(notice: AlertNotice, settings: AlertSettings, p
   if(filter.keywords.length)reasons.push('관심 검색어 일치');
   if(filter.categories.length)reasons.push('관심 분야 일치');
   if(filter.regions.length) {
-    const basis=filter.regionBasis??'auto';
-    const assessment=assessAlertRegions(notice,filter.regions,basis);
+    const assessment=assessAlertRegions(notice,filter.regions);
     if(assessment.status==='excluded')return no();
     if(assessment.status==='review')missing.push(assessment.reason);
-    else reasons.push(basis==='both'?'현장·참가 지역 모두 일치':basis==='site'?'현장·수행 지역 일치':basis==='participation'?'참가 가능 지역 일치':'검색 지역 일치');
+    else reasons.push('지역명 키워드 일치');
   }
   if(filter.useCompanyRegion) {
     if(!profile)missing.push('업체 소재지 확인 필요');
-    else if(!notice.regionComplete)missing.push('업체 지역조건 확인 필요');
     else {
-      const assessment=assessRegion(notice,profile);
+      const assessment=assessCompanyRegionKeywords(notice,profile);
       if(assessment.status==='excluded')return no();
-      if(assessment.status==='review')missing.push('업체 지역조건 확인 필요');else reasons.push('내 업체 지역 일치');
+      if(assessment.status==='review')missing.push('내 업체 지역명 확인 필요');else reasons.push('내 업체 시·도 키워드 일치');
     }
   }
   if(filter.licenses.length) {

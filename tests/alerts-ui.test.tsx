@@ -81,10 +81,10 @@ describe('personal alert account lifecycle', () => {
 
 describe('alert presentation and direct links', () => {
   it('shows saved-condition comparison reasons and missing data on existing notice cards',()=>{
-    const notice={...NOTICES[0],source:'live' as const,status:'접수중' as const,deadline:new Date(Date.now()+2*86400000).toISOString(),openingAt:new Date(Date.now()+3*86400000).toISOString(),sourceUpdatedAt:'',regionComplete:true,licenseComplete:true,province:'',district:''};
+    const notice={...NOTICES[0],source:'live' as const,status:'접수중' as const,deadline:new Date(Date.now()+2*86400000).toISOString(),openingAt:new Date(Date.now()+3*86400000).toISOString(),sourceUpdatedAt:'',regionComplete:true,licenseComplete:true,province:'',district:'',allowedRegions:null};
     const settings=structuredClone(DEFAULT_ALERT_SETTINGS);settings.enabled=true;settings.filter.keywords=[];settings.filter.regions=['경기'];settings.filter.regionBasis='site';
     const html=renderToStaticMarkup(<AlertsPage alerts={access(overview({settings,existingMatches:[{...notice,status:'접수중'}]}))} signedIn onLogin={()=>{}} />);
-    expect(html).toContain('조건 확인 필요');expect(html).toContain('현장·수행 위치 확인 필요');expect(html).toContain('현재 저장한 조건');
+    expect(html).toContain('조건 확인 필요');expect(html).toContain('지역명 확인 필요');expect(html).toContain('현재 저장한 조건');
   });
   it('keeps alerts reachable independently of locked managed menus', () => {
     expect(appViewFromHash('#alerts')).toBe('alerts'); expect(appViewHash('alerts')).toBe('#alerts');
@@ -121,7 +121,8 @@ describe('alert presentation and direct links', () => {
       minDaysUntilDeadline: 3, useCompanyLicenses: true,
     } } });
     const html = renderToStaticMarkup(<AlertsPage alerts={access(data)} signedIn onLogin={() => {}} />);
-    expect(html).toContain('<option value="both" selected="">현장·참가 지역 모두</option>');
+    expect(html).not.toContain('name="regionBasis"');
+    expect(html).toContain('제공된 전체 정보에서 지역명 키워드');
     expect(html).toMatch(/name="agencies"[^>]*value="성남시, 한국환경공단"/);
     expect(html).toMatch(/name="contractMethods"[^>]*value="제한경쟁, 일반경쟁"/);
     const deadlineInput = html.match(/<input[^>]*name="minDaysUntilDeadline"[^>]*>/)?.[0];
@@ -129,14 +130,15 @@ describe('alert presentation and direct links', () => {
     expect(deadlineInput).toContain('max="365"');
     expect(deadlineInput).toContain('value="3"');
     expect(html).toMatch(/name="useCompanyLicenses"[^>]*checked=""/);
-    for (const value of ['auto', 'site', 'participation', 'either', 'both']) expect(html).toContain(`<option value="${value}"`);
+    expect(html).toContain('내 업체 시·도 이름이 포함된 공고 찾기');
   });
   it('keeps the previous regional comparison when loading settings without a region basis', () => {
     const filter = { ...DEFAULT_ALERT_SETTINGS.filter };
     delete filter.regionBasis;
     const data = overview({ settings: { ...DEFAULT_ALERT_SETTINGS, filter } });
     const html = renderToStaticMarkup(<AlertsPage alerts={access(data)} signedIn onLogin={() => {}} />);
-    expect(html).toContain('<option value="auto" selected="">업무별 기본</option>');
+    expect(html).not.toContain('name="regionBasis"');
+    expect(html).toContain('제공된 전체 정보에서 지역명 키워드');
     expect(html).toMatch(/name="minDaysUntilDeadline"[^>]*value=""/);
   });
 });
