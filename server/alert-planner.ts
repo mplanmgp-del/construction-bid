@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { alertNoticeKey,hasOmittedContentDigest,isOlderAlertNotice,matchAlertNotice,matchAlarmNotice,meaningfulChanges,noticeContentKey,noticeOmittedContentKey } from '../src/alerts/domain.ts';
 import type { AlertEventKind,AlertNotice,WorkerRule } from '../src/alerts/types.ts';
-export interface Observation { key:string;notice:AlertNotice;fingerprint:string;version:number }
+export interface Observation { key:string;notice:AlertNotice;fingerprint:string;version:number;observedAt?:string }
 export interface Membership {userId:string;key:string;lastVersion:number;initial?:boolean}
 export interface AlertCommit {observations:Observation[];events:{userId:string;key:string;version:number;kind:AlertEventKind;message:string;changeFields:string[]}[];existing:{userId:string;key:string;version:number;initial?:boolean}[]}
 export function planAlertChanges(notices:AlertNotice[],previous:Observation[],memberships:Membership[],rules:WorkerRule[],now=Date.now(),batchHeads:AlertNotice[]=notices):AlertCommit {
@@ -51,7 +51,10 @@ export function planAlertChanges(notices:AlertNotice[],previous:Observation[],me
       if(last!==undefined) {
         const activation=Date.parse(rule.settings.activatedAt||new Date(now).toISOString());
         const sourceTime=Math.max(Date.parse(notice.postedAt)||0,Date.parse(notice.sourceUpdatedAt)||0);
-        if(sourceTime<activation) existing({userId:rule.userId,key,version,...(!matched?{initial:false}:{})});
+        // A persisted observation proves an old source clock was already baselined
+        // for this activation. In-batch observations intentionally carry no timestamp.
+        const observedSinceActivation=Date.parse(before?.observedAt||'')>=activation;
+        if(sourceTime<activation&&!observedSinceActivation) existing({userId:rule.userId,key,version,...(!matched?{initial:false}:{})});
         else if(matched&&changed&&rule.settings.notifyChanges) event({userId:rule.userId,key,version,kind:'changed',message:`관심 공고의 ${fields.join(' · ')} 항목이 변경되었습니다.`,changeFields:fields});
         else existing({userId:rule.userId,key,version,initial:false});
       } else if(matched) {
