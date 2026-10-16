@@ -37,3 +37,12 @@
 - 운영 DB 반영 후 검색 API, 실제 코드별 검색 결과, 자동조회 설정과 브라우저 화면을 확인하고 배포 도메인을 전환한다.
 
 현재 Chrome 확장 연결이 응답하지 않아 운영 DB 반영과 실제 운영 화면 검증은 대기 중이다. 로컬 검증과 운영 반영 완료를 구분한다.
+
+## 배포 준비 확인
+
+- 구현 커밋: `ba11ff4`.
+- 운영 전환 대기 배포: `dpl_Fi196j8A5bKu5xuVVp9gartQRPpr`, 상태 `READY`.
+- 배포 주소: https://construction-g33ludt8b-mplanmgp-2490.vercel.app
+- 이 배포의 실제 상세 API로 `R26BK01775554-000`을 조회해 `licenseComplete=true`, 대표·허용 업종코드 `4995`, `5652`가 상세와 공고 객체 양쪽에 저장되는 것을 확인했다.
+- 기존 사용자 주소 `construction-bid-nine.vercel.app`이 이전 배포 `dpl_AjTNbpygKenxYAtgJDhJ4Bczg3po`를 가리키는 것을 별도로 확인했다. DB 적용과 코드별 검색 검증 후 이 주소를 전환해야 한다.
+- 운영 SQL SHA-256: `934D6482F9081FC23C29B4266A89A7619A34284052FACD74042D4A5175F6A604`.
