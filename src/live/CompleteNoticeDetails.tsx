@@ -7,6 +7,7 @@ import { NoticeSummary } from './NoticeSummary';
 import { safeG2bUrl } from './client';
 import { RelatedNoticeDetails } from './RelatedNoticeDetails';
 import { NoticePrintDialog } from '../print/NoticePrintDialog';
+import { noticeWorkLabel } from '../components/notice-presentation';
 
 const icons: Record<string, ReactNode> = {
   general: <Building2 />, schedule: <CalendarClock />, eligibility: <ShieldCheck />,
@@ -20,13 +21,15 @@ function fallbackSections(bid: BidNotice, detail: G2bNoticeDetail): G2bDetailSec
       { key: 'number', label: '입찰공고번호', value: `${bid.number}-${bid.revision}` },
       { key: 'agency', label: '공고기관', value: bid.agency || null },
       { key: 'title', label: '공고명', value: bid.title || null, wide: true },
+      ...(bid.procurementSource === 'private' ? [{ key: 'procurementSource', label: '공고 구분', value: noticeWorkLabel(bid) }] : []),
+      ...(bid.bidMethod ? [{ key: 'bidMethod', label: '입찰방식', value: bid.bidMethod }] : []),
       { key: 'contract', label: '계약방법', value: bid.contractMethod || null },
       { key: 'posted', label: '게시일시', value: bid.postedAt ? formatDateTime(bid.postedAt, { includeYear: true }) : null },
     ] },
     { id: 'schedule', label: '입찰 일정', fields: [
       { key: 'registration', label: '참가자격 등록마감', value: bid.registrationDeadline ? formatDateTime(bid.registrationDeadline, { includeYear: true }) : null },
-      { key: 'deadline', label: '입찰서 제출마감', value: bid.deadline ? formatDateTime(bid.deadline, { includeYear: true }) : null },
-      { key: 'opening', label: '개찰일시', value: bid.openingAt ? formatDateTime(bid.openingAt, { includeYear: true }) : null },
+      { key: 'deadline', label: '입찰서 제출마감', value: bid.deadline ? formatDateTime(bid.deadline, { includeYear: true }) : bid.procurementSource === 'private' ? '공고서 확인' : null },
+      { key: 'opening', label: '개찰일시', value: bid.openingAt ? formatDateTime(bid.openingAt, { includeYear: true }) : bid.procurementSource === 'private' ? '일정 확인 필요' : null },
     ] },
     { id: 'eligibility', label: '투찰 제한', fields: [
       { key: 'regions', label: '참가 가능 지역', value: detail.allowedRegions?.join(', ') || null, wide: true },
@@ -74,7 +77,7 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true, printRe
   return <div className="fnd-complete">
     {showSummary && <NoticeSummary bid={bid} detail={detail} />}
     <div className="fnd-jumpbar" aria-label="공고 상세 구역 이동">
-      <div className="fnd-jump-scroll"><button type="button" className="fnd-related-jump" onClick={() => jumpTo('relatedData')}>계약·진행 이력·기관</button>{sections.map(section => <button type="button" key={section.id} onClick={() => jumpTo(section.id)}>{section.label}</button>)}<button type="button" onClick={() => jumpTo('documents')}>첨부서류 <span>{documents.length}</span></button></div>
+      <div className="fnd-jump-scroll">{bid.procurementSource !== 'private' && <button type="button" className="fnd-related-jump" onClick={() => jumpTo('relatedData')}>계약·진행 이력·기관</button>}{sections.map(section => <button type="button" key={section.id} onClick={() => jumpTo(section.id)}>{section.label}</button>)}<button type="button" onClick={() => jumpTo('documents')}>첨부서류 <span>{documents.length}</span></button></div>
     </div>
     <div className="fnd-detail-tools">
       <div className="fnd-detail-heading"><span className="fnd-eyebrow">NOTICE DETAILS</span><h2>공고 상세정보 <span>{totalFields}개 항목</span></h2></div>
@@ -104,7 +107,7 @@ export function CompleteNoticeDetails({ detail, bid, showSummary = true, printRe
       })}</ul> : <p className="fnd-doc-empty">공개 데이터에서 제공된 첨부서류가 없습니다.{sourceUrl && ' 나라장터 원문에서 첨부 여부를 확인해 주세요.'}</p>}
       <p className="fnd-section-note"><Info size={15} />첨부서류는 발주기관이 게시한 나라장터 원본 링크로 열립니다.</p>
     </section>
-    {bid.source === 'live' && <div className="fnd-related-anchor" ref={element => { sectionRefs.current.relatedData = element; }}><RelatedNoticeDetails key={noticeKey} bid={bid} onDataChange={setRelated} /></div>}
+    {bid.source === 'live' && bid.procurementSource !== 'private' && <div className="fnd-related-anchor" ref={element => { sectionRefs.current.relatedData = element; }}><RelatedNoticeDetails key={noticeKey} bid={bid} onDataChange={setRelated} /></div>}
     {printNoticeKey === noticeKey && <NoticePrintDialog key={noticeKey} bid={bid} detail={detail} related={related?.number === bid.number && related.revision === bid.revision && related.type === bid.type ? related : null} onClose={() => setPrintNoticeKey('')} />}
   </div>;
 }

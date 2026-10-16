@@ -124,7 +124,7 @@ export function UnifiedNoticeSearch({ query, loading, refreshBlocked = false, on
         {draft.keyword && <button type="button" className="unified-search-clear" aria-label="검색어 지우기" onClick={() => { change({ ...draft, keyword: '' }); inputRef.current?.focus(); }}><X size={18} aria-hidden="true" /></button>}
         <button className="button button-primary unified-search-submit" type="submit" disabled={blocked}>{busy ? '조회 중' : kind === 'number' && !userId ? '로그인 후 조회' : '검색'}<ArrowRight size={17} aria-hidden="true" /></button>
       </div>
-      <p id={hintId} className="unified-search-hint">{kind === 'number' ? '번호 조회에는 기간과 상세 조건을 적용하지 않습니다. 최신 차수와 전체 이력을 확인합니다.' : '공고명은 입찰서 제출마감 기간으로 검색합니다. 검색어를 비우면 전체 공고를 조회합니다.'}</p>
+      <p id={hintId} className="unified-search-hint">{kind === 'number' ? '번호 조회에는 기간과 상세 조건을 적용하지 않습니다. 최신 차수와 전체 이력을 확인합니다.' : '공고명은 입찰서 제출마감 기간으로 검색합니다. 제출마감 미제공 민간공고는 게시일 기준으로 함께 표시합니다. 검색어를 비우면 전체 공고를 조회합니다.'}</p>
       <details ref={periodRef} className="unified-search-period-details" hidden={kind === 'number'}>
         <summary><span>제출마감 기간 · {query.from.replaceAll('-', '.')} – {query.to.replaceAll('-', '.')}</span><ChevronDown size={17} aria-hidden="true" /></summary>
         <fieldset className="unified-search-period" disabled={kind === 'number'}>

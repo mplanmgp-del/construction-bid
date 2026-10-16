@@ -21,10 +21,10 @@ interface RegionLoadState {
 }
 
 export function useNoticeRegions(notices: BidNotice[], enabled: boolean, companyFilter = false, requestKey = '') {
-  // Only public identities determine the request lifetime. Rendering a response
+  // Only notice identities determine the request lifetime. Rendering a response
   // or changing an unrelated filter must not start the same requests again.
-  const signature = JSON.stringify(notices.filter(bid => needsNoticeRegions(bid) && (companyFilter || bid.type === '용역')).map(({ number, revision, type }) => ({
-    number, revision, type, source: 'live', allowedRegions: null,
+  const signature = JSON.stringify(notices.filter(bid => needsNoticeRegions(bid) && (companyFilter || bid.type === '용역')).map(({ number, revision, type, procurementSource }) => ({
+    number, revision, type, ...(procurementSource === 'private' ? { procurementSource } : {}), source: 'live', allowedRegions: null,
   })));
   const targets = useMemo(() => JSON.parse(signature) as NoticeRegionTarget[], [signature]);
   const [retryVersion, setRetryVersion] = useState(0);

@@ -10,6 +10,7 @@ import { createArchivePageLoader } from './company-archive-page.ts';
 import { createOpeningResultsLoader, createOpeningSummaryLoader } from './g2b-results.ts';
 import { startSearchWindows } from '../src/live/start-range.ts';
 import { ProviderQuotaError, providerRetryAfter } from './provider-quota.ts';
+import { PRIVATE_BID_BASE, PRIVATE_NOTICE_DIVISIONS, mapPrivateDetailSections, mapPrivateNotice, matchesPrivateNotice, privateConditionParams, privateNoticeOperation } from './g2b-private.ts';
 
 type Row = Record<string, unknown>;
 const BID_BASE = 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/';
@@ -172,7 +173,10 @@ function providerError(code: string): G2bError | ProviderQuotaError {
 export function readProviderPayload(payload: unknown): { items: Row[]; totalCount: number } {
   const root = object(payload), gateway = object(object(root.OpenAPI_ServiceResponse).cmmMsgHeader);
   if (text(gateway.returnReasonCode)) throw providerError(text(gateway.returnReasonCode));
-  const response = object(root.response ?? root), header = object(response.header), body = object(response.body);
+  // Private service errors use a namespaced Java response envelope, while
+  // successful responses use the same normal envelope as public services.
+  const response = object(root.response ?? root['nkoneps.com.response.ResponseError'] ?? root['nkoneps.com.response.Response'] ?? root);
+  const header = object(response.header), body = object(response.body);
   const code = text(header.resultCode);
   if (code === '03') return { items: [], totalCount: 0 };
   if (!['00', '0', '000'].includes(code)) throw providerError(code);
@@ -237,14 +241,22 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     }
     return result;
   }
-  async function participationRegions(number: string, revision: string, type: G2bBusinessType, deadline = Infinity): Promise<G2bNoticeRegions> {
-    const base = { number, revision, type, allowedRegions: null, complete: false, fetchedAt: new Date(now()).toISOString() };
+  async function participationRegions(number: string, revision: string, type: G2bBusinessType, deadline = Infinity, procurementSource: 'public' | 'private' = 'public'): Promise<G2bNoticeRegions> {
+    const sourceMetadata = procurementSource === 'private' ? { procurementSource } : {};
+    const base = { number, revision, type, ...sourceMetadata, allowedRegions: null, complete: false, fetchedAt: new Date(now()).toISOString() };
     const remaining = deadline - now();
     if (remaining <= 0) throw new G2bError(504, 'G2B_UNAVAILABLE', '지역조건 조회 시간이 초과되었습니다.');
     try {
-      const result = await request(BID_BASE, 'getBidPblancListInfoPrtcptPsblRgn', {
+      const providerBase = procurementSource === 'private' ? PRIVATE_BID_BASE : BID_BASE;
+      const operation = procurementSource === 'private' ? 'getPrvtBidPblancListInfoPrtcptPsblRgn' : 'getBidPblancListInfoPrtcptPsblRgn';
+      const params = {
         inqryDiv: '2', bidNtceNo: number, bidNtceOrd: revision, pageNo: '1', numOfRows: '999',
-      }, Math.min(15_000, remaining), true);
+      };
+      const result = await request(providerBase, operation, params, Math.min(15_000, remaining), true);
+      if (procurementSource === 'private' && result.items.some(row => !matchesNoticeRow(row, number, revision, type))) {
+        cache.delete(`provider:${providerBase}:${operation}:${new URLSearchParams(params)}`);
+        return { ...base, error: 'G2B_INCOMPLETE_RESPONSE' };
+      }
       const rows = result.items.filter(row => matchesNoticeRow(row, number, revision, type));
       const names = unique(rows.map(row => text(row.prtcptPsblRgnNm)));
       // An empty successful response is unknown, not evidence of nationwide participation.
@@ -254,11 +266,11 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       throw error;
     }
   }
-  async function noticeRegions(notices: Array<{ number: string; revision: string }>, type: G2bBusinessType): Promise<G2bNoticeRegionsPage> {
+  async function noticeRegions(notices: Array<{ number: string; revision: string }>, type: G2bBusinessType, procurementSource: 'public' | 'private' = 'public'): Promise<G2bNoticeRegionsPage> {
     const items: G2bNoticeRegions[] = new Array(notices.length);
     const finishBy = now() + 40_000;
     let next = 0, retryAfterSeconds = 0, quotaExceeded = false;
-    const failed = (index: number, error: string): G2bNoticeRegions => ({ ...notices[index], type, allowedRegions: null,
+    const failed = (index: number, error: string): G2bNoticeRegions => ({ ...notices[index], type, ...(procurementSource === 'private' ? { procurementSource } : {}), allowedRegions: null,
       complete: false, fetchedAt: new Date(now()).toISOString(), error });
     async function worker() {
       while (next < notices.length) {
@@ -266,7 +278,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
         if (quotaExceeded) { items[index] = failed(index, 'G2B_QUOTA_EXCEEDED'); continue; }
         if (now() >= finishBy) { items[index] = failed(index, 'G2B_UNAVAILABLE'); continue; }
         const { number, revision } = notices[index];
-        try { items[index] = await participationRegions(number, revision, type, finishBy); }
+        try { items[index] = await participationRegions(number, revision, type, finishBy, procurementSource); }
         catch (error) {
           if (error instanceof ProviderQuotaError) {
             quotaExceeded = true;
@@ -302,6 +314,7 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       cache.delete(`provider:${BID_BASE}:${operation}:${new URLSearchParams(params)}`);
       throw new G2bError(502, 'G2B_INCOMPLETE_RESPONSE', '공고의 전체 변경·취소 이력을 확인하지 못했습니다. 최신 상태를 판단할 수 없어 조회를 중단했습니다. 잠시 후 다시 조회해 주세요.');
     }
+    if (result.totalCount === 0) return lookupPrivateNotices(query.type, query.number);
     const items = result.items.map(row => mapNotice(row, query.type, now())).sort((first, second) => Number(second.revision) - Number(first.revision));
     const latest = items[0];
     // A submission-closed notice can still be awaiting its future opening.
@@ -314,6 +327,52 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
     return { items, totalCount: items.length, page: 1, pageSize: 999, hasMore: false,
       fetchedAt: new Date(now()).toISOString(), source: '나라장터 입찰공고정보서비스', warnings: [] };
   }
+  async function lookupPrivateNotices(type: G2bBusinessType, number: string): Promise<G2bNoticePage> {
+    const operation = privateNoticeOperation(type);
+    const params = { inqryDiv: PRIVATE_NOTICE_DIVISIONS.number, bidNtceNo: number, pageNo: '1', numOfRows: '999' };
+    const result = await request(PRIVATE_BID_BASE, operation, params);
+    if (result.totalCount > 999 || result.items.length !== result.totalCount
+      || result.items.some(row => !matchesPrivateNotice(row, number, type))
+      || new Set(result.items.map(identity)).size !== result.items.length) {
+      cache.delete(`provider:${PRIVATE_BID_BASE}:${operation}:${new URLSearchParams(params)}`);
+      throw new G2bError(502, 'G2B_INCOMPLETE_RESPONSE', '민간 공고의 전체 변경·취소 이력을 확인하지 못했습니다. 최신 상태를 판단할 수 없어 조회를 중단했습니다. 잠시 후 다시 조회해 주세요.');
+    }
+    const items = result.items.map(row => mapPrivateNotice(row, type, now())).sort((first, second) => Number(second.revision) - Number(first.revision));
+    return { items, totalCount: items.length, page: 1, pageSize: 999, hasMore: false,
+      fetchedAt: new Date(now()).toISOString(), source: '누리장터 민간입찰공고정보서비스', warnings: [] };
+  }
+  async function privateDetail(number: string, revision: string, type: G2bBusinessType): Promise<G2bNoticeDetail | undefined> {
+    // General private queries do not accept a revision filter. Validate the
+    // complete history before selecting the requested revision.
+    const history = await lookupPrivateNotices(type, number);
+    const found = history.items.find(notice => notice.revision === revision);
+    if (!found) return;
+    const general = await request(PRIVATE_BID_BASE, privateNoticeOperation(type), {
+      inqryDiv: PRIVATE_NOTICE_DIVISIONS.number, bidNtceNo: number, pageNo: '1', numOfRows: '999',
+    });
+    const noticeRow = general.items.find(row => text(row.bidNtceOrd).padStart(3, '0') === revision)!;
+    const params = privateConditionParams(number, revision);
+    const [regions, licenses] = await Promise.allSettled([
+      request(PRIVATE_BID_BASE, 'getPrvtBidPblancListInfoPrtcptPsblRgn', params),
+      request(PRIVATE_BID_BASE, 'getPrvtBidPblancListInfoLicenseLimit', params),
+    ]);
+    const matches = (row: Row) => text(row.bidNtceNo) === number && /^\d{1,3}$/.test(text(row.bidNtceOrd)) && text(row.bidNtceOrd).padStart(3, '0') === revision;
+    const complete = (result: PromiseSettledResult<{ items: Row[]; totalCount: number }>) => result.status === 'fulfilled'
+      && result.value.items.length === result.value.totalCount && result.value.items.every(matches);
+    const regionComplete = complete(regions), licenseComplete = complete(licenses);
+    const regionRows = regionComplete && regions.status === 'fulfilled' ? regions.value.items : [];
+    const licenseRows = licenseComplete && licenses.status === 'fulfilled' ? licenses.value.items : [];
+    const names = unique(regionRows.map(row => text(row.prtcptPsblRgnNm)));
+    const licenseNames = unique(licenseRows.map(row => text(row.lcnsLmtNm)));
+    const notice = { ...found, allowedRegions: names.length ? names : null, licenses: licenseNames };
+    return { number, revision, notice, allowedRegions: notice.allowedRegions, licenses: licenseNames,
+      regionComplete, licenseComplete, fetchedAt: new Date(now()).toISOString(), sourceUrl: notice.detailUrl,
+      sections: mapPrivateDetailSections(noticeRow, regionRows, licenseRows), warnings: [
+        ...(!regionComplete ? ['민간 공고의 지역조건을 모두 확인하지 못했습니다. 공고 원문을 확인해 주세요.'] : []),
+        ...(!licenseComplete ? ['민간 공고의 면허조건을 모두 확인하지 못했습니다. 공고 원문을 확인해 주세요.'] : []),
+        ...(!notice.deadline ? ['입찰 마감일시가 API에 제공되지 않았습니다. 직찰 등 제출 방법과 마감은 첨부 공고문을 확인해 주세요.'] : []),
+      ] };
+  }
   async function detail(number: string, revision: string, type: G2bBusinessType): Promise<G2bNoticeDetail> {
     const params = { inqryDiv: '2', bidNtceNo: number, bidNtceOrd: revision, pageNo: '1', numOfRows: '999' };
     const [general, baseAmounts, regions, licenses] = await Promise.allSettled([
@@ -322,6 +381,10 @@ export function createG2bClient({ serviceKey, fetcher = fetch, now = Date.now }:
       request(BID_BASE, 'getBidPblancListInfoPrtcptPsblRgn', params),
       request(BID_BASE, 'getBidPblancListInfoLicenseLimit', params),
     ]);
+    if (general.status === 'fulfilled' && general.value.totalCount === 0 && general.value.items.length === 0) {
+      const privateResult = await privateDetail(number, revision, type);
+      if (privateResult) return privateResult;
+    }
     const quotaFailure = [general, baseAmounts, regions, licenses].find(result => result.status === 'rejected' && result.reason instanceof ProviderQuotaError);
     const matches = (row: Row) => matchesNoticeRow(row, number, revision, type);
     const regionComplete = regions.status === 'fulfilled' && regions.value.items.length >= regions.value.totalCount;

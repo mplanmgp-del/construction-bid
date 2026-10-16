@@ -4,6 +4,7 @@ import type { SearchFilters } from '../types';
 
 export interface ActiveCatalogIdentity {
   type: G2bBusinessType; number: string; tracked?: boolean;
+  procurementSource?: 'public' | 'private';
   /** Minimum source facts that a later full-history response must contain. */
   revision?: string; sourceUpdatedAt?: string;
   notice?: AlertNotice;
@@ -12,6 +13,7 @@ export interface ActiveCatalogIdentity {
 }
 export interface ActiveCatalogSourceJob {
   id: string; type: G2bBusinessType; kind: 'history' | 'current' | 'registered' | 'modified';
+  procurementSource?: 'public' | 'private';
   from: string; to: string; page: number; pageSize: 999; totalCount: number | null;
 }
 export interface ActiveCatalogStatus {
@@ -20,6 +22,7 @@ export interface ActiveCatalogStatus {
   lastCheckedAt: string | null; error: string | null; storageBytes: number; storageCeiling: number;
   /** Current-only posting sweep; never substitutes for unfiltered history coverage. */
   currentCoverage?: CurrentCatalogCoverage;
+  privateCoverage?: CurrentCatalogCoverage;
 }
 export interface CurrentCatalogCoverage {
   cutoff: string | null; checked: number; pending: number; verificationPending: number;
@@ -84,6 +87,7 @@ export interface VerifiedNoticeSearchStatus {
   storage: { bytes: number; ceiling: number; full: boolean };
   sourceError?: string | null;
   currentCoverage?: CurrentCatalogCoverage;
+  privateCoverage?: CurrentCatalogCoverage;
   warnings?: string[];
 }
 /** Compatibility response for the existing combined search endpoint. */

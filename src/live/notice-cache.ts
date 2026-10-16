@@ -25,14 +25,15 @@ function browserStorage(): CacheStorage | undefined {
   try { return typeof window === 'undefined' ? undefined : window.localStorage; } catch { return undefined; }
 }
 
-function publicNotice(bid: BidNotice): BidNotice {
+function cachedNotice(bid: BidNotice): BidNotice {
   // Explicit projection strips any later UI/account-specific additions.
   return {
     id: bid.id, number: bid.number, revision: bid.revision, title: bid.title, agency: bid.agency,
     type: bid.type, category: bid.category, province: bid.province, district: bid.district,
+    procurementSource: bid.procurementSource, bidMethod: bid.bidMethod,
     allowedRegions: bid.allowedRegions, estimatedPrice: bid.estimatedPrice, plannedAmount: bid.plannedAmount,
     demandAgency: bid.demandAgency, noticeKind: bid.noticeKind, contractMethod: bid.contractMethod,
-    status: bid.status, postedAt: bid.postedAt, deadline: bid.deadline, openingAt: bid.openingAt,
+    status: bid.status, postedAt: bid.postedAt, deadline: bid.deadline, openingAt: bid.openingAt, sourceUpdatedAt: bid.sourceUpdatedAt,
     registrationDeadline: bid.registrationDeadline, biddingStartAt: bid.biddingStartAt,
     ...(bid.openingCompleted !== undefined ? { openingCompleted: bid.openingCompleted } : {}),
     licenses: bid.licenses, duration: bid.duration, description: bid.description, requirements: bid.requirements,
@@ -49,6 +50,7 @@ function isCompletePage(value: unknown): value is G2bNoticePage {
     && Number.isFinite(Date.parse(page.fetchedAt)) && typeof page.source === 'string'
     && page.items.every(item => item && typeof item.id === 'string' && typeof item.title === 'string'
       && typeof item.number === 'string' && typeof item.revision === 'string'
+      && (item.procurementSource === undefined || ['public', 'private'].includes(item.procurementSource))
       && ['공사', '용역'].includes(item.type) && Array.isArray(item.documents)
       && Array.isArray(item.licenses) && Array.isArray(item.requirements)
       && (item.allowedRegions === null || Array.isArray(item.allowedRegions)))
@@ -104,7 +106,7 @@ export function writeNoticeCache(query: NoticeQuery, page: G2bNoticePage, now = 
   if (!storage || !isCompletePage(page) || now - Date.parse(page.fetchedAt) >= NOTICE_CACHE_MAX_AGE_MS || Date.parse(page.fetchedAt) > now) return;
   try {
     const key = noticeQueryKey(query);
-    const publicPage: G2bNoticePage = { items: page.items.map(publicNotice), totalCount: page.totalCount,
+    const publicPage: G2bNoticePage = { items: page.items.map(cachedNotice), totalCount: page.totalCount,
       page: 1, pageSize: page.items.length, hasMore: false, fetchedAt: page.fetchedAt, source: page.source,
       warnings: page.warnings?.filter(warning => typeof warning === 'string') };
     if (JSON.stringify([{ key, savedAt: now, page: publicPage }]).length > MAX_CHARACTERS) return;

@@ -6,15 +6,20 @@ import { formatDateTime, formatPrice } from '../domain';
 export function NoticeSummary({ bid, detail, pending = false, failed = false }: {
   bid: BidNotice; detail?: G2bNoticeDetail; pending?: boolean; failed?: boolean;
 }) {
-  const budget = detail?.sections?.flatMap(section => section.fields).find(field => field.key === 'bdgtAmt');
+  const privateSource = bid.procurementSource === 'private';
+  const budget = detail?.sections?.flatMap(section => section.fields).find(field => field.key === (privateSource ? 'asignBdgtAmt' : 'bdgtAmt'));
   // Once returned, the current detail is authoritative, including an explicit missing value.
   const planned = budget ? budget.value : bid.plannedAmount == null ? null : formatPrice(bid.plannedAmount);
   const unknown = pending ? '조회 중' : failed ? '조회 실패' : '-';
+  const schedule = (value: string, privateMissing: string) => {
+    const formatted = formatDateTime(value, { includeYear: true });
+    return bid.procurementSource === 'private' && formatted === '일정 미제공' ? privateMissing : value ? formatted : unknown;
+  };
   return <div className="fnd-key-summary" aria-label="입찰 핵심 정보">
     <div className="fnd-estimate"><span>추정가격</span><strong>{bid.estimatedPrice == null ? unknown : formatPrice(bid.estimatedPrice)}</strong><small>공고에 공개된 추정가격 기준</small></div>
-    <div className="fnd-estimate fnd-base-amount"><span>예정금액</span><strong>{planned || unknown}</strong><small>{bid.type === '공사' ? '공고에 공개된 공사 예정금액 기준' : '공고에 공개된 사업 예산금액 기준'}</small></div>
-    <div className="fnd-summary-date"><CalendarClock size={20} /><span>입찰서 제출마감</span><strong>{bid.deadline ? formatDateTime(bid.deadline, { includeYear: true }) : unknown}</strong></div>
-    <div className="fnd-summary-date"><FileCheck2 size={20} /><span>개찰일시</span><strong>{bid.openingAt ? formatDateTime(bid.openingAt, { includeYear: true }) : unknown}</strong></div>
+    <div className="fnd-estimate fnd-base-amount"><span>{privateSource ? '배정예산금액' : '예정금액'}</span><strong>{planned || unknown}</strong><small>{privateSource ? '누리장터에 공개된 배정예산금액' : bid.type === '공사' ? '공고에 공개된 공사 예정금액 기준' : '공고에 공개된 사업 예산금액 기준'}</small></div>
+    <div className="fnd-summary-date"><CalendarClock size={20} /><span>입찰서 제출마감</span><strong>{schedule(bid.deadline, '공고서 확인')}</strong></div>
+    <div className="fnd-summary-date"><FileCheck2 size={20} /><span>개찰일시</span><strong>{schedule(bid.openingAt, '일정 확인 필요')}</strong></div>
   </div>;
 }
 

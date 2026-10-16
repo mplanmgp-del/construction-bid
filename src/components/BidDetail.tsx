@@ -10,6 +10,7 @@ import { CompleteNoticeDetails } from '../live/CompleteNoticeDetails';
 import { PendingNoticeDetails } from '../live/NoticeSummary';
 import { noticeState } from '../notice-status';
 import { noticeSubmissionMessage } from './notice-schedule';
+import { noticeVisibleStateLabel, noticeWorkLabel } from './notice-presentation';
 import { buildBidHelperSeed, type BidHelperSeed } from '../bid-helper/notice-seed';
 
 interface BidDetailProps {
@@ -201,8 +202,8 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
         </div>
         <div className="detail-heading">
           <div className="detail-heading-badges">
-            <span className={`nl-state is-${state.tone}`} title={state.description}>{state.label}</span>
-            <span className="detail-category">{bid.type} · {bid.category}</span>
+            <span className={`nl-state is-${state.tone}`} title={state.description}>{noticeVisibleStateLabel(bid, state.label)}</span>
+            <span className="detail-category">{noticeWorkLabel(bid)}{bid.bidMethod ? ` · ${bid.bidMethod}` : ''} · {bid.category}</span>
             {bid.revised && <span className="badge badge-amber">정정</span>}
           </div>
           <div className="detail-title-row">

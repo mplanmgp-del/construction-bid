@@ -10,6 +10,37 @@ const params = (notices = `${identity.number}:1`, type = '용역') => new URLSea
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('on-demand participation regions', () => {
+  it.each(['공사', '용역'] as const)('routes explicitly private %s regions to the private condition operation', async type => {
+    const calls: URL[] = [];
+    const client = createG2bClient({ serviceKey: 'private-region', fetcher: async input => {
+      const url = new URL(String(input)); calls.push(url);
+      return response(url.pathname.includes('/PrvtBidNtceService/') ? [{ ...region, bsnsDivNm: undefined }] : []);
+    } });
+    const input = params(`${identity.number}:1`, type); input.set('procurementSource', 'private');
+    const result = await handleG2bRequest('/api/notice-regions', input, client);
+    expect(result).toMatchObject({ status: 200, body: { items: [{ ...identity, type, procurementSource: 'private', allowedRegions: ['서울특별시'], complete: true }] } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].pathname).toBe('/1230000/ao/PrvtBidNtceService/getPrvtBidPblancListInfoPrtcptPsblRgn');
+    expect(Object.fromEntries(calls[0].searchParams)).toMatchObject({ inqryDiv: '2', bidNtceNo: identity.number, bidNtceOrd: '001' });
+  });
+
+  it('rejects an invalid procurement source before reading a provider', async () => {
+    const fetcher = vi.fn(); const input = params(); input.set('procurementSource', 'live');
+    expect(await handleG2bRequest('/api/notice-regions', input, createG2bClient({ serviceKey: 'test', fetcher })))
+      .toMatchObject({ status: 400, body: { error: { code: 'INVALID_QUERY' } } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['empty', [], 0, true],
+    ['incomplete', [region], 2, false],
+    ['other revision', [{ ...region, bidNtceOrd: '000' }], 1, false],
+  ] as const)('keeps private %s conditions unknown without inferring nationwide participation', async (_name, items, totalCount, complete) => {
+    const input = params(); input.set('procurementSource', 'private');
+    const result = await handleG2bRequest('/api/notice-regions', input, createG2bClient({ serviceKey: 'test', fetcher: async () => response([...items], totalCount) }));
+    expect(result).toMatchObject({ status: 200, body: { items: [{ procurementSource: 'private', allowedRegions: null, complete }] } });
+  });
+
   it('loads exact construction participation regions when a company filter requests them', async () => {
     const client = createG2bClient({ serviceKey: 'construction-region', fetcher: async () => response([{ ...region, bsnsDivNm: '공사' }]) });
     const result = await handleG2bRequest('/api/notice-regions', params(`${identity.number}:1`, '공사'), client);

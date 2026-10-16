@@ -2,6 +2,8 @@ import { expect, it } from 'vitest';
 import type { G2bNoticePage } from '../src/g2b-types';
 import type { NoticeQuery } from '../src/live/notice-search';
 import { NOTICE_CACHE_KEY, NOTICE_CACHE_FRESH_MS, NOTICE_CACHE_MAX_AGE_MS, noticeQueryKey, readLastNoticeQuery, readNoticeCache, writeNoticeCache } from '../src/live/notice-cache';
+import { mapPrivateNotice } from '../server/g2b-private';
+import privateFixture from './fixtures/g2b-private-notice.json';
 
 const now = Date.parse('2026-10-13T02:00:00Z');
 const query: NoticeQuery = { type: '공사·용역', from: '2026-10-07', to: '2026-10-13', keyword: '철거' };
@@ -54,6 +56,28 @@ it('persists only public notice fields and detaches subsequent UI mutations', ()
   const cached = readNoticeCache(query, now, storage)!;
   expect(cached.page.items[0].title).toBe('철거 공사'); expect(cached.page.items[0].licenses).toEqual([]);
   expect(storage.getItem(NOTICE_CACHE_KEY)).not.toMatch(/companyProfile|eligible|accountId|private@example/);
+});
+
+it('round-trips private procurement and bid method without inventing a deadline, estimated price or region', () => {
+  const storage = store(); const cacheTime = Date.parse('2026-10-16T03:00:00Z');
+  const notice = mapPrivateNotice(privateFixture.response.body.items[1], '공사', cacheTime);
+  const result = { ...page(), items: [notice], fetchedAt: new Date(cacheTime).toISOString(), source: '누리장터 민간입찰공고정보서비스' };
+  writeNoticeCache(query, result, cacheTime, storage);
+  notice.bidMethod = 'UI 변경'; notice.procurementSource = 'public';
+  const restored = readNoticeCache(query, cacheTime + 1000, storage);
+  expect(restored).toMatchObject({ fresh: true, page: { items: [{
+    id: 'g2b:공사:R26BK01774453:001', type: '공사', procurementSource: 'private', bidMethod: '직찰',
+    noticeKind: '변경공고', deadline: '', status: '확인필요', estimatedPrice: null,
+    allowedRegions: null, licenses: [], sourceUpdatedAt: '2026-10-16T10:32:23+09:00',
+  }] } });
+});
+
+it('rejects a cached malformed procurement source rather than routing it as a public notice', () => {
+  const storage = store(); writeNoticeCache(query, page(), now, storage);
+  const entries = JSON.parse(storage.getItem(NOTICE_CACHE_KEY)!);
+  entries[0].page.items[0].procurementSource = 'live';
+  storage.setItem(NOTICE_CACHE_KEY, JSON.stringify(entries));
+  expect(readNoticeCache(query, now, storage)).toBeNull();
 });
 
 it('bounds storage to six successful searches and keeps unrelated account preferences', () => {

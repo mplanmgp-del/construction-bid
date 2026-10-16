@@ -19,6 +19,9 @@ export function noticeState(bid: BidNotice, now = Date.now()): NoticeState {
   if (Number.isFinite(opening) && opening <= now) {
     return { label: '개찰 완료', tone: 'opened', description: '공고에 기재된 개찰일시 기준입니다. 실제 개찰·낙찰 결과는 공개 결과에서 확인하세요.' };
   }
+  if (bid.procurementSource === 'private' && !Number.isFinite(deadline)) {
+    return { label: '-', tone: 'unknown', description: '민간공고의 제출 마감은 공고서에서 확인해 주세요.' };
+  }
   if (Number.isFinite(start) && start > now) return { label: '예정', tone: 'scheduled', description: '입찰 개시 전입니다.' };
   // Preserve an explicitly upcoming phase when the API did not provide its start time.
   if (!Number.isFinite(start) && bid.status === '접수예정' && (!Number.isFinite(deadline) || deadline > now)) {

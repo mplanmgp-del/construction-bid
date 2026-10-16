@@ -17,6 +17,7 @@ import { LockedMenu } from '../admin/AdminPage';
 import { menuIsLocked } from '../admin/navigation';
 import { browserNoticeNumberRepository, buildNoticeNumberResult, type NoticeNumberRepository } from './notice-number-search';
 import { noticeSubmissionMessage } from '../components/notice-schedule';
+import { noticeVisibleStateLabel, noticeWorkLabel } from '../components/notice-presentation';
 import { buildBidHelperSeed, storePendingBidHelperSeed } from '../bid-helper/notice-seed';
 
 function queryNotice() {
@@ -192,7 +193,7 @@ export function NoticeDetailPage() {
       {error && <section className="fnd-error-state" role="alert"><Info size={25} /><div><h2>공고 상세 조회를 완료하지 못했습니다</h2><p>{error}</p></div>{query.valid && <button type="button" className="fnd-secondary-button" onClick={() => setRetry(value => value + 1)} disabled={loading}><RefreshCw size={16} />다시 조회</button>}</section>}
       {detail && bid && <>
         <section className="fnd-hero" aria-labelledby="fnd-notice-title">
-          <div className="fnd-hero-top"><div className="fnd-badges"><span className={`fnd-status is-${state?.tone}`} title={state?.description}>{state?.label}</span><span>{bid.type}</span>{bid.contractMethod && <span>{bid.contractMethod}</span>}</div><div className="fnd-hero-actions"><button type="button" onClick={copyNumber} aria-label="공고번호 복사" title="공고번호 복사"><Copy size={18} /></button></div></div>
+          <div className="fnd-hero-top"><div className="fnd-badges"><span className={`fnd-status is-${state?.tone}`} title={state?.description}>{noticeVisibleStateLabel(bid, state?.label ?? '')}</span><span>{noticeWorkLabel(bid)}</span>{bid.bidMethod && <span>{bid.bidMethod}</span>}{bid.contractMethod && <span>{bid.contractMethod}</span>}</div><div className="fnd-hero-actions"><button type="button" onClick={copyNumber} aria-label="공고번호 복사" title="공고번호 복사"><Copy size={18} /></button></div></div>
           <h1 id="fnd-notice-title">{bid.title || '-'}</h1>
           <div className="fnd-hero-meta"><span><Building2 size={16} />{bid.agency || '-'}</span><span className="fnd-notice-number">{bid.number}-{bid.revision}</span></div>
           {revisionVerification.status === 'verified' && Number(revisionVerification.latest.revision) === Number(bid.revision) && noticeSubmissionMessage(revisionVerification.latest, statusNow) && <p className="detail-submission-status">{noticeSubmissionMessage(revisionVerification.latest, statusNow)}</p>}
@@ -202,8 +203,10 @@ export function NoticeDetailPage() {
         <NoticeDetailRevisionNotice bid={bid} verification={revisionVerification} now={statusNow} />
         <div className="fnd-opening-launch"><button type="button" onClick={openBidHelper}><Calculator size={17} />투찰 도우미로 계산</button><span>공개된 금액을 확인하고 가정값으로 계산합니다.</span></div>
         {detail.warnings.length > 0 && <aside className="fnd-data-warning"><Info size={18} /><div><strong>일부 상세 항목은 확인이 필요합니다</strong><ul>{detail.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div></aside>}
-        <div ref={resultsRef} className="fnd-opening-launch" id="results"><button type="button" aria-expanded={showOpeningResults} aria-controls="fnd-opening-results" onClick={() => setShowOpeningResults(value => !value)}><ListOrdered size={17} />{showOpeningResults ? '개찰·낙찰 결과 닫기' : '개찰·낙찰 결과 보기'}</button><span>개찰 1순위와 최종 낙찰업체를 구분해 확인합니다.</span></div>
-        {showOpeningResults && <div id="fnd-opening-results"><OpeningResultsPanel key={`${bid.type}-${bid.number}-${bid.revision}`} row={bid} onClose={() => setShowOpeningResults(false)} autoFocus={false} /></div>}
+        {bid.procurementSource === 'private' ? <p className="detail-help">민간공고의 개찰·계약 결과는 나라장터에서 확인해 주세요. <a href="https://www.g2b.go.kr/" target="_blank" rel="noopener noreferrer">나라장터 열기</a></p> : <>
+          <div ref={resultsRef} className="fnd-opening-launch" id="results"><button type="button" aria-expanded={showOpeningResults} aria-controls="fnd-opening-results" onClick={() => setShowOpeningResults(value => !value)}><ListOrdered size={17} />{showOpeningResults ? '개찰·낙찰 결과 닫기' : '개찰·낙찰 결과 보기'}</button><span>개찰 1순위와 최종 낙찰업체를 구분해 확인합니다.</span></div>
+          {showOpeningResults && <div id="fnd-opening-results"><OpeningResultsPanel key={`${bid.type}-${bid.number}-${bid.revision}`} row={bid} onClose={() => setShowOpeningResults(false)} autoFocus={false} /></div>}
+        </>}
         <CompleteNoticeDetails detail={detail} bid={bid} printRef={printRef} />
         <footer className="fnd-data-footer"><div><Clock3 size={16} /><span>조회 시각 {formatDateTime(detail.fetchedAt)} (한국시간)</span><button type="button" onClick={() => setRetry(value => value + 1)} disabled={loading}><RefreshCw size={14} className={loading ? 'fnd-spin' : undefined} />{loading ? '조회 중' : '다시 조회'}</button></div><p>공개된 항목을 기준으로 표시합니다. 세부 참가자격과 변경 사항은 최신 공고 원문을 확인해 주세요.</p></footer>
       </>}

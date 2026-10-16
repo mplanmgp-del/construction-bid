@@ -2,7 +2,7 @@ import type { BidNotice } from '../types';
 import type { G2bNoticeDetail } from '../g2b-types';
 import { ApiError, fetchApi } from './client';
 
-export type NoticeRegionTarget = Pick<BidNotice, 'number' | 'revision' | 'type' | 'source' | 'allowedRegions'>;
+export type NoticeRegionTarget = Pick<BidNotice, 'number' | 'revision' | 'type' | 'source' | 'allowedRegions' | 'procurementSource'>;
 export interface NoticeRegionEntry {
   allowedRegions: string[] | null;
   complete: boolean;
@@ -73,7 +73,8 @@ export function selectNoticeRegionTargets(candidates: BidNotice[], visible: BidN
 
 export function seedNoticeDetailRegions(bid: NoticeRegionTarget, detail: G2bNoticeDetail) {
   if (bid.source !== 'live' || bid.number !== detail.number || bid.revision !== detail.revision || !detail.regionComplete
-    || (detail.notice && (detail.notice.type !== bid.type || detail.notice.number !== bid.number || detail.notice.revision !== bid.revision))) return;
+    || (detail.notice && (detail.notice.type !== bid.type || detail.notice.number !== bid.number || detail.notice.revision !== bid.revision
+      || (detail.notice.procurementSource ?? 'public') !== (bid.procurementSource ?? 'public')))) return;
   const entry = verifiedEntry({ complete: detail.regionComplete, fetchedAt: detail.fetchedAt, allowedRegions: detail.allowedRegions });
   if (entry.complete) storeRegion(noticeRegionKey(bid), entry);
 }
@@ -82,7 +83,9 @@ let blockedUntil = 0;
 const unknownMessage = '참가 가능 지역을 확인하지 못했습니다. 공고 원문을 확인해 주세요.';
 const quotaMessage = '지역 조회 호출 한도에 도달했습니다. 잠시 후 다시 확인해 주세요.';
 
-export function noticeRegionKey(bid: Pick<BidNotice, 'number' | 'revision' | 'type'>) { return `${bid.type}:${bid.number}:${bid.revision}`; }
+export function noticeRegionKey(bid: Pick<BidNotice, 'number' | 'revision' | 'type' | 'procurementSource'>) {
+  return `${bid.procurementSource === 'private' ? 'private:' : ''}${bid.type}:${bid.number}:${bid.revision}`;
+}
 export function needsNoticeRegions(bid: NoticeRegionTarget) {
   return bid.source === 'live' && !bid.allowedRegions?.some(region => region.trim());
 }
@@ -126,7 +129,7 @@ function rememberRetryAfter(seconds: unknown) {
   }
 }
 
-/** Hydrates only public identities; failed or missing rows remain unknown. */
+/** Hydrates exact identities from their procurement service; missing rows remain unknown. */
 export async function loadNoticeRegions(
   bids: NoticeRegionTarget[], signal: AbortSignal,
   publish?: (key: string, entry: NoticeRegionEntry) => void,
@@ -152,8 +155,10 @@ export async function loadNoticeRegions(
     return true;
   });
   for (const type of ['공사', '용역'] as const) {
-    const business = missing.filter(bid => bid.type === type);
-    for (let index = 0; index < business.length; index += 10) queue.push(business.slice(index, index + 10));
+    for (const procurementSource of ['public', 'private'] as const) {
+      const business = missing.filter(bid => bid.type === type && (bid.procurementSource ?? 'public') === procurementSource);
+      for (let index = 0; index < business.length; index += 10) queue.push(business.slice(index, index + 10));
+    }
   }
   async function worker() {
     while (queue.length && !signal.aborted && !stoppedForQuota && !getNoticeRegionsRetryAt()) {
@@ -161,6 +166,7 @@ export async function loadNoticeRegions(
       try {
         const payload = await fetchApi<unknown>(`/api/notice-regions?${new URLSearchParams({
           type: batch[0].type, notices: batch.map(bid => `${bid.number}:${bid.revision}`).join(','),
+          ...(batch[0].procurementSource === 'private' ? { procurementSource: 'private' } : {}),
           ...(options.retryFailed ? { refresh: '1' } : {}),
         })}`, requestAbort.signal);
         if (signal.aborted) return;
@@ -171,7 +177,8 @@ export async function loadNoticeRegions(
         }
         const rows = Array.isArray(page?.items) ? page.items.map(record).filter((item): item is Record<string, unknown> => !!item) : [];
         for (const bid of batch) {
-          const matching = rows.filter(item => item.number === bid.number && item.revision === bid.revision && item.type === bid.type);
+          const matching = rows.filter(item => item.number === bid.number && item.revision === bid.revision && item.type === bid.type
+            && (item.procurementSource ?? 'public') === (bid.procurementSource ?? 'public'));
           const entry = verifiedEntry(matching.length === 1 ? matching[0] : undefined);
           emit(bid, !entry.complete && stoppedForQuota ? unconfirmed(true) : entry, entry.complete || !stoppedForQuota);
         }

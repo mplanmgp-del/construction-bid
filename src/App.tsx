@@ -24,7 +24,7 @@ import type { UnifiedSearchDraft } from './live/unified-notice-search';
 import { SearchEmptyState } from './ui/SearchEmptyState';
 import { readSearchSession, writeSearchSession } from './ui/search-session';
 import { deadlineMonthWindow } from './notice-deadline-window';
-import { isOngoingNotice } from './notice-deadline-window';
+import { isCatalogNotice } from './notice-deadline-window';
 import { VerifiedSearchFeedback, VerifiedSearchPagination } from './live/VerifiedSearchFeedback';
 import { filtersForIndexedSearch } from './live/notice-search';
 import { CompanyDashboard } from './company/CompanyDashboard';
@@ -241,7 +241,7 @@ export default function App() {
 
   const rawSourceNotices = useMemo(() => (view === 'bookmarks'
     ? mergeById(mode === 'live' ? Object.values(member.workspace?.noticeSnapshots ?? {}).map(bid => currentNotice(bid)) : [], availableNotices).filter(bid => bookmarks.includes(bid.id))
-    : availableNotices).filter(bid => serverSearch || mode !== 'live' || isOngoingNotice(bid, statusNow)), [view, mode, serverSearch, member.workspace?.noticeSnapshots, availableNotices, bookmarks, statusNow]);
+    : availableNotices).filter(bid => serverSearch || mode !== 'live' || isCatalogNotice(bid, statusNow)), [view, mode, serverSearch, member.workspace?.noticeSnapshots, availableNotices, bookmarks, statusNow]);
   const activeRegions = selectedRegions(filters);
   const activeStatuses = selectedStatuses(filters);
   const regionCandidates = useMemo(() => serverSearch ? rawSourceNotices : filterNotices(rawSourceNotices,

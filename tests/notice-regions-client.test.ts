@@ -312,6 +312,39 @@ it('loads construction participation regions separately from service regions whe
   expect(bids[0].province).toBe('부산광역시');
 });
 
+it('separates public/private region batches and cache membership for otherwise identical identities', async () => {
+  const calls: URL[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    const url = new URL(path, 'https://example.test'); calls.push(url);
+    const privateSource = url.searchParams.get('procurementSource') === 'private';
+    return Response.json({ items: [row('SAME', { ...(privateSource ? { procurementSource: 'private' } : {}), allowedRegions: privateSource ? ['경기도'] : ['서울특별시'] })] });
+  }));
+  const bids = [service('SAME'), service('SAME', { procurementSource: 'private' })];
+  const result = await regions.loadNoticeRegions(bids, new AbortController().signal);
+  expect(calls.map(url => url.searchParams.get('procurementSource'))).toEqual([null, 'private']);
+  expect(regions.mergeNoticeRegions(bids, result.entries).map(bid => bid.allowedRegions)).toEqual([['서울특별시'], ['경기도']]);
+  expect(regions.getCachedNoticeRegions(bids).size).toBe(2);
+});
+
+it('does not use a public or unlabelled region response as private region evidence', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [row('PRIVATE')] })));
+  const bids = [service('PRIVATE', { procurementSource: 'private' })];
+  const result = await regions.loadNoticeRegions(bids, new AbortController().signal);
+  expect(regions.mergeNoticeRegions(bids, result.entries)[0].allowedRegions).toBeNull();
+  expect([...result.entries.values()][0].complete).toBe(false);
+});
+
+it('retains the procurement source in hook targets so a private detail seed avoids a duplicate load', async () => {
+  const { useNoticeRegions } = await import('../src/live/useNoticeRegions');
+  const bid = service('PRIVATE', { procurementSource: 'private' });
+  regions.seedNoticeDetailRegions(bid, { number: bid.number, revision: bid.revision, notice: bid, allowedRegions: ['경기도'],
+    regionComplete: true, licenses: [], licenseComplete: false, fetchedAt: '2026-10-14T01:00:00Z', warnings: [] });
+  let result: ReturnType<typeof useNoticeRegions> | undefined;
+  function Probe() { result = useNoticeRegions([bid], true); return null; }
+  renderToStaticMarkup(createElement(Probe));
+  expect(result).toMatchObject({ pending: 0, items: [{ procurementSource: 'private', allowedRegions: ['경기도'] }] });
+});
+
 it('only includes construction lookups in the hook when the company region filter is requested', async () => {
   const { useNoticeRegions } = await import('../src/live/useNoticeRegions');
   const bids = [service('C1', { type: '공사' }), service('S1')];

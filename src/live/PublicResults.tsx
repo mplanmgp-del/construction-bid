@@ -6,6 +6,7 @@ import { dateRangeError, fetchApi, koreanToday, mergeById, recentDates } from '.
 import { OpeningResultsPanel } from './OpeningResultsPanel';
 
 export function PublicResults({ bid }: { bid?: BidNotice }) {
+  if (bid?.procurementSource === 'private') return <p className="detail-help">민간공고의 개찰·계약 결과는 나라장터에서 확인해 주세요. <a href="https://www.g2b.go.kr/" target="_blank" rel="noopener noreferrer">나라장터 열기</a></p>;
   if (bid) return <OpeningResultsPanel key={`${bid.type}-${bid.number}-${bid.revision}`} row={bid} embedded autoFocus={false} />;
   return <LegacyPublicResults />;
 }

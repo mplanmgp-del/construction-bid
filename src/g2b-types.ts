@@ -18,6 +18,7 @@ export interface G2bNoticeRegions {
   number: string;
   revision: string;
   type: G2bBusinessType;
+  procurementSource?: 'public' | 'private';
   allowedRegions: string[] | null;
   complete: boolean;
   fetchedAt: string;

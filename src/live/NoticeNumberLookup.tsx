@@ -3,6 +3,7 @@ import { ArrowUpRight, Bookmark, CircleAlert, LoaderCircle, Search } from 'lucid
 import { NOTICE_REVISION_CONTEXT, type BidNotice } from '../types';
 import { noticeState } from '../notice-status';
 import { currentNotice } from './client';
+import { noticeVisibleStateLabel, noticeWorkLabel } from '../components/notice-presentation';
 import {
   NoticeNumberController, visibleNoticeNumberSearch,
   type NoticeNumberSnapshot, type NoticeNumberType,
@@ -20,7 +21,7 @@ function latestState(notice: BidNotice) {
   const current = currentNotice(notice);
   if (current.status === '마감') return { label: '입찰 마감', tone: 'closed' };
   const phase = noticeState(current);
-  return { label: phase.label === '-' ? '상태 확인 필요' : phase.label, tone: phase.tone };
+  return { label: phase.label === '-' && current.procurementSource !== 'private' ? '상태 확인 필요' : noticeVisibleStateLabel(current, phase.label), tone: phase.tone };
 }
 
 /** Preserve the original record while carrying its current revision context into the drawer. */
@@ -41,12 +42,12 @@ export function NoticeNumberResults({ snapshot, bookmarks, onBookmark, onOpen }:
     {snapshot.groups.map(group => {
       const latest = group.latest, state = latestState(latest), saved = bookmarks.includes(latest.id);
       return <article key={group.type} className="notice-number-card" data-notice-number={latest.number}>
-        <div className="notice-number-card-top"><span>{group.type} · {latest.number}</span><div><strong>최신 {latest.revision}차수</strong><span className={`notice-number-status ${state.tone}`}>{state.label}</span></div></div>
+        <div className="notice-number-card-top"><span>{noticeWorkLabel(latest)}{latest.bidMethod ? ` · ${latest.bidMethod}` : ''} · {latest.number}</span><div><strong>최신 {latest.revision}차수</strong><span className={`notice-number-status ${state.tone}`}>{state.label}</span></div></div>
         <h3><button type="button" onClick={() => onOpen(latest)}>{latest.title}</button></h3>
         <p className="notice-number-agency">{latest.agency}{latest.demandAgency && latest.demandAgency !== latest.agency ? ` · 수요기관 ${latest.demandAgency}` : ''}</p>
         {state.tone === 'cancelled' && <p className="notice-number-cancel-note"><CircleAlert size={17} /><span>최신 {latest.revision}차수가 취소공고입니다. 이전 {group.history.at(1)?.revision ?? '공고'}차수의 마감일이 남아 있어도 현재 진행 공고로 볼 수 없습니다.</span></p>}
         {group.requestedRevision !== null && group.requestedRevision !== latest.revision && <p className="notice-number-history-note">{group.requested ? `입력한 ${group.requestedRevision}차수는 이전 차수입니다. 아래 이력에서 확인할 수 있습니다.` : `입력한 ${group.requestedRevision}차수는 확인되지 않았습니다. 조회된 최신 차수를 표시합니다.`}</p>}
-        <dl className="notice-number-dates"><div><dt>최신 공고 게시일</dt><dd>{fullDate(latest.postedAt)}</dd></div><div><dt>입찰 개시일시</dt><dd>{fullDate(latest.biddingStartAt)}</dd></div><div><dt>입찰 마감일시</dt><dd>{fullDate(latest.deadline)}</dd></div></dl>
+        <dl className="notice-number-dates"><div><dt>최신 공고 게시일</dt><dd>{fullDate(latest.postedAt)}</dd></div><div><dt>입찰 개시일시</dt><dd>{latest.procurementSource === 'private' && fullDate(latest.biddingStartAt) === '일정 미제공' ? '일정 확인 필요' : fullDate(latest.biddingStartAt)}</dd></div><div><dt>입찰 마감일시</dt><dd>{latest.procurementSource === 'private' && fullDate(latest.deadline) === '일정 미제공' ? '공고서 확인' : fullDate(latest.deadline)}</dd></div></dl>
         {group.warnings.map((warning, index) => <p key={index} className="notice-number-history-note">{warning}</p>)}
         <div className="notice-number-card-actions"><button type="button" className={`button button-secondary${saved ? ' is-saved' : ''}`} aria-label={`${latest.number}-${latest.revision} 즐겨찾기 ${saved ? '해제' : '추가'}`} aria-pressed={saved} onClick={() => onBookmark(latest)}><Bookmark size={16} fill={saved ? 'currentColor' : 'none'} /><span>{saved ? '즐겨찾기됨' : '즐겨찾기'}</span></button><button type="button" className="button button-secondary" onClick={() => onOpen(latest)}><span>최신 공고 상세</span><ArrowUpRight size={16} /></button></div>
         <details className="notice-number-history" open={group.requestedRevision !== null && group.requestedRevision !== latest.revision}>

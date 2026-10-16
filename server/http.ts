@@ -85,15 +85,17 @@ export async function handleG2bRequest(path: string, params: URLSearchParams, ap
     }
     if (path === '/api/notice-regions') {
       const type = params.get('type');
+      const procurementSource = params.get('procurementSource') ?? 'public';
       const values = (params.get('notices') || '').split(',');
-      if ((type !== '공사' && type !== '용역') || values.length > 10 || values.some(value => !/^[a-zA-Z0-9_-]{1,40}:\d{1,3}$/.test(value))) {
+      if ((type !== '공사' && type !== '용역') || (procurementSource !== 'public' && procurementSource !== 'private')
+        || values.length > 10 || values.some(value => !/^[a-zA-Z0-9_-]{1,40}:\d{1,3}$/.test(value))) {
         throw new G2bError(400, 'INVALID_QUERY', '지역조건은 공고번호와 차수를 지정하여 최대 10건씩 조회해 주세요.');
       }
       const notices = values.map(value => { const [number, revision] = value.split(':'); return { number, revision: revision.padStart(3, '0') }; });
       if (new Set(notices.map(notice => `${notice.number}:${notice.revision}`)).size !== notices.length) {
         throw new G2bError(400, 'INVALID_QUERY', '중복된 공고번호와 차수가 포함되어 있습니다.');
       }
-      const body = await api.noticeRegions(notices, type);
+      const body = await api.noticeRegions(notices, type, procurementSource);
       return { status: 200, body, ...(body.retryAfterSeconds ? { retryAfterSeconds: body.retryAfterSeconds } : {}) };
     }
     if (path === '/api/notices') {

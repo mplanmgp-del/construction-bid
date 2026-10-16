@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { koreanTimestamp, mapNotice, readProviderPayload } from './g2b.ts';
+import { mapPrivateNotice, matchesPrivateNotice, PRIVATE_BID_BASE, PRIVATE_NOTICE_DIVISIONS, privateNoticeOperation } from './g2b-private.ts';
 import { createOpeningSummaryLoader } from './g2b-results.ts';
 import { ProviderQuotaError, providerRetryAfter } from './provider-quota.ts';
 import { matchAlarmNotice, noticeContentKey, noticeOmittedContentKey } from '../src/alerts/domain.ts';
-import { isOngoingNotice, noticeTimestamp } from '../src/notice-deadline-window.ts';
+import { isCatalogNotice, isOngoingNotice, noticeTimestamp } from '../src/notice-deadline-window.ts';
 import type { ActiveCatalogStore } from './active-catalog-store.ts';
 import type { ActiveCatalogCommit, ActiveCatalogIdentity, ActiveCatalogSourceJob } from '../src/live/active-catalog-types.ts';
 import type { AlertNotice, WorkerRule } from '../src/alerts/types.ts';
@@ -50,7 +51,7 @@ export function createActiveCatalogProvider(
     catch { throw new Error('나라장터 인증키 형식을 확인해 주세요.'); }
     const url = new URL(operation, service?.service === 'opening'
       ? 'https://apis.data.go.kr/1230000/as/ScsbidInfoService/'
-      : 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/');
+      : operation.startsWith('getPrvt') ? PRIVATE_BID_BASE : 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/');
     url.search = new URLSearchParams({ ...params, serviceKey: decoded, type: 'json' }).toString();
     let response: Response;
     try {
@@ -70,13 +71,14 @@ export function createActiveCatalogProvider(
   };
 }
 
-function fact(row: Row, type: ActiveCatalogIdentity['type'], now: number): AlertNotice {
+function fact(row: Row, type: ActiveCatalogIdentity['type'], now: number, procurementSource?: 'public' | 'private'): AlertNotice {
   const number = str(row.bidNtceNo), revision = str(row.bidNtceOrd);
   if (!/^[A-Za-z0-9_-]{1,40}$/.test(number) || !/^\d{1,3}$/.test(revision)
-    || (str(row.bsnsDivNm) && str(row.bsnsDivNm) !== type)) {
+    || (str(row.bsnsDivNm) && str(row.bsnsDivNm) !== type)
+    || procurementSource === 'private' && !matchesPrivateNotice(row, number, type)) {
     throw new Error('공고 식별정보가 불완전하여 확인 범위를 유지합니다.');
   }
-  const notice = mapNotice(row, type, now);
+  const notice = procurementSource === 'private' ? mapPrivateNotice(row, type, now) : mapNotice(row, type, now);
   const sourceUpdatedAt = koreanTimestamp(row.chgDt) || koreanTimestamp(row.rgstDt) || notice.postedAt;
   if (!notice.postedAt || !sourceUpdatedAt) throw new Error('공고 일시가 불완전하여 확인 범위를 유지합니다.');
   return compactCatalogNotice({ ...notice, sourceUpdatedAt, regionComplete: false, licenseComplete: false });
@@ -134,8 +136,12 @@ async function participantConditions(notice: AlertNotice, request: ActiveCatalog
   };
   // At most one provider call per verification lane: source and condition work share the four-call cap.
   let enriched = notice;
-  if (region) enriched = { ...enriched, allowedRegions: await load('getBidPblancListInfoPrtcptPsblRgn', 'prtcptPsblRgnNm'), regionComplete: true };
-  if (license) enriched = { ...enriched, licenses: await load('getBidPblancListInfoLicenseLimit', 'lcnsLmtNm'), licenseComplete: true };
+  const prefix = notice.procurementSource === 'private' ? 'getPrvtBidPblancListInfo' : 'getBidPblancListInfo';
+  if (region) {
+    const regions = await load(`${prefix}PrtcptPsblRgn`, 'prtcptPsblRgnNm');
+    enriched = { ...enriched, allowedRegions: regions.length || notice.procurementSource !== 'private' ? regions : null, regionComplete: true };
+  }
+  if (license) enriched = { ...enriched, licenses: await load(`${prefix}LicenseLimit`, 'lcnsLmtNm'), licenseComplete: true };
   return enriched;
 }
 
@@ -224,12 +230,14 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       let total: number | undefined;
       const all: AlertNotice[] = [];
       for (let page = 1; page <= 2; page++) {
-        const result = await request(`getBidPblancListInfo${identity.type === '공사' ? 'Cnstwk' : 'Servc'}`, { inqryDiv: '2', bidNtceNo: identity.number, pageNo: String(page), numOfRows: '999' });
+        const privateSource = (identity.procurementSource ?? identity.notice?.procurementSource) === 'private';
+        const result = await request(privateSource ? privateNoticeOperation(identity.type) : `getBidPblancListInfo${identity.type === '공사' ? 'Cnstwk' : 'Servc'}`,
+          { inqryDiv: privateSource ? PRIVATE_NOTICE_DIVISIONS.number : '2', bidNtceNo: identity.number, pageNo: String(page), numOfRows: '999' });
         if (total !== undefined && total !== result.totalCount) throw new Error('조회 도중 공고 차수의 전체 건수가 바뀌어 다시 확인합니다.');
         total = result.totalCount;
         if (!total || total > 1000) throw new Error('공고 차수 이력을 모두 확인하지 못해 다시 확인합니다.');
         validPage(result.items, total, page, 999);
-        const items = result.items.map(row => fact(row, identity.type, now));
+        const items = result.items.map(row => fact(row, identity.type, now, identity.procurementSource ?? identity.notice?.procurementSource));
         if (items.some(item => item.number !== identity.number)) throw new Error('공고 번호와 차수 응답이 일치하지 않아 다시 확인합니다.');
         all.push(...items);
         if (all.length === total) break;
@@ -250,7 +258,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       let all = await completeHistory(identity);
       const latest = all.at(-1)!;
       let checked = identity.refreshMatching ? latest : reuseParticipantConditions(latest, identity.notice);
-      if (isOngoingNotice(checked, now) && noticeTimestamp(checked.deadline) <= now && noticeTimestamp(checked.openingAt) > now) {
+      if (checked.procurementSource !== 'private' && isOngoingNotice(checked, now) && noticeTimestamp(checked.deadline) <= now && noticeTimestamp(checked.openingAt) > now) {
         const completion = await openingSummary({ number: checked.number, revision: checked.revision, type: checked.type });
         if (!(completion.openingComplete ?? completion.complete)) {
           if (quotaFailure) throw quotaFailure;
@@ -259,7 +267,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
         }
         if (/^(?:개찰\s*완료|유찰)$/.test(completion.result.trim())) checked = { ...checked, openingCompleted: true };
       }
-      if (isOngoingNotice(checked, now)) checked = await participantConditions(checked, request);
+      if (isCatalogNotice(checked, now)) checked = await participantConditions(checked, request);
       all[all.length - 1] = checked;
       // Public publication never keeps historical bodies or consumes the private queue.
       // Only after it succeeds may private retention acknowledge the verification job.
@@ -276,14 +284,14 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
           && indexed?.type === checked.type && indexed.number === checked.number && indexed.revision === checked.revision
           && Date.parse(indexed.sourceUpdatedAt) === Date.parse(checked.sourceUpdatedAt)) {
           try {
-            const listing = await request(`getBidPblancListInfo${identity.type === '공사' ? 'Cnstwk' : 'Servc'}`, {
-              inqryDiv: '1', inqryBgnDt: minuteKst(checked.postedAt),
+            const listing = await request(checked.procurementSource === 'private' ? privateNoticeOperation(identity.type) : `getBidPblancListInfo${identity.type === '공사' ? 'Cnstwk' : 'Servc'}`, {
+              inqryDiv: checked.procurementSource === 'private' ? PRIVATE_NOTICE_DIVISIONS.posted : '1', inqryBgnDt: minuteKst(checked.postedAt),
               inqryEndDt: minuteKst(new Date(Date.parse(checked.postedAt) + 60_000).toISOString()), pageNo: '1', numOfRows: '999',
             });
             validPage(listing.items, listing.totalCount, 1, 999);
             if (listing.totalCount > 999) throw new SourcePublicationDeferred();
             const targets = listing.items.filter(row => str(row.bidNtceNo) === checked.number
-              && str(row.bidNtceOrd).padStart(3, '0') === checked.revision).map(row => fact(row, identity.type, now));
+              && str(row.bidNtceOrd).padStart(3, '0') === checked.revision).map(row => fact(row, identity.type, now, checked.procurementSource));
             if (targets.length !== 1 || sourceProjection(targets[0]) !== sourceProjection(checked)) throw new SourcePublicationDeferred();
             const refreshed = await completeHistory(identity);
             if (sourceProjection(refreshed.at(-1)!) !== sourceProjection(checked)) throw new SourcePublicationDeferred();
@@ -324,19 +332,22 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
     const discoverSources = async (jobs: ActiveCatalogSourceJob[]) => parallel(jobs, async (job: ActiveCatalogSourceJob) => {
       try {
         const suffix = job.type === '공사' ? 'Cnstwk' : 'Servc';
+        const privateSource = job.procurementSource === 'private';
+        const search = job.kind === 'history' || job.kind === 'current';
         const params: Record<string, string> = {
-          inqryDiv: job.kind === 'modified' ? '3' : '1', inqryBgnDt: minuteKst(job.from), inqryEndDt: minuteKst(job.to),
+          inqryDiv: privateSource ? search ? '1' : job.kind === 'modified' ? PRIVATE_NOTICE_DIVISIONS.posted : PRIVATE_NOTICE_DIVISIONS.registered : job.kind === 'modified' ? '3' : '1',
+          inqryBgnDt: minuteKst(job.from), inqryEndDt: minuteKst(job.to),
           pageNo: String(job.page), numOfRows: String(job.pageSize),
-          ...(job.kind === 'current' ? { bidClseExcpYn: 'Y' } : {}),
+          ...(job.kind === 'current' && !privateSource ? { bidClseExcpYn: 'Y' } : {}),
         };
-        const response = await request(`getBidPblancListInfo${suffix}${job.kind === 'history' || job.kind === 'current' ? 'PPSSrch' : ''}`, params);
+        const response = await request(privateSource ? privateNoticeOperation(job.type, search) : `getBidPblancListInfo${suffix}${search ? 'PPSSrch' : ''}`, params);
         if (job.totalCount !== null && job.totalCount !== response.totalCount) throw new SourceSnapshotChanged('조회 도중 전체 건수가 바뀌어 확인 범위를 다시 수집합니다.');
         validPage(response.items, response.totalCount, job.page, job.pageSize);
         const ids = new Set<string>(), observed = new Map<string, ActiveCatalogIdentity>(), items: AlertNotice[] = [];
         const rawIdentities: string[] = [];
         const indexFacts: AlertNotice[] = [];
         for (const row of response.items) {
-          const notice = fact(row, job.type, now);
+          const notice = fact(row, job.type, now, job.procurementSource);
           if (ids.has(notice.id)) throw new SourceSnapshotChanged('공고 목록의 차수가 중복되어 확인 범위를 다시 수집합니다.');
           ids.add(notice.id);
           if (job.kind === 'current') rawIdentities.push(`${notice.number}:${notice.revision}`);
@@ -349,7 +360,8 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
           const key = `${notice.type}:${notice.number}`, previous = observed.get(key);
           if (!previous || Number(notice.revision) > Number(previous.revision)
             || notice.revision === previous.revision && Date.parse(notice.sourceUpdatedAt) > Date.parse(previous.sourceUpdatedAt!)) {
-            observed.set(key, { type: notice.type, number: notice.number, revision: notice.revision, sourceUpdatedAt: notice.sourceUpdatedAt });
+            observed.set(key, { type: notice.type, number: notice.number, revision: notice.revision, sourceUpdatedAt: notice.sourceUpdatedAt,
+              ...(privateSource ? { procurementSource: 'private' as const } : {}) });
           }
           if (potentialRules(notice, rules, now).length) items.push(notice);
         }
@@ -361,8 +373,8 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
           if (clock() > deadline - 9_000) throw new WorkerBudgetExhausted('공고 색인 저장 시간이 부족하여 같은 구간에서 이어서 확인합니다.');
           const slice = indexFacts.slice(batch * 200, (batch + 1) * 200);
           const result = await write(() => store.indexUpsert(leaseId, { scopeVersion: claim.scopeVersion, sourceId: job.id, page: job.page,
-            batch, batches, notices: slice.filter(notice => isOngoingNotice(notice, now)),
-            removed: slice.filter(notice => !isOngoingNotice(notice, now)).map(notice => ({ type: notice.type,
+            batch, batches, notices: slice.filter(notice => isCatalogNotice(notice, now)),
+            removed: slice.filter(notice => !isCatalogNotice(notice, now)).map(notice => ({ type: notice.type,
               number: notice.number, revision: notice.revision, sourceUpdatedAt: notice.sourceUpdatedAt })) }));
           if (result.storageFull) {
             throw new Error('전체 공고 저장 한도에 도달하여 수집을 대기합니다. 기존 공고와 알림은 보존됩니다.');

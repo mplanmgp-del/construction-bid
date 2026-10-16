@@ -4,6 +4,7 @@ import type { ActiveCatalogPage, ActiveCatalogPageQuery, ActiveCatalogStatus } f
 import type { AlertProvider } from './alert-collector.ts';
 import { noticeTimestamp } from '../src/notice-deadline-window.ts';
 import { createG2bClient, koreanTimestamp, mapNotice } from './g2b.ts';
+import { mapPrivateNotice, matchesPrivateNotice, PRIVATE_NOTICE_DIVISIONS, privateNoticeOperation } from './g2b-private.ts';
 import { compactCatalogNotice } from './active-catalog-worker.ts';
 import type { G2bResultSummary } from '../src/g2b-types.ts';
 
@@ -44,13 +45,16 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
         if(verifyHistory) {
           if(requests>=maxRequests){stop=true;break;}
           requests++;
-          const rows=await provider(`getBidPblancListInfo${notice.type==='공사'?'Cnstwk':'Servc'}`,{inqryDiv:'2',bidNtceNo:notice.number});
+          const privateSource=notice.procurementSource==='private';
+          const rows=await provider(privateSource?privateNoticeOperation(notice.type):`getBidPblancListInfo${notice.type==='공사'?'Cnstwk':'Servc'}`,
+            {inqryDiv:privateSource?PRIVATE_NOTICE_DIVISIONS.number:'2',bidNtceNo:notice.number});
           if(!rows.length||rows.length>1000)throw new Error('공고 전체 차수 이력을 확인하지 못했습니다. 다음 확인 때 다시 시도합니다.');
           versions=rows.map(row=>{
             const revision=String(row.bidNtceOrd??'').trim();
             if(String(row.bidNtceNo??'').trim()!==notice.number||!/^\d{1,3}$/.test(revision)
-              ||row.bsnsDivNm&&String(row.bsnsDivNm).trim()!==notice.type)throw new Error('공고 전체 이력의 번호·차수를 확인하지 못했습니다.');
-            const mapped=mapNotice(row,notice.type,now),sourceUpdatedAt=koreanTimestamp(row.chgDt)||koreanTimestamp(row.rgstDt)||mapped.postedAt;
+              ||row.bsnsDivNm&&String(row.bsnsDivNm).trim()!==notice.type
+              ||privateSource&&!matchesPrivateNotice(row,notice.number,notice.type))throw new Error('공고 전체 이력의 번호·차수를 확인하지 못했습니다.');
+            const mapped=privateSource?mapPrivateNotice(row,notice.type,now):mapNotice(row,notice.type,now),sourceUpdatedAt=koreanTimestamp(row.chgDt)||koreanTimestamp(row.rgstDt)||mapped.postedAt;
             if(!mapped.postedAt||!sourceUpdatedAt)throw new Error('공고 전체 이력의 일시를 확인하지 못했습니다.');
             return compactCatalogNotice({...mapped,sourceUpdatedAt,regionComplete:false,licenseComplete:false});
           }).sort((a,b)=>Number(a.revision)-Number(b.revision));
@@ -68,7 +72,7 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
           license ||= !notice.licenseComplete&&(filter.licenses.length>0||filter.useCompanyLicenses===true);
         }
         const needed=Number(region)+Number(license);
-        const waiting=potential(notice).length>0&&noticeTimestamp(notice.deadline)<=now&&noticeTimestamp(notice.openingAt)>now;
+        const waiting=notice.procurementSource!=='private'&&potential(notice).length>0&&noticeTimestamp(notice.deadline)<=now&&noticeTimestamp(notice.openingAt)>now;
         if(requests+needed+(waiting?2:0)>maxRequests){stop=true;break;}
         if (needed) {
           const exact = { inqryDiv: '2', bidNtceNo: notice.number, bidNtceOrd: notice.revision };
@@ -79,13 +83,15 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
               || row.bsnsDivNm && String(row.bsnsDivNm).trim() !== notice.type)) throw new Error('공고 참가조건의 번호·차수를 확인하지 못했습니다.');
             return rows;
           };
-          const [regions, licenses] = await Promise.all([region ? load('getBidPblancListInfoPrtcptPsblRgn') : null, license ? load('getBidPblancListInfoLicenseLimit') : null]);
+          const prefix=notice.procurementSource==='private'?'getPrvtBidPblancListInfo':'getBidPblancListInfo';
+          const [regions, licenses] = await Promise.all([region ? load(`${prefix}PrtcptPsblRgn`) : null, license ? load(`${prefix}LicenseLimit`) : null]);
           const values = (rows: Record<string, unknown>[], key: string) => {
             const names = rows.map(row => String(row[key] ?? '').trim());
             if (names.some(name => !name)) throw new Error('공고 참가조건이 불완전하여 다음 확인 때 다시 시도합니다.');
             return [...new Set(names)];
           };
-          notice = { ...notice, ...(regions ? { allowedRegions: values(regions, 'prtcptPsblRgnNm'), regionComplete: true } : {}),
+          const regionNames=regions?values(regions,'prtcptPsblRgnNm'):[];
+          notice = { ...notice, ...(regions ? { allowedRegions: !regionNames.length&&notice.procurementSource==='private'?null:regionNames, regionComplete: true } : {}),
             ...(licenses ? { licenses: values(licenses, 'lcnsLmtNm'), licenseComplete: true } : {}) };
           changed=true;
         }

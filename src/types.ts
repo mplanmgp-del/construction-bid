@@ -20,6 +20,8 @@ export interface BidNotice {
   [NOTICE_REVISION_CONTEXT]?: { latestRevision: string; latestStatus: BidStatus; latestNoticeKind?: string };
   id: string; number: string; revision: string; title: string; agency: string;
   type: '공사' | '용역'; category: Category; province: string; district: string;
+  procurementSource?: 'public' | 'private';
+  bidMethod?: string;
   allowedRegions: string[] | null; estimatedPrice: number | null;
   plannedAmount?: number | null;
   demandAgency?: string;

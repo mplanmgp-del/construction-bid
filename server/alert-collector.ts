@@ -1,4 +1,5 @@
 import { koreanTimestamp, mapNotice, readProviderPayload } from './g2b.ts';
+import { PRIVATE_BID_BASE } from './g2b-private.ts';
 import { latestAlertNotices } from '../src/alerts/domain.ts';
 import type { AlertNotice } from '../src/alerts/types.ts';
 
@@ -14,7 +15,7 @@ export function createAlertProvider(key=process.env.G2B_SERVICE_KEY, fetcher:typ
     for(let page=1;page<=12;page++) {
       const remaining=deadline-Date.now();
       if(remaining<1500||++requests>(options.maxRequests??40)) throw new Error('나라장터 조회 시간 또는 호출 예산에 도달하여 다음 확인 때 다시 시도합니다.');
-      const url=new URL(operation,'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/');
+      const url=new URL(operation,operation.startsWith('getPrvt')?PRIVATE_BID_BASE:'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/');
       let decoded=key; try { if(key.includes('%')) decoded=decodeURIComponent(key); } catch { throw new Error('나라장터 인증키 형식을 확인해 주세요.'); }
       url.search=new URLSearchParams({...params,pageNo:String(page),numOfRows:'999',type:'json',serviceKey:decoded}).toString();
       let response:Response; try { response=await fetcher(url,{signal:AbortSignal.timeout(Math.min(12_000,remaining)),redirect:'error',cache:'no-store'}); } catch { throw new Error('나라장터 응답이 지연되어 다음 확인 때 다시 시도합니다.'); }

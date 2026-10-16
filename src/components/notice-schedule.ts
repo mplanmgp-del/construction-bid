@@ -10,7 +10,7 @@ function koreanTime(value: string | undefined): number {
 export function noticeSubmissionMessage(bid: BidNotice, now = Date.now()): string {
   if (bid.status === '취소' || bid.noticeKind?.includes('취소')) return '취소된 공고';
   const deadline = koreanTime(bid.deadline);
-  if (!Number.isFinite(deadline)) return '제출 마감일 확인 필요';
+  if (!Number.isFinite(deadline)) return bid.procurementSource === 'private' ? '일정은 공고서 확인' : '제출 마감일 확인 필요';
   if (deadline <= now) {
     const opening = koreanTime(bid.openingAt);
     return !bid.openingCompleted && Number.isFinite(opening) && opening > now

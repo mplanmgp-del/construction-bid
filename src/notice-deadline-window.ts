@@ -41,6 +41,14 @@ export function isOngoingNotice(notice: BidNotice, now = Date.now()): boolean {
   return ['active', 'urgent', 'scheduled'].includes(noticeState(notice, now).tone);
 }
 
+/** Manual private tenders need review even when the electronic deadline is absent. */
+export function isCatalogNotice(notice: BidNotice, now = Date.now()): boolean {
+  if (isOngoingNotice(notice, now)) return true;
+  return notice.procurementSource === 'private' && !notice.deadline.trim()
+    && !notice.openingCompleted && notice.status !== '취소' && !/취소/.test(notice.noticeKind ?? '')
+    && Number.isFinite(noticeTimestamp(notice.openingAt)) && noticeTimestamp(notice.openingAt) > now;
+}
+
 export function matchesDeadlineWindow(notice: BidNotice, window: NoticeDeadlineWindow, now = Date.now()): boolean {
   if (!isOngoingNotice(notice, now)) return false;
   const day = kstDay(noticeTimestamp(notice.deadline));
@@ -48,5 +56,5 @@ export function matchesDeadlineWindow(notice: BidNotice, window: NoticeDeadlineW
 }
 
 export function isAlarmEligible(notice: BidNotice, now = Date.now()): boolean {
-  return isOngoingNotice(notice, now);
+  return isCatalogNotice(notice, now);
 }
