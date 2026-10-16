@@ -20,6 +20,12 @@ describe('menu access including direct links', () => {
     expect(menuIsLocked('account', false, false, [])).toBe(false);
     expect(menuIsLocked('admin', false, false, [])).toBe(false);
   });
+  it('opens the public bid helper directly without requiring menu settings or an account', () => {
+    const view = appViewFromHash('#bid-helper');
+    expect(view).toBe('bid-helper');
+    expect(appViewHash(view)).toBe('#bid-helper');
+    expect(menuIsLocked(view, false, false, [])).toBe(false);
+  });
 });
 
 

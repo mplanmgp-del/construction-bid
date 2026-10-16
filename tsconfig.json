@@ -10,7 +10,8 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "noEmit": true,
-    "types": ["vite/client", "vitest/globals", "node"]
+    "types": ["vite/client", "vitest/globals", "node"],
+    "typeRoots": ["./node_modules/@types", "./node_modules"]
   },
   "include": ["src", "server", "api", "vite.config.ts", "tests"]
 }
