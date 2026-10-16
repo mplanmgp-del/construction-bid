@@ -3,9 +3,10 @@ import { alertNoticeKey,hasOmittedContentDigest,isOlderAlertNotice,matchAlertNot
 import type { AlertEventKind,AlertNotice,WorkerRule } from '../src/alerts/types.ts';
 export interface Observation { key:string;notice:AlertNotice;fingerprint:string;version:number;observedAt?:string }
 export interface Membership {userId:string;key:string;lastVersion:number;initial?:boolean}
-export interface AlertCommit {observations:Observation[];events:{userId:string;key:string;version:number;kind:AlertEventKind;message:string;changeFields:string[]}[];existing:{userId:string;key:string;version:number;initial?:boolean}[]}
+export interface AlertCommit {observations:Observation[];events:{userId:string;key:string;version:number;kind:AlertEventKind;message:string;changeFields:string[]}[];existing:{userId:string;key:string;version:number;initial?:boolean}[];matchingKeys?:string[]}
 export function planAlertChanges(notices:AlertNotice[],previous:Observation[],memberships:Membership[],rules:WorkerRule[],now=Date.now(),batchHeads:AlertNotice[]=notices):AlertCommit {
   const plan:AlertCommit={observations:[],events:[],existing:[]};
+  const matchingKeys=new Set<string>();
   const facts=new Map(previous.map(item=>[item.key,item]));
   const seen=new Map(memberships.map(item=>[`${item.userId}:${item.key}`,item]));
   const ordered=[...notices].sort((a,b)=>alertNoticeKey(a).localeCompare(alertNoticeKey(b))||Number(a.revision)-Number(b.revision)||Date.parse(a.sourceUpdatedAt)-Date.parse(b.sourceUpdatedAt));
@@ -39,6 +40,7 @@ export function planAlertChanges(notices:AlertNotice[],previous:Observation[],me
       const comparison=matchAlarmNotice(notice,rule.settings,rule.profile,now);
       // The current head controls the entire revision batch, including earlier otherwise-active revisions.
       const matched=comparison.matched&&matchAlarmNotice(heads.get(key)!,rule.settings,rule.profile,now).matched;
+      if(matched) matchingKeys.add(key);
       if(!matched&&last===undefined) continue;
       // A retained dedup ledger is not a subscription to an old, now unrelated filter.
       // Compare the previous source facts too, so losing eligibility/cancellation is still reported.
@@ -65,5 +67,6 @@ export function planAlertChanges(notices:AlertNotice[],previous:Observation[],me
     }
     if(relevant) {const observation={key,notice,fingerprint,version};plan.observations.push(observation);facts.set(key,observation);}
   }
+  if(matchingKeys.size) plan.matchingKeys=[...matchingKeys];
   return plan;
 }
