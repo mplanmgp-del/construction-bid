@@ -130,4 +130,32 @@ do $$declare i integer;n jsonb;requested integer;scope text;old_lease uuid:='787
  assert (select procurement_source='private' from bid_active_catalog_private.verification where number='R26CODEAUTOPRIVATE'),'private upgrade uses its own official provider';
  assert bid_active_catalog_private.request_industry_verification(scope,now())=0,'unchanged upgrade requests observe the ten-minute cadence';
 end $$;
+
+-- A later list/history read can have more room for source keywords than the
+-- cached version whose complete participant facts have already been stored.
+-- The real personal-history commit must recompact after reusing those facts.
+delete from bid_active_catalog_private.verification;delete from bid_active_catalog_private.deadline_index;delete from bid_active_catalog_private.groups;
+update bid_active_catalog_private.runtime set lease_id=null,lease_until=null,retry_after_at=null;
+do $$declare full_notice jsonb;listing jsonb;cached jsonb;r jsonb;c jsonb;lease text;scope text;begin
+ full_notice:=pg_temp.industry_notice('R26CODELONGCACHE',jsonb_build_object('regionSearchText',repeat('서울 철거 현장 정보 ',1000),
+   'regionSearchDigest',repeat('b',64),'licenses',jsonb_build_array('구조물해체·비계공사업/4995','건축공사업/0002'),
+   'licenseCodes','["4995","0002"]'::jsonb));
+ cached:=bid_active_catalog_private.compact(full_notice);
+ assert octet_length(cached::text)<=4096,'the original enriched history fits the record limit';
+ r:=public.bid_active_catalog_worker(repeat('a',64),'publish_verified',jsonb_build_object('notices',jsonb_build_array(cached)));
+ assert r->>'ok'='true','the complete long-text notice is retained through the real RPC';
+ update bid_active_catalog_private.groups set next_check_at=now()-interval '1 minute' where number='R26CODELONGCACHE';
+ c:=public.bid_active_catalog_worker(repeat('a',64),'claim','{}');lease:=c->>'leaseId';scope:=c->>'scopeVersion';
+ assert exists(select 1 from jsonb_array_elements(c->'verify') x where x->>'number'='R26CODELONGCACHE'),'the exact retained long-text head receives a leased recheck';
+ listing:=bid_active_catalog_private.compact(full_notice||'{"licenses":[],"licenseCodes":[],"allowedRegions":[],"licenseComplete":false,"regionComplete":false}'::jsonb);
+ assert octet_length(listing::text)<=4096 and length(listing->>'regionSearchText')>length(cached->>'regionSearchText'),'a later list-only projection has a larger keyword prefix';
+ r:=public.bid_active_catalog_worker(repeat('a',64),'commit',jsonb_build_object('leaseId',lease,'scopeVersion',scope,'groups',jsonb_build_array(jsonb_build_array(listing))));
+ assert r->>'ok'='true','cached participant-code reuse must fit after recompact';
+ select latest into cached from bid_active_catalog_private.groups where number='R26CODELONGCACHE';
+ assert cached->'licenseCodes'='["0002","4995"]' and cached->>'licenseComplete'='true' and cached->>'regionComplete'='true','cached exact codes and participant facts survive long-text history reuse';
+ assert octet_length(cached::text)<=4096,'the retained result stays inside the original compact allowance';
+ assert cached->>'regionSearchDigest'=repeat('b',64) and bid_active_catalog_private.source_version(cached)=bid_active_catalog_private.source_version(bid_active_catalog_private.compact(full_notice)),'the stable region digest and source version are preserved';
+ assert (cached->>'sourceUpdatedAt')::timestamptz=(full_notice->>'sourceUpdatedAt')::timestamptz,'cached reuse does not edit the official source clock';
+ assert not has_function_privilege('anon','bid_active_catalog_private.worker_legacy(text,text,jsonb)','execute') and not has_function_privilege('authenticated','bid_active_catalog_private.worker_legacy(text,text,jsonb)','execute'),'the personal-history worker stays private';
+end $$;
 rollback;
