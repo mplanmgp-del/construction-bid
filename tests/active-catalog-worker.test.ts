@@ -71,6 +71,12 @@ describe('all-age active catalog collection', () => {
     expect(db.commit.mock.calls.flatMap(([, p]) => p.rejectedGroups ?? [])).toEqual([]);
   });
 
+  it.each([true,false])('requests the ten-minute refresh only for a head matching current rules: %s', async matching => {
+    const db = store([], [{ type: '공사', number: 'R26BK01359594', tracked: true }], matching ? [rule()] : []);
+    expect(await runActiveCatalogWorker(db, { provider: repairProvider(), now })).toMatchObject({ ok: true, groups: 1 });
+    expect(db.commit.mock.calls.find(([, p]) => p.groups?.length)?.[1]).toMatchObject({ refreshMatching: matching });
+  });
+
   it('acknowledges the same refreshed full revision history that passed public reconciliation', async () => {
     const db = store([], [{ type: '공사', number: 'R26BK01359594', tracked: true }]);
     const head = row({ bidNtceOrd: '001' });

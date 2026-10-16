@@ -303,7 +303,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
       searchGroups++;
       const matched = potentialRules(checked, rules, now).some(rule => matchAlarmNotice(checked, rule.settings, rule.profile, now).matched);
       if (matched || identity.tracked) {
-        await commit({ scopeVersion: claim.scopeVersion, groups: [all] });
+        await commit({ scopeVersion: claim.scopeVersion, groups: [all], refreshMatching: matched });
         groups++; versions += all.length;
       } else groupPayload.rejectedGroups!.push({ type: identity.type, number: identity.number });
     } catch (error) {

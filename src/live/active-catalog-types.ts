@@ -36,6 +36,8 @@ export interface ActiveCatalogClaim {
 }
 export interface ActiveCatalogCommit {
   scopeVersion: string;
+  /** A single verified head matched the current live rules in the server matcher. */
+  refreshMatching?: boolean;
   sources?: { id: string; page: number; totalCount: number; receivedCount: number;
     /** Every current raw number:revision, including nonfocus titles, until its source completes. */
     rawIdentities?: string[];
