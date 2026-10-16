@@ -48,13 +48,17 @@ do $$declare definition text;anchor text;replacement text;begin
        and nullif(g.latest->>'deadline','')::timestamptz<(last_day+1)::timestamp at time zone 'Asia/Seoul'$a$;
   replacement:=$a$     select d.type,d.number from bid_active_catalog_private.deadline_index d
      union select g.type,g.number from bid_active_catalog_private.groups g$a$;
-  -- The production SQL editor retained one space per indented line. Accept
-  -- only that exact alternate spelling; never normalize the function body.
+  -- Windows SQL editor models also give multiline literals CRLF. Normalize
+  -- both operands, not only the function definition read from PostgreSQL.
+  anchor:=replace(anchor,E'\r\n',E'\n');replacement:=replace(replacement,E'\r\n',E'\n');
+  -- Retain compatibility with an exactly one-space-indented anchor spelling;
+  -- the raw production definition keeps its normal indentation unchanged.
   if position(anchor in definition)=0 then anchor:=regexp_replace(anchor,E'^[\t ]+',' ','gn');end if;
   if position(anchor in definition)=0 then raise exception 'Audited alarm candidate range changed';end if;
   definition:=replace(definition,anchor,replacement);
   anchor:=$a$         and (nullif(latest->>'deadline','')::timestamptz at time zone 'Asia/Seoul')::date between first_day and last_day
 $a$;
+  anchor:=replace(anchor,E'\r\n',E'\n');
   if position(anchor in definition)=0 then anchor:=regexp_replace(anchor,E'^[\t ]+',' ','gn');end if;
   if position(anchor in definition)=0 then raise exception 'Audited inactive alarm range changed';end if;
   execute replace(definition,anchor,'');
@@ -70,6 +74,7 @@ $a$;
    if p_payload?'expectedSourceVersion' and (jsonb_typeof(p_payload->'expectedSourceVersion') is distinct from 'string'
      or coalesce(p_payload->>'expectedSourceVersion','')!~'^[0-9a-f]{64}$' or jsonb_array_length(p_payload->'groups')<>1) then
      raise exception using errcode='22023',message='Invalid source reconciliation precondition';end if;$a$;
+  anchor:=replace(anchor,E'\r\n',E'\n');replacement:=replace(replacement,E'\r\n',E'\n');
   if position(anchor in definition)=0 then raise exception 'Audited publication batch validation changed';end if;
   definition:=replace(definition,anchor,replacement);
   anchor:=$a$if revision_value<candidate.revision or revision_value=candidate.revision and source_time<candidate.source_updated_at then raise exception 'Stale shared history';end if;$a$;
@@ -78,6 +83,7 @@ $a$;
          raise exception using errcode='PBC01',message='SHARED_SOURCE_CHANGED',
            detail=bid_active_catalog_private.publication_conflict(head,indexed.notice,indexed.source_version,candidate.revision,candidate.source_updated_at)::text;
        end if;$a$;
+  anchor:=replace(anchor,E'\r\n',E'\n');replacement:=replace(replacement,E'\r\n',E'\n');
   if position(anchor in definition)=0 then raise exception 'Audited stale queued history guard changed';end if;
   definition:=replace(definition,anchor,replacement);
   anchor:=$a$if found and (revision_value<indexed.revision or revision_value=indexed.revision and source_time<indexed.source_updated_at
@@ -101,6 +107,7 @@ $a$;
            raise exception using errcode='PBC01',message='SHARED_SOURCE_CHANGED',
              detail=bid_active_catalog_private.publication_conflict(head,indexed.notice,indexed.source_version)::text;
        end if;$a$;
+  anchor:=replace(anchor,E'\r\n',E'\n');replacement:=replace(replacement,E'\r\n',E'\n');
   if position(anchor in definition)=0 then anchor:=regexp_replace(anchor,E'^[\t ]+',' ','gn');end if;
   if position(anchor in definition)=0 then raise exception 'Audited stale public source guard changed';end if;
   definition:=replace(definition,anchor,replacement);
@@ -108,6 +115,7 @@ $a$;
      update bid_active_catalog_private.runtime set storage_blocked=true where singleton;return jsonb_build_object('ok',false,'storageFull',true);
    end;
  else$a$;
+  anchor:=replace(anchor,E'\r\n',E'\n');replacement:=replace(replacement,E'\r\n',E'\n');
   replacement:=$a$   exception when sqlstate 'PBC01' then
      get stacked diagnostics conflict_detail=pg_exception_detail;
      -- Raising inside the publication subtransaction rolls back any preceding
