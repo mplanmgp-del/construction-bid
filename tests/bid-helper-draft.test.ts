@@ -43,6 +43,17 @@ describe('bid helper draft restoration', () => {
     expect(restored.fields.aValue).toBe('');
   });
 
+  it('fills the applicable A amount and preserves edits only while the disclosed A amount is unchanged', () => {
+    const source = { ...seed, aValue: 689_664 };
+    expect(restoreBidHelperState(source, null).fields.aValue).toBe('689,664');
+    const raw = serializeBidHelperState({ fields: edited, seed: source });
+    expect(restoreBidHelperState(source, raw).fields.aValue).toBe('123,456');
+    const refreshed = restoreBidHelperState({ ...source, aValue: 700_000 }, raw);
+    expect(refreshed.fields.aValue).toBe('700,000');
+    expect(refreshed.fields.noticeRate).toBe('100');
+    expect(restoreBidHelperState(source, encoded()).fields.aValue).toBe('689,664');
+  });
+
   it('restores the latest draft together with its notice metadata when no explicit seed is supplied', () => {
     const restored = restoreBidHelperState(undefined, encoded());
     expect(restored.fields).toEqual(edited);
@@ -63,13 +74,13 @@ describe('bid helper draft restoration', () => {
   });
 
   it('rejects an invalid stored seed without restoring misattributed edited fields', () => {
-    for (const invalidSeed of [{ ...seed, aValue: 100 }, { ...seed, revision: '../../' }, { ...seed, baseAmount: -1 }, null]) {
+    for (const invalidSeed of [{ ...seed, aValue: -1 }, { ...seed, aValue: '100' }, { ...seed, aValue: 100, aApplied: false }, { ...seed, revision: '../../' }, { ...seed, baseAmount: -1 }, null]) {
       const restored = restoreBidHelperState(undefined, encoded(edited, invalidSeed));
       expect(restored.fields.aValue).toBe('');
       expect(restored.fields.baseAmount).toBe('');
       expect(restored.seed).toBeUndefined();
     }
-    expect(restoreBidHelperState(seed, encoded(edited, { ...seed, aValue: 100 })).fields.aValue).toBe('');
+    expect(restoreBidHelperState(seed, encoded(edited, { ...seed, aValue: -1 })).fields.aValue).toBe('');
   });
 
   it('falls back safely on malformed, oversized, legacy, or nonexact field data', () => {

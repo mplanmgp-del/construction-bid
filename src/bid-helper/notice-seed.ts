@@ -7,6 +7,7 @@ export interface BidHelperSeed {
   number: string;
   revision: string;
   baseAmount?: number;
+  aValue?: number;
   lowerRate?: number;
   netCost?: number;
   rangeMin?: number;
@@ -17,7 +18,7 @@ export interface BidHelperSeed {
 
 const TRANSFER_KEY = 'construction-bid.bid-helper.pending.v1';
 type SeedStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-const seedKeys = new Set(['noticeId', 'title', 'number', 'revision', 'baseAmount', 'lowerRate', 'netCost', 'rangeMin', 'rangeMax', 'aApplied', 'notes']);
+const seedKeys = new Set(['noticeId', 'title', 'number', 'revision', 'baseAmount', 'aValue', 'lowerRate', 'netCost', 'rangeMin', 'rangeMax', 'aApplied', 'notes']);
 
 function field(section: G2bDetailSection | undefined, key: string): string | null {
   const matches = section?.fields.filter(item => item.key === key) ?? [];
@@ -72,10 +73,16 @@ export function buildBidHelperSeed(bid: BidNotice, detail?: G2bNoticeDetail | nu
     }
     const applied = field(base, 'bidPrceCalclAYn');
     if (applied === '예' || applied === '아니오') seed.aApplied = applied === '예';
+    if (seed.aApplied === true) {
+      const aValue = amount(field(base, 'insuranceManagementSum'));
+      if (aValue !== undefined) seed.aValue = aValue;
+    }
   }
   if (seed.baseAmount === undefined) seed.notes.push('기초금액을 확인해 직접 입력하세요.');
   if (seed.lowerRate === undefined) seed.notes.push('적용할 낙찰 하한율을 확인해 직접 입력하세요.');
-  seed.notes.push('A값 적용 시 공고 원문에서 확인한 금액을 직접 입력하세요.');
+  if (seed.aValue !== undefined) seed.notes.push('입찰가격 A값 적용이 ‘예’인 공고로, 보험료·관리비 합계를 A값으로 가져왔습니다.');
+  else if (seed.aApplied === false) seed.notes.push('입찰가격 A값 미적용 공고로, A값을 0원으로 입력했습니다.');
+  else seed.notes.push('A값 적용 여부와 금액을 확인해 직접 입력하세요.');
   return seed;
 }
 
@@ -88,10 +95,11 @@ export function isBidHelperSeed(value: unknown): value is BidHelperSeed {
     || typeof row.number !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(row.number)
     || typeof row.revision !== 'string' || !/^\d{3}$/.test(row.revision)
     || !Array.isArray(row.notes) || row.notes.length > 20 || !row.notes.every(item => text(item, 500))) return false;
-  for (const key of ['baseAmount', 'netCost'] as const) {
+  for (const key of ['baseAmount', 'aValue', 'netCost'] as const) {
     const item = row[key];
     if (item !== undefined && (typeof item !== 'number' || !Number.isSafeInteger(item) || item < 0)) return false;
   }
+  if (row.aValue !== undefined && row.aApplied !== true) return false;
   for (const key of ['lowerRate', 'rangeMin', 'rangeMax'] as const) {
     const item = row[key];
     if (item !== undefined && (typeof item !== 'number' || !Number.isFinite(item) || item < (key === 'lowerRate' ? Number.MIN_VALUE : -100) || item > 100)) return false;

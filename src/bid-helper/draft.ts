@@ -23,7 +23,7 @@ function seededFields(seed?: BidHelperSeed): BidHelperFields {
     baseAmount: seed.baseAmount === undefined ? '' : seed.baseAmount.toLocaleString('ko-KR'),
     lowerRate: seed.lowerRate?.toString() ?? '',
     targetRate: seed.lowerRate?.toString() ?? '',
-    aValue: seed.aApplied === false ? '0' : '',
+    aValue: seed.aApplied === false ? '0' : seed.aApplied === true && seed.aValue !== undefined ? seed.aValue.toLocaleString('ko-KR') : '',
     rangeMin: seed.rangeMin?.toString() ?? '-3',
     rangeMax: seed.rangeMax?.toString() ?? '3',
   };
@@ -32,7 +32,7 @@ function seededFields(seed?: BidHelperSeed): BidHelperFields {
 function noticeFingerprint(seed: BidHelperSeed): string {
   return JSON.stringify([
     seed.noticeId, seed.number, seed.revision,
-    seed.baseAmount, seed.lowerRate, seed.netCost, seed.rangeMin, seed.rangeMax, seed.aApplied,
+    seed.baseAmount, seed.aValue, seed.lowerRate, seed.netCost, seed.rangeMin, seed.rangeMax, seed.aApplied,
   ]);
 }
 
