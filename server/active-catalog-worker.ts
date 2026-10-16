@@ -249,7 +249,7 @@ export async function runActiveCatalogWorker(store: ActiveCatalogStore, options:
     try {
       let all = await completeHistory(identity);
       const latest = all.at(-1)!;
-      let checked = reuseParticipantConditions(latest, identity.notice);
+      let checked = identity.refreshMatching ? latest : reuseParticipantConditions(latest, identity.notice);
       if (isOngoingNotice(checked, now) && noticeTimestamp(checked.deadline) <= now && noticeTimestamp(checked.openingAt) > now) {
         const completion = await openingSummary({ number: checked.number, revision: checked.revision, type: checked.type });
         if (!(completion.openingComplete ?? completion.complete)) {

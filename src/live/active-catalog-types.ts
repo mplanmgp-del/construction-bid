@@ -7,6 +7,8 @@ export interface ActiveCatalogIdentity {
   /** Minimum source facts that a later full-history response must contain. */
   revision?: string; sourceUpdatedAt?: string;
   notice?: AlertNotice;
+  /** Current-rule demand: refresh participant facts even when source time is unchanged. */
+  refreshMatching?: boolean;
 }
 export interface ActiveCatalogSourceJob {
   id: string; type: G2bBusinessType; kind: 'history' | 'current' | 'registered' | 'modified';

@@ -77,6 +77,18 @@ describe('all-age active catalog collection', () => {
     expect(db.commit.mock.calls.find(([, p]) => p.groups?.length)?.[1]).toMatchObject({ refreshMatching: matching });
   });
 
+  it.each([true,false])('refreshes exact participant facts only for a prioritized matching refresh: %s', async refreshMatching => {
+    const cached = { ...compactCatalogNotice({ ...mapNotice(row(), '공사', now), sourceUpdatedAt: '1995-10-02T00:00:00+09:00', regionComplete: true, licenseComplete: true }), allowedRegions: ['서울특별시'], licenses: ['기존 면허'] };
+    const db = store([], [{ type: '공사', number: 'R26BK01359594', tracked: true, notice: cached, refreshMatching }]);
+    const provider = vi.fn<ActiveCatalogProvider>(async operation => operation === 'getBidPblancListInfoPrtcptPsblRgn'
+      ? { items: [{ bidNtceNo: cached.number, bidNtceOrd: '000', prtcptPsblRgnNm: '경기도' }], totalCount: 1 }
+      : operation === 'getBidPblancListInfoLicenseLimit'
+        ? { items: [{ bidNtceNo: cached.number, bidNtceOrd: '000', lcnsLmtNm: '갱신된 면허' }], totalCount: 1 }
+        : { items: [row()], totalCount: 1 });
+    expect(await runActiveCatalogWorker(db, { provider, now })).toMatchObject({ ok: true, requests: refreshMatching ? 3 : 1 });
+    expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({ allowedRegions: [refreshMatching ? '경기도' : '서울특별시'], licenses: [refreshMatching ? '갱신된 면허' : '기존 면허'] });
+  });
+
   it('acknowledges the same refreshed full revision history that passed public reconciliation', async () => {
     const db = store([], [{ type: '공사', number: 'R26BK01359594', tracked: true }]);
     const head = row({ bidNtceOrd: '001' });
