@@ -186,37 +186,50 @@ export function calculateScenario(input: ScenarioInput): ScenarioResult {
   };
 }
 
-/** Spread twelve distinct assumptions across the range while retaining all three anchors. */
-export function buildComparisonRates(input: Pick<ScenarioInput, 'rangeMin' | 'rangeMax' | 'noticeRate'>): number[] {
+export const RATE_CANDIDATE_COUNT = 10_000;
+export type ScenarioDraw = { candidateIndex: number; noticeRate: number; result: ScenarioResult };
+
+/** Equally spaced inclusive candidates, rounded once to the supported eight-decimal rate precision. */
+export function buildDrawRates(input: Pick<ScenarioInput, 'rangeMin' | 'rangeMax'>): number[] {
   if (!Number.isFinite(input.rangeMin) || !Number.isFinite(input.rangeMax) || input.rangeMin <= -100 || input.rangeMax < input.rangeMin) {
     throw new Error('예가 변동 범위를 확인하세요.');
   }
-  if (!Number.isFinite(input.noticeRate) || input.noticeRate <= 0) throw new Error('공고 사정률을 확인하세요.');
-  const lower = add(HUNDRED, decimal(input.rangeMin));
-  const upper = add(HUNDRED, decimal(input.rangeMax));
-  const current = decimal(input.noticeRate);
-  if (compare(current, lower) < 0 || compare(current, upper) > 0) throw new Error('공고 사정률이 예가 변동 범위를 벗어났습니다.');
-  const rates = new Set([asNumber(lower), input.noticeRate, asNumber(upper)]);
-  while (rates.size < 12) {
-    const sorted = [...rates].sort((left, right) => left - right);
-    const gaps = sorted.slice(1).map((right, index) => ({ left: sorted[index], right }));
-    gaps.sort((left, right) => (right.right - right.left) - (left.right - left.left));
-    let added = false;
-    for (const gap of gaps) {
-      const midpoint = divide(add(decimal(gap.left), decimal(gap.right)), fraction(2n));
-      for (const digits of [6, 8]) {
-        const scale = 10n ** BigInt(digits);
-        const scaled = multiply(midpoint, fraction(scale));
-        const rounded = (2n * scaled.numerator + scaled.denominator) / (2n * scaled.denominator);
-        const candidate = asNumber(fraction(rounded, scale));
-        if (candidate > gap.left && candidate < gap.right && !rates.has(candidate)) {
-          rates.add(candidate); added = true; break;
-        }
-      }
-      if (added) break;
-    }
-    // An equal or very narrow range cannot provide twelve different rates at input precision.
-    if (!added) break;
-  }
-  return [...rates].sort((left, right) => left - right);
+  const scale = 100_000_000n;
+  const lower = multiply(add(HUNDRED, decimal(input.rangeMin)), fraction(scale));
+  const upper = multiply(add(HUNDRED, decimal(input.rangeMax)), fraction(scale));
+  if (lower.denominator !== 1n || upper.denominator !== 1n) throw new Error('예가 변동폭은 소수 8자리까지 입력하세요.');
+  const width = upper.numerator - lower.numerator;
+  const intervals = BigInt(RATE_CANDIDATE_COUNT - 1);
+  if (width < intervals) throw new Error('서로 다른 후보 10,000개를 만들 수 있도록 예가 변동폭을 넓혀 주세요.');
+  const rates = Array.from({ length: RATE_CANDIDATE_COUNT }, (_, index) => {
+    const offset = (2n * width * BigInt(index) + intervals) / (2n * intervals);
+    const exact = fraction(lower.numerator + offset, scale);
+    const rate = asNumber(exact);
+    if (compare(decimal(rate), exact) !== 0) throw new Error('예가 변동폭이 소수 8자리 사정률로 처리할 수 있는 범위를 벗어났습니다.');
+    return rate;
+  });
+  if (new Set(rates).size !== RATE_CANDIDATE_COUNT) throw new Error('서로 다른 후보 10,000개를 만들 수 있도록 예가 변동폭을 확인하세요.');
+  return rates;
+}
+
+function secureRandomUint32(): number {
+  if (!globalThis.crypto?.getRandomValues) throw new Error('이 브라우저에서 무작위 추첨을 사용할 수 없습니다.');
+  return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
+}
+
+/** Draw only after validating the complete candidate range. Modulo rejection keeps each candidate equiprobable. */
+export function drawScenario(input: Omit<ScenarioInput, 'noticeRate'>, randomUint32: () => number = secureRandomUint32): ScenarioDraw {
+  const rates = buildDrawRates(input);
+  calculateScenario({ ...input, noticeRate: rates[0] });
+  calculateScenario({ ...input, noticeRate: rates[rates.length - 1] });
+  const wordCount = 0x1_0000_0000;
+  const limit = Math.floor(wordCount / RATE_CANDIDATE_COUNT) * RATE_CANDIDATE_COUNT;
+  let word: number;
+  do {
+    word = randomUint32();
+    if (!Number.isInteger(word) || word < 0 || word >= wordCount) throw new Error('무작위 추첨 값을 읽지 못했습니다. 다시 계산해 주세요.');
+  } while (word >= limit);
+  const candidateIndex = word % RATE_CANDIDATE_COUNT;
+  const noticeRate = rates[candidateIndex];
+  return { candidateIndex, noticeRate, result: calculateScenario({ ...input, noticeRate }) };
 }
