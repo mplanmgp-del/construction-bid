@@ -7,6 +7,7 @@ import { createG2bClient, koreanTimestamp, mapNotice } from './g2b.ts';
 import { mapPrivateNotice, matchesPrivateNotice, PRIVATE_NOTICE_DIVISIONS, privateNoticeOperation } from './g2b-private.ts';
 import { compactCatalogNotice, potentialCatalogRules } from './active-catalog-worker.ts';
 import type { G2bResultSummary } from '../src/g2b-types.ts';
+import { noticeLicenseCodes } from './notice-license-codes.ts';
 
 export interface CatalogReader {
   page(query: ActiveCatalogPageQuery): Promise<ActiveCatalogPage>;
@@ -67,7 +68,7 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
         for(const rule of potential(notice)) {
           const filter=rule.settings.filter;
           region ||= !notice.regionComplete&&(filter.useCompanyRegion||filter.regions.length>0);
-          license ||= !notice.licenseComplete&&(filter.licenses.length>0||filter.useCompanyLicenses===true);
+          license ||= (!notice.licenseComplete||!Array.isArray(notice.licenseCodes))&&(filter.licenses.length>0||filter.useCompanyLicenses===true);
         }
         const needed=Number(region)+Number(license);
         const waiting=notice.procurementSource!=='private'&&potential(notice).length>0&&noticeTimestamp(notice.deadline)<=now&&noticeTimestamp(notice.openingAt)>now;
@@ -90,7 +91,7 @@ export async function scanCatalogForAlerts(catalog: CatalogReader, provider: Ale
           };
           const regionNames=regions?values(regions,'prtcptPsblRgnNm'):[];
           notice = { ...notice, ...(regions ? { allowedRegions: !regionNames.length&&notice.procurementSource==='private'?null:regionNames, regionComplete: true } : {}),
-            ...(licenses ? { licenses: values(licenses, 'lcnsLmtNm'), licenseComplete: true } : {}) };
+            ...(licenses ? { licenses: values(licenses, 'lcnsLmtNm'), licenseCodes: noticeLicenseCodes(licenses), licenseComplete: true } : {}) };
           changed=true;
         }
         if(waiting&&rules.some(rule=>matchAlarmNotice(notice,rule.settings,rule.profile,now).matched)) {

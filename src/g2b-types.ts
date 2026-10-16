@@ -49,6 +49,7 @@ export interface G2bNoticeDetail {
   revision: string;
   allowedRegions: string[] | null;
   licenses: string[];
+  licenseCodes?: string[];
   regionComplete: boolean;
   licenseComplete: boolean;
   fetchedAt: string;

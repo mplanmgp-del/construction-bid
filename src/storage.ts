@@ -13,7 +13,7 @@ export interface PrototypeState {
 interface StorageLike { getItem(key: string): string | null; setItem(key: string, value: string): void; }
 
 function initialState(defaultProfiles: CompanyProfile[]): PrototypeState {
-  const profiles = defaultProfiles.map(profile => ({ ...profile, licenses: [...profile.licenses] }));
+  const profiles = defaultProfiles.map(profile => ({ ...profile, licenses: [...profile.licenses], ...(profile.licenseCodes === undefined ? {} : { licenseCodes: [...profile.licenseCodes] }) }));
   return {
     version: 1, activeProfileId: profiles[0].id, profiles,
     bookmarks: Object.fromEntries(profiles.map(profile => [profile.id, []])),
@@ -26,6 +26,7 @@ function isProfile(value: unknown): value is CompanyProfile {
   const profile = value as Record<string, unknown>;
   return ['id', 'companyName', 'province', 'district', 'address', 'contactName', 'email'].every(key => typeof profile[key] === 'string')
     && isOptionalBusinessNumber(profile.businessNumber)
+    && (profile.licenseCodes === undefined || Array.isArray(profile.licenseCodes) && profile.licenseCodes.length<=100 && profile.licenseCodes.every(code=>typeof code==='string'&&/^\d{4}$/.test(code)))
     && Array.isArray(profile.licenses) && profile.licenses.every(license => typeof license === 'string');
 }
 
@@ -37,7 +38,7 @@ export function loadPrototypeState(defaultProfiles: CompanyProfile[], storage?: 
     const saved = JSON.parse(raw);
     if (saved.version !== 1 || !Array.isArray(saved.profiles) || !saved.profiles.every(isProfile)) throw new Error('invalid state');
     const profiles = defaultProfiles.map(profile => saved.profiles.find((item: CompanyProfile) => item.id === profile.id) ?? profile)
-      .map(profile => ({ ...profile, licenses: [...profile.licenses],
+      .map(profile => ({ ...profile, licenses: [...profile.licenses], ...(profile.licenseCodes === undefined ? {} : { licenseCodes: [...profile.licenseCodes] }),
         ...(profile.businessNumber === undefined ? {} : { businessNumber: normalizeBusinessNumber(profile.businessNumber)! }),
         ...(profile.quickLinks === undefined ? {} : { quickLinks: readQuickLinks(profile.quickLinks) }),
       }));
@@ -59,7 +60,7 @@ export function loadPrototypeState(defaultProfiles: CompanyProfile[], storage?: 
 
 export function savePrototypeState(state: PrototypeState, storage?: StorageLike): boolean {
   try {
-    if (!state.profiles.every(profile => isOptionalBusinessNumber(profile.businessNumber))) return false;
+    if (!state.profiles.every(isProfile)) return false;
     const profiles = state.profiles.map(profile => ({ ...profile,
       ...(profile.businessNumber === undefined ? {} : { businessNumber: normalizeBusinessNumber(profile.businessNumber)! }),
       ...(profile.quickLinks === undefined ? {} : { quickLinks: readQuickLinks(profile.quickLinks) }),

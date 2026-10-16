@@ -3,6 +3,7 @@ import { assessCompanyRegionKeywords, assessKeywordRegions } from '../region-key
 import { canonicalProvince } from '../search-filters.ts';
 import { DEFAULT_ALERT_SETTINGS, type AlertNotice, type AlertSettings, type AlertMatch, type AlertRegionBasis } from './types.ts';
 import { isAlarmEligible, isOngoingNotice, noticeTimestamp } from '../notice-deadline-window.ts';
+import { assessIndustryCodes, companyIndustrySelections, noticeIndustryCodes } from '../industry-codes.ts';
 
 const clean = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ');
 const canonical = (value: string) => clean(value).toLowerCase();
@@ -39,7 +40,10 @@ function content(notice: AlertNotice): Record<string, unknown> {
     '공고 내용':clean(notice.description), '참가조건':sorted(notice.requirements),
   };
 }
-export function noticeContentKey(notice: AlertNotice): string { return JSON.stringify(content(notice)); }
+export function noticeContentKey(notice: AlertNotice): string {
+  const codes=noticeIndustryCodes(notice);
+  return JSON.stringify({ ...content(notice), ...(codes.length?{'요구 업종코드':codes}:{}) });
+}
 const omittedFields=['첨부서류','공고 내용','참가조건'];
 export function noticeOmittedContentKey(notice:AlertNotice):string {
   const values=content(notice);
@@ -51,6 +55,11 @@ export function meaningfulChanges(before: AlertNotice, after: AlertNotice): stri
   const compact=hasOmittedContentDigest(before)||hasOmittedContentDigest(after);
   const fields=Object.keys(previous).filter(key=>!(compact&&(omittedFields.includes(key)||key==='참가 가능 지역'&&(!before.regionComplete||!after.regionComplete)||key==='요구 면허'&&(!before.licenseComplete||!after.licenseComplete)))
     &&JSON.stringify(previous[key]) !== JSON.stringify(next[key]));
+  // First-time enrichment is not a procurement change. Compare codes only when
+  // both observations contain a known code and complete condition results.
+  const beforeCodes=noticeIndustryCodes(before), afterCodes=noticeIndustryCodes(after);
+  if(beforeCodes.length&&afterCodes.length&&before.licenseComplete&&after.licenseComplete
+    &&JSON.stringify(beforeCodes)!==JSON.stringify(afterCodes))fields.push('요구 업종코드');
   return Number(after.revision)>Number(before.revision)?['공고 차수',...fields]:fields;
 }
 export function alertNoticeKey(notice: Pick<AlertNotice,'type'|'number'>): string { return `g2b:${notice.type}:${notice.number}`; }
@@ -135,18 +144,22 @@ export function matchAlertNotice(notice: AlertNotice, settings: AlertSettings, p
     }
   }
   if(filter.licenses.length) {
-    if(!notice.licenseComplete||!notice.licenses.length)missing.push('면허조건 확인 필요');
-    else if(!filter.licenses.some(wanted=>notice.licenses.some(item=>license(item)===license(wanted))))return no();
-    else reasons.push('관심 면허 일치');
+    const assessment=assessIndustryCodes(notice,filter.licenses);
+    if(assessment.status==='excluded')return no();
+    if(assessment.status==='review')missing.push(assessment.reason);
+    else reasons.push('관심 업종코드 일치');
   }
   if(filter.useCompanyLicenses) {
-    const held=profile?.licenses?.filter(provided)??[];
-    if(!held.length)missing.push('내 업체 보유 면허 확인 필요');
-    else if(!notice.licenseComplete||!notice.licenses.length)missing.push('공고 면허조건 확인 필요');
-    else if(!held.some(wanted=>notice.licenses.some(item=>license(item)===license(wanted))))return no();
+    const held=profile?companyIndustrySelections(profile):[];
+    if(!held.length)missing.push('내 업체 보유 업종코드 확인 필요');
     else {
-      reasons.push('내 업체 보유 면허 관련 공고');
-      if(sorted(notice.licenses,license).length>1)missing.push('복수 면허 조합 확인 필요');
+      const assessment=assessIndustryCodes(notice,held);
+      if(assessment.status==='excluded')return no();
+      if(assessment.status==='review')missing.push(assessment.reason);
+      else {
+        reasons.push('내 업체 보유 업종코드 일치');
+        if(noticeIndustryCodes(notice).length>1)missing.push('복수 면허 조합 확인 필요');
+      }
     }
   }
   if(filter.agencies?.length) {

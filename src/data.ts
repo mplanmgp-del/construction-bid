@@ -1,4 +1,5 @@
 import type { BidNotice, Category, CompanyProfile, SearchFilters } from './types.ts';
+import { resolveIndustrySelections } from './industry-codes.ts';
 
 export const DEMO_TODAY = '2026-10-12';
 
@@ -90,7 +91,7 @@ function example(index: number, input: ExampleInput): BidNotice {
     type: category === '폐기물' || category === '조사·설계·감리' ? '용역' : '공사', category,
     contractMethod: '제한경쟁', status: '접수중', postedAt: `2026-10-${String(12 - ((index - 1) % 6)).padStart(2, '0')}T09:00:00+09:00`,
     openingAt: `${day}T16:00:00+09:00`, registrationDeadline: `${registrationDay}T18:00:00+09:00`,
-    licenses: [...licenses], duration: '착공일로부터 45일',
+    licenses: [...licenses], licenseCodes: resolveIndustrySelections(licenses).codes, duration: '착공일로부터 45일',
     description: `디자인 테스트를 위한 가상 공고입니다. ${input.title}에 필요한 작업 범위, 현장 안전계획 및 일정 조율을 확인하는 예시이며 실제 공공입찰 자료가 아닙니다.`,
     requirements: [
       '등록된 본점 소재지가 참가 가능 지역에 해당하는지 공고 원문 기준으로 확인해야 합니다.',

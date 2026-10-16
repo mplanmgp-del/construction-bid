@@ -7,6 +7,7 @@ import type { AlertsAccess } from './useAlerts';
 import { BrowserPushControls } from './BrowserPushControls';
 import { BookmarkButton } from '../components/BookmarkButton';
 import { matchAlarmNotice, normalizeAlertSettings } from './domain';
+import { INDUSTRY_CODES, resolveIndustrySelections } from '../industry-codes';
 
 interface AlertForm {
   enabled: boolean; notifyChanges: boolean; keywords: string; excludeKeywords: string;
@@ -62,6 +63,7 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
       regions: splitValues(form.regions), licenses: splitValues(form.licenses), minAmount: form.minAmount.trim() ? Number(form.minAmount) : null, maxAmount: form.maxAmount.trim() ? Number(form.maxAmount) : null,
       includeUnknown: form.includeUnknown, useCompanyRegion: form.useCompanyRegion, regionBasis: form.regionBasis,
       agencies: splitValues(form.agencies), contractMethods: splitValues(form.contractMethods), minDaysUntilDeadline: form.minDaysUntilDeadline.trim() ? Number(form.minDaysUntilDeadline) : null, useCompanyLicenses: form.useCompanyLicenses };
+    if (resolveIndustrySelections(filter.licenses).unresolved.length) throw new Error('업종·면허는 목록의 업종명 또는 공식 4자리 업종코드로 입력해 주세요. 엔지니어링사업은 세부 업종코드가 필요합니다.');
     const normalized = normalizeAlertSettings({ ...settings, enabled: form.enabled, notifyChanges: form.notifyChanges, filter });
     return { ...normalized, enabled: form.enabled };
   }
@@ -130,14 +132,15 @@ export function AlertsPage({ alerts, signedIn, onLogin, profile = null, isAdmin 
             <details className="alerts-category-options"><summary>관심 분야 <span>{form.categories.length ? `${form.categories.length}개 선택` : '전체 분야'}</span></summary><div>{CATEGORIES.map(category => <label className="alerts-checkbox" key={category}><input type="checkbox" checked={form.categories.includes(category)} onChange={() => update('categories', form.categories.includes(category) ? form.categories.filter(value => value !== category) : [...form.categories, category])} />{category}</label>)}</div></details>
             <label className="alerts-field"><span>지역 <small>쉼표로 구분 · 비워두면 전체</small></span><input className="field" name="regions" value={form.regions} maxLength={1000} placeholder="서울특별시, 경기도 성남시" onChange={event => update('regions', event.target.value)} /></label>
             <p id="alerts-region-help" className="alerts-help">공고명·기관명·현장 주소·참가 지역·공고 내용 등 제공된 전체 정보에서 지역명 키워드를 찾습니다. 시·군·구 또는 읍·면·동을 입력하면 마지막 지역명으로 검색합니다. 실제 참가자격은 공고 원문을 확인해 주세요.</p>
-            <label className="alerts-field"><span>업종·면허 <small>쉼표로 구분 · 비워두면 전체</small></span><input className="field" name="licenses" value={form.licenses} maxLength={1000} placeholder="구조물해체·비계공사업" onChange={event => update('licenses', event.target.value)} /></label>
+            <label className="alerts-field"><span>업종·면허 <small>업종코드로 일치 · 쉼표로 구분</small></span><input className="field" name="licenses" list="alert-industry-codes" value={form.licenses} maxLength={1000} placeholder="구조물해체·비계공사업 (4995), 5652" aria-describedby="alerts-industry-code-help" onChange={event => update('licenses', event.target.value)} /><datalist id="alert-industry-codes">{INDUSTRY_CODES.map(item => <option key={item.code} value={`${item.name} (${item.code})`} />)}</datalist></label>
+            <p id="alerts-industry-code-help" className="alerts-help">공고의 공식 4자리 업종코드와 비교합니다. 목록에 없는 업종·엔지니어링 세부 업종은 코드를 입력하세요. 이름만 있고 코드를 확인할 수 없는 기존 조건은 미확인으로 표시됩니다. 비워두면 전체 업종입니다.</p>
             <label className="alerts-field"><span>발주·수요기관 <small>쉼표로 구분 · 기관명 일부 일치</small></span><input className="field" name="agencies" value={form.agencies} maxLength={1000} placeholder="성남시, 한국환경공단" onChange={event => update('agencies', event.target.value)} /></label>
             <label className="alerts-field"><span>계약방법 <small>쉼표로 구분 · 방법명 일치</small></span><input className="field" name="contractMethods" value={form.contractMethods} maxLength={1000} placeholder="제한경쟁, 일반경쟁, 수의계약" onChange={event => update('contractMethods', event.target.value)} /></label>
             <div className="alerts-field"><span>추정가격 범위</span><div className="alerts-amounts"><label><span className="sr-only">최소 추정가격</span><input className="field" type="number" name="minAmount" min="0" step="1" value={form.minAmount} placeholder="최소 금액" onChange={event => update('minAmount', event.target.value)} /></label><span>~</span><label><span className="sr-only">최대 추정가격</span><input className="field" type="number" name="maxAmount" min="0" step="1" value={form.maxAmount} placeholder="최대 금액" onChange={event => update('maxAmount', event.target.value)} /></label><span>원</span></div></div>
             <label className="alerts-field"><span>제출 마감까지 최소 남은 일수 <small>0~365일 · 비워두면 제한 없음</small></span><input className="field" type="number" name="minDaysUntilDeadline" min="0" max="365" step="1" value={form.minDaysUntilDeadline} placeholder="예: 3" onChange={event => update('minDaysUntilDeadline', event.target.value)} /></label>
             <label className="alerts-checkbox"><input type="checkbox" checked={form.useCompanyRegion} onChange={event => update('useCompanyRegion', event.target.checked)} /><span>내 업체 시·도 이름이 포함된 공고 찾기</span></label>
             <label className="alerts-checkbox"><input type="checkbox" name="useCompanyLicenses" checked={form.useCompanyLicenses} onChange={event => update('useCompanyLicenses', event.target.checked)} aria-describedby="alerts-license-help" /><span>등록한 내 업체 보유 면허와 관련 있는 공고 비교</span></label>
-            <p id="alerts-license-help" className="alerts-help">보유 면허 중 하나가 관련 있는 공고를 찾습니다. 복수 면허 조합 등 최종 참가 자격은 공고 원문을 확인해 주세요.</p>
+            <p id="alerts-license-help" className="alerts-help">내 업체 보유 면허의 공식 업종코드 중 하나가 같은 공고를 찾습니다. 복수 면허 조합 등 최종 참가 자격은 공고 원문을 확인해 주세요.</p>
             <label className="alerts-checkbox"><input type="checkbox" checked={form.includeUnknown} onChange={event => update('includeUnknown', event.target.checked)} /><span>선택 조건의 정보가 미확인인 공고도 포함</span></label>
             <label className="alerts-checkbox"><input type="checkbox" checked={form.notifyChanges} onChange={event => update('notifyChanges', event.target.checked)} /><span>진행중·마감 임박·예정 공고의 중요한 변경도 알림 받기</span></label>
             <p className="alerts-help">검색어·분야·지역·면허·기관·계약방법·가격·남은 일수 중 조건을 하나 이상 정해 주세요. 서로 다른 조건은 모두 충족해야 하며, 같은 입력란의 여러 값은 하나 이상 일치하면 됩니다. 최종 참가 자격과 제출 일정은 공고 원문을 확인해 주세요.</p>

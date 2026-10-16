@@ -21,7 +21,7 @@ function privateApi(privateRows = rows, totalCount = privateRows.length) {
     }
     const identity = { bidNtceNo: number, bidNtceOrd: '001' };
     if (url.pathname.endsWith('getPrvtBidPblancListInfoPrtcptPsblRgn')) return response([{ ...identity, prtcptPsblRgnNm: '경기도' }]);
-    if (url.pathname.endsWith('getPrvtBidPblancListInfoLicenseLimit')) return response([{ ...identity, lcnsLmtNm: '구조물해체·비계공사업' }]);
+    if (url.pathname.endsWith('getPrvtBidPblancListInfoLicenseLimit')) return response([{ ...identity, lcnsLmtNm: '구조물해체·비계공사업', permsnIndstrytyList: '[석면해체.제거업/5652]' }]);
     throw new Error('Unexpected operation');
   } });
   return { api, requests };
@@ -93,6 +93,8 @@ describe('private detail integration', () => {
     const result = await api.detail(number, '001', '공사');
     expect(result.notice).toMatchObject({ procurementSource: 'private', revision: '001', allowedRegions: ['경기도'], licenses: ['구조물해체·비계공사업'] });
     expect(result).toMatchObject({ allowedRegions: ['경기도'], licenses: ['구조물해체·비계공사업'], regionComplete: true, licenseComplete: true });
+    expect(result.licenseCodes).toEqual(['5652']);
+    expect(result.notice?.licenseCodes).toEqual(['5652']);
     expect(result.sourceUrl).toBe('https://www.g2b.go.kr/');
     expect(fields(result).find(field => field.key === 'bidMethdNm')?.value).toBe('직찰');
     expect(fields(result).find(field => field.key === 'refAmt')?.value).toBeNull();

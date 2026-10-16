@@ -7,7 +7,7 @@ create function pg_temp.speed_notice(p_number text,p_more jsonb default '{}'::js
  select jsonb_build_object('id','g2b:공사:'||p_number||':000','number',p_number,'revision','000','type','공사','title','학교 철거 해체 석면 건설폐기물 공사',
  'agency','공공 기관','demandAgency','교육청','category','철거·해체','province','서울특별시','district','강남구','postedAt',now()-interval '1 day',
  'sourceUpdatedAt',now()-interval '1 minute','biddingStartAt',now()-interval '2 days','deadline',now()+interval '7 days','openingAt',now()+interval '8 days',
- 'status','접수중','source','live','regionComplete',true,'licenseComplete',true,'licenses',jsonb_build_array('구조물해체·비계공사업'),'allowedRegions',jsonb_build_array('서울특별시'),
+ 'status','접수중','source','live','regionComplete',true,'licenseComplete',true,'licenses',jsonb_build_array('구조물해체·비계공사업'),'licenseCodes',jsonb_build_array('4995'),'allowedRegions',jsonb_build_array('서울특별시'),
  'contractMethod','제한경쟁','estimatedPrice',100000000,'sourceOmittedDigest',repeat('a',64))||p_more;
 $$;
 create function pg_temp.speed_seed(n jsonb) returns void language sql as $$
@@ -27,7 +27,7 @@ do $$declare i integer;n jsonb;q jsonb;old_page jsonb;fast_page jsonb;old_all js
    if i%2=0 then n:=n||jsonb_build_object('id','g2b:용역:'||(n->>'number')||':000','type','용역');end if;
    perform pg_temp.speed_seed(n);
  end loop;
- perform pg_temp.speed_seed(pg_temp.speed_notice('R26UNVERIFIED','{"regionComplete":false,"licenseComplete":false}'));
+ perform pg_temp.speed_seed(pg_temp.speed_notice('R26UNVERIFIED','{"regionComplete":false,"licenseComplete":false,"licenseCodes":[]}'));
  perform pg_temp.speed_seed(pg_temp.speed_notice('R26INVALIDATED'));
  insert into bid_active_catalog_private.deadline_invalidations(type,number,revision,source_updated_at) values('공사','R26INVALIDATED',1,now());
  perform pg_temp.speed_seed(pg_temp.speed_notice('R26OPENED','{"openingCompleted":true}'));

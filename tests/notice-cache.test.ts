@@ -100,6 +100,19 @@ it('bounds storage to six successful searches and keeps unrelated account prefer
   expect(storage.getItem('account-preferences')).toBe('keep');
 });
 
+it('round-trips exact industry codes and rejects malformed or numeric cached codes', () => {
+  const storage = store(), result = page(); result.items[0].licenseCodes = ['0002', '4995'];
+  writeNoticeCache(query, result, now, storage);
+  expect(readNoticeCache(query, now, storage)?.page.items[0].licenseCodes).toEqual(['0002', '4995']);
+  for (const bad of [['2'], [2], ['4995', 'incorrect']]) {
+    const entries = JSON.parse(storage.getItem(NOTICE_CACHE_KEY)!);
+    entries[0].page.items[0].licenseCodes = bad;
+    storage.setItem(NOTICE_CACHE_KEY, JSON.stringify(entries));
+    expect(readNoticeCache(query, now, storage)).toBeNull();
+    writeNoticeCache(query, result, now, storage);
+  }
+});
+
 it('restores only the last valid successful public query on reload', () => {
   const storage = store(); writeNoticeCache(query, page(), now, storage);
   writeNoticeCache({ ...query, keyword: '석면' }, page(), now + 1, storage);

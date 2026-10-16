@@ -10,7 +10,7 @@ const notice = (patch: Partial<AlertNotice> = {}): AlertNotice => ({
   contractMethod:'제한경쟁',status:'접수중',postedAt:'2026-10-14T09:00:00+09:00',deadline:'2026-10-20T10:00:00+09:00',
   openingAt:'2026-10-20T11:00:00+09:00',registrationDeadline:'2026-10-19T18:00:00+09:00',licenses:['석면해체·제거업'],
   duration:'원문 확인',description:'내용',requirements:[],documents:[],revised:false,source:'live',
-  sourceUpdatedAt:'2026-10-14T09:00:00+09:00',regionComplete:true,licenseComplete:true,...patch,
+  sourceUpdatedAt:'2026-10-14T09:00:00+09:00',regionComplete:true,licenseComplete:true,licenseCodes:['5652'],...patch,
 });
 const settings = () => structuredClone(DEFAULT_ALERT_SETTINGS);
 describe('personalized alert content and matching',()=>{
@@ -74,7 +74,7 @@ describe('personalized alert content and matching',()=>{
 });
 
 describe('expanded construction and service alert comparison',()=>{
-  const company: CompanyProfile={id:'company',companyName:'테스트',province:'경기도',district:'성남시',address:'',licenses:['석면해체ㆍ제거업/4999'],contactName:'',email:''};
+  const company: CompanyProfile={id:'company',companyName:'테스트',province:'경기도',district:'성남시',address:'',licenses:['석면해체ㆍ제거업/5652'],contactName:'',email:''};
   const rule=(filter:Record<string,unknown>={})=>{
     const s=settings();s.enabled=true;Object.assign(s.filter,filter);return s;
   };
@@ -100,16 +100,16 @@ describe('expanded construction and service alert comparison',()=>{
     expect(matchAlertNotice(partial,rule({regions:['서울'],regionBasis:'either',includeUnknown:false}),null,now)).toMatchObject({matched:true,needsReview:false});
     expect(matchAlertNotice(notice({type:'용역',allowedRegions:['전국']}),rule({regions:['제주'],regionBasis:'participation'}),null,now)).toMatchObject({matched:true,needsReview:false});
   });
-  it.each(['공사','용역'] as const)('compares company license overlap for %s with normalized industry names',type=>{
+  it.each(['공사','용역'] as const)('compares company license overlap for %s with exact official industry codes',type=>{
     const s=rule({useCompanyLicenses:true});
     expect(matchAlertNotice(notice({type}),s,company,now)).toMatchObject({matched:true,needsReview:false});
-    expect(matchAlertNotice(notice({type,licenses:['건축공사업']}),s,company,now).matched).toBe(false);
+    expect(matchAlertNotice(notice({type,licenses:['건축공사업'],licenseCodes:['0002']}),s,company,now).matched).toBe(false);
     expect(matchAlertNotice(notice({type}),s,{...company,licenses:[]},now)).toMatchObject({matched:true,needsReview:true});
-    expect(matchAlertNotice(notice({type,licenseComplete:false}),s,company,now)).toMatchObject({matched:true,needsReview:true});
+    expect(matchAlertNotice(notice({type,licenseComplete:false,licenseCodes:undefined}),s,company,now)).toMatchObject({matched:true,needsReview:true});
     expect(matchAlertNotice(notice({type}),s,null,now)).toMatchObject({matched:true,needsReview:true});
   });
   it('flags multiple required licenses as a combination to check even if one overlaps',()=>{
-    const match=matchAlertNotice(notice({licenses:['석면해체·제거업','건축공사업']}),rule({useCompanyLicenses:true}),company,now);
+    const match=matchAlertNotice(notice({licenses:['석면해체·제거업','건축공사업'],licenseCodes:['5652','0002']}),rule({useCompanyLicenses:true}),company,now);
     expect(match).toMatchObject({matched:true,needsReview:true});
     expect(match.reasons.join(' ')).toContain('복수 면허');
   });

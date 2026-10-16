@@ -26,7 +26,7 @@ describe('real notice browser boundary', () => {
     expect(mergeById([{ id: 'A-000', value: 1 }], [{ id: 'A-000', value: 2 }, { id: 'A-001', value: 3 }])).toEqual([{ id: 'A-000', value: 2 }, { id: 'A-001', value: 3 }]);
   });
   it('matches official license display with dot variants and provider code suffix', () => {
-    const bid = { ...NOTICES[0], licenses: ['구조물해체ㆍ비계공사업/4996'] };
+    const bid = { ...NOTICES[0], licenseCodes: undefined, licenses: ['구조물해체ㆍ비계공사업/4995'] };
     expect(filterNotices([bid], { ...DEFAULT_FILTERS, category: '전체', status: '전체', autoRegion: false, license: '구조물해체·비계공사업' }, DEMO_PROFILES[0])).toHaveLength(1);
   });
   it('expires saved live snapshots but preserves cancellations and demos', () => {

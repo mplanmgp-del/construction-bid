@@ -35,6 +35,15 @@ describe('member workspace isolation and persistence', () => {
       expect(() => validateWorkspace({ ...oldWorkspace, profile: { ...oldWorkspace.profile, businessNumber } }, 'a')).toThrow('Invalid workspace');
     }
   });
+  it('rejects malformed optional industry codes and keeps leading-zero codes intact', () => {
+    const workspace = emptyMemberWorkspace('a');
+    for (const licenseCodes of [null, '4995', [4995], ['495'], ['4995x']]) {
+      expect(() => validateWorkspace({ ...workspace, profile: { ...workspace.profile, licenseCodes } }, 'a')).toThrow('Invalid workspace');
+      const notice = { ...NOTICES[0], licenseCodes };
+      expect(validateWorkspace({ ...workspace, noticeSnapshots: { [notice.id]: notice } }, 'a').noticeSnapshots).toEqual({});
+    }
+    expect(validateWorkspace({ ...workspace, profile: { ...workspace.profile, licenseCodes: ['0002'] } }, 'a').profile.licenseCodes).toEqual(['0002']);
+  });
   it('saves and restores a normalized business number without changing the member profile or other account', async () => {
     let saved: MemberWorkspace | null = null;
     const repository = repo();
@@ -78,6 +87,18 @@ describe('member workspace isolation and persistence', () => {
     const restored = validateWorkspace({ ...emptyMemberWorkspace('a'), noticeSnapshots: { [notice.id]: enriched } }, 'a');
     expect(restored.noticeSnapshots[notice.id].regionSearchText).toEqual(enriched.regionSearchText);
     expect(mergeNoticeDetail(enriched, detail)).toBe(enriched);
+  });
+  it('preserves exact industry codes from completed detail and keeps them across workspace reload', () => {
+    const notice = { ...NOTICES[0], licenseCodes: ['0002'] };
+    const detail: G2bNoticeDetail = { number: notice.number, revision: notice.revision, allowedRegions: null,
+      licenses: ['구조물해체ㆍ비계공사업/4995'], licenseCodes: ['4995'], regionComplete: false,
+      licenseComplete: true, fetchedAt: '', warnings: [] };
+    const enriched = mergeNoticeDetail(notice, detail);
+    expect(enriched.licenseCodes).toEqual(['4995']);
+    expect(mergeNoticeDetail(enriched, { ...detail, licenseComplete: false, licenseCodes: ['0003'] }).licenseCodes).toEqual(['4995']);
+    const restored = validateWorkspace({ ...emptyMemberWorkspace('a'), noticeSnapshots: { [notice.id]: enriched } }, 'a');
+    expect(restored.noticeSnapshots[notice.id].licenseCodes).toEqual(['4995']);
+    expect(mergeNoticeDetail(enriched, { ...detail, licenseCodes: undefined }).licenseCodes).toBeUndefined();
   });
   it('queues writes serially and sends the newest edit using the preceding server version', async () => {
     const first = deferred<string>();

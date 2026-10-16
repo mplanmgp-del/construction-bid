@@ -36,7 +36,7 @@ function cachedNotice(bid: BidNotice): BidNotice {
     status: bid.status, postedAt: bid.postedAt, deadline: bid.deadline, openingAt: bid.openingAt, sourceUpdatedAt: bid.sourceUpdatedAt,
     registrationDeadline: bid.registrationDeadline, biddingStartAt: bid.biddingStartAt,
     ...(bid.openingCompleted !== undefined ? { openingCompleted: bid.openingCompleted } : {}),
-    licenses: bid.licenses, duration: bid.duration, description: bid.description, requirements: bid.requirements,
+    licenses: bid.licenses, ...(bid.licenseCodes === undefined ? {} : { licenseCodes: [...bid.licenseCodes] }), duration: bid.duration, description: bid.description, requirements: bid.requirements,
     documents: bid.documents.map(doc => ({ name: doc.name, size: doc.size, url: doc.url })),
     revised: bid.revised, source: 'live', detailUrl: bid.detailUrl, specialRegionCondition: bid.specialRegionCondition,
   };
@@ -54,6 +54,7 @@ function isCompletePage(value: unknown): value is G2bNoticePage {
       && (item.regionSearchText === undefined || typeof item.regionSearchText === 'string' && item.regionSearchText.length <= 16000)
       && ['공사', '용역'].includes(item.type) && Array.isArray(item.documents)
       && Array.isArray(item.licenses) && Array.isArray(item.requirements)
+      && (item.licenseCodes === undefined || Array.isArray(item.licenseCodes) && item.licenseCodes.length <= 100 && item.licenseCodes.every(code => typeof code === 'string' && /^\d{4}$/.test(code)))
       && (item.allowedRegions === null || Array.isArray(item.allowedRegions)))
     && new Set(page.items.map(item => item.id)).size === page.items.length;
 }

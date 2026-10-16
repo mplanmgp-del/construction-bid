@@ -79,7 +79,7 @@ describe('all-age active catalog collection', () => {
   });
 
   it.each([true,false])('refreshes exact participant facts only for a prioritized matching refresh: %s', async refreshMatching => {
-    const cached = { ...compactCatalogNotice({ ...mapNotice(row(), '공사', now), sourceUpdatedAt: '1995-10-02T00:00:00+09:00', regionComplete: true, licenseComplete: true }), allowedRegions: ['서울특별시'], licenses: ['기존 면허'] };
+    const cached = { ...compactCatalogNotice({ ...mapNotice(row(), '공사', now), sourceUpdatedAt: '1995-10-02T00:00:00+09:00', regionComplete: true, licenseComplete: true }), allowedRegions: ['서울특별시'], licenses: ['기존 면허'], licenseCodes: ['4995'] };
     const db = store([], [{ type: '공사', number: 'R26BK01359594', tracked: true, notice: cached, refreshMatching }]);
     const provider = vi.fn<ActiveCatalogProvider>(async operation => operation === 'getBidPblancListInfoPrtcptPsblRgn'
       ? { items: [{ bidNtceNo: cached.number, bidNtceOrd: '000', prtcptPsblRgnNm: '경기도' }], totalCount: 1 }
@@ -399,7 +399,7 @@ describe('all-age active catalog collection', () => {
 
   it('reuses completed participant facts only while the verified source version is unchanged', async () => {
     const mapped = mapNotice(row(), '공사', now);
-    const cached = compactCatalogNotice({ ...mapped, sourceUpdatedAt: mapped.postedAt, allowedRegions: ['서울특별시'], licenses: ['해체공사업'], regionComplete: true, licenseComplete: true });
+    const cached = compactCatalogNotice({ ...mapped, sourceUpdatedAt: mapped.postedAt, allowedRegions: ['서울특별시'], licenses: ['해체공사업'], licenseCodes: ['4995'], regionComplete: true, licenseComplete: true });
     for (const changed of [false, true]) {
       const db = store([], [{ type: '공사', number: 'R26BK01359594', notice: cached }], []);
       const provider = vi.fn<ActiveCatalogProvider>(async operation => /(?:PrtcptPsblRgn|LicenseLimit)$/.test(operation)
@@ -409,6 +409,19 @@ describe('all-age active catalog collection', () => {
       expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({ regionComplete: true, licenseComplete: true,
         allowedRegions: changed ? [] : ['서울특별시'], licenses: changed ? [] : ['해체공사업'] });
     }
+  });
+  it('refreshes legacy completed license rows once so permitted industry codes are no longer discarded', async () => {
+    const mapped = mapNotice(row(), '공사', now);
+    const cached = compactCatalogNotice({ ...mapped, sourceUpdatedAt: mapped.postedAt, allowedRegions: ['서울특별시'],
+      licenses: ['건축공사업/0002'], regionComplete: true, licenseComplete: true });
+    const db = store([], [{ type: '공사', number: mapped.number, notice: cached }], []);
+    const provider = vi.fn<ActiveCatalogProvider>(async operation => /LicenseLimit$/.test(operation)
+      ? { items: [{ bidNtceNo: mapped.number, bidNtceOrd: mapped.revision, lcnsLmtNm: '건축공사업/0002', permsnIndstrytyList: '[토목건축공사업/0003]' }], totalCount: 1 }
+      : { items: [row()], totalCount: 1 });
+    expect(await runActiveCatalogWorker(db, { provider, now })).toMatchObject({ ok: true, requests: 2, searchGroups: 1 });
+    expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({
+      allowedRegions: ['서울특별시'], licenses: ['건축공사업/0002'], licenseCodes: ['0002', '0003'], licenseComplete: true,
+    });
   });
 
   it('polls every due registration and modification window before historical discovery', async () => {
@@ -824,12 +837,12 @@ describe('all-age active catalog collection', () => {
     const provider: ActiveCatalogProvider = async operation => /PrtcptPsblRgn$/.test(operation)
       ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', prtcptPsblRgnNm: '서울특별시 강남구' }], totalCount: 1 }
       : /LicenseLimit$/.test(operation)
-        ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', lcnsLmtNm: '구조물해체·비계공사업' }], totalCount: 1 }
+        ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', lcnsLmtNm: '구조물해체·비계공사업/4995', permsnIndstrytyList: '[건축공사업/0002]' }], totalCount: 1 }
         : { items: [row({ largeContent: `${'공고 본문입니다. '.repeat(2000)} 서울특별시 강남구` })], totalCount: 1 };
     const result = await runActiveCatalogWorker(db, { provider, now });
     expect(result).toMatchObject({ ok: true, searchGroups: 1 });
     expect(db.publishSearchVerified).toHaveBeenCalledOnce();
-    expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({ allowedRegions: ['서울특별시 강남구'], licenses: ['구조물해체·비계공사업'] });
+    expect(db.publishSearchVerified.mock.calls[0][1].groups[0][0]).toMatchObject({ allowedRegions: ['서울특별시 강남구'], licenses: ['구조물해체·비계공사업/4995'], licenseCodes: ['4995', '0002'] });
   });
 
   it('keeps an omitted-content digest before dropping large bodies and preserves it on repeated compaction', () => {
@@ -924,14 +937,14 @@ describe('all-age active catalog collection', () => {
 
   it('loads common exact region and license conditions before retaining a matching group', async () => {
     const provider = vi.fn<ActiveCatalogProvider>(async (operation) => operation === 'getBidPblancListInfoLicenseLimit'
-      ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', lcnsLmtNm: '해체공사업' }], totalCount: 1 }
+      ? { items: [{ bidNtceNo: 'R26BK01359594', bidNtceOrd: '000', lcnsLmtNm: '구조물해체ㆍ비계공사업/4995' }], totalCount: 1 }
       : operation === 'getBidPblancListInfoPrtcptPsblRgn' ? { items: [], totalCount: 0 }
       : { items: [row()], totalCount: 1 });
-    const db = store([], [{ type: '공사', number: 'R26BK01359594' }], [rule({ licenses: ['해체공사업'], includeUnknown: false })]);
+    const db = store([], [{ type: '공사', number: 'R26BK01359594' }], [rule({ licenses: ['4995'], includeUnknown: false })]);
     const result = await runActiveCatalogWorker(db, { provider, now });
     expect(result).toMatchObject({ ok: true, groups: 1, requests: 3 });
     expect(provider.mock.calls.map(([operation]) => operation)).toEqual(['getBidPblancListInfoCnstwk', 'getBidPblancListInfoPrtcptPsblRgn', 'getBidPblancListInfoLicenseLimit']);
-    expect(db.commit.mock.calls[0][1].groups?.[0][0]).toMatchObject({ licenses: ['해체공사업'], licenseComplete: true, regionComplete: true });
+    expect(db.commit.mock.calls[0][1].groups?.[0][0]).toMatchObject({ licenses: ['구조물해체ㆍ비계공사업/4995'], licenseCodes: ['4995'], licenseComplete: true, regionComplete: true });
   });
 
   it('drops a candidate whose exact conditions do not match and retries an incomplete condition page', async () => {

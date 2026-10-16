@@ -3,9 +3,9 @@ import { DEMO_TODAY, DISTRICTS } from './data.ts';
 import { assessCompanyRegionKeywords, assessKeywordRegions } from './region-keywords.ts';
 import { noticeState } from './notice-status.ts';
 import { canonicalProvince, selectedRegions, selectedStatuses } from './search-filters.ts';
+import { assessIndustryCodes } from './industry-codes.ts';
 
 const cleanText = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ');
-const canonicalLicense = (value: string) => cleanText(value.replace(/[ㆍ・ᆞ]/g, '·')).replace(/\/\d+$/, '').replace(/\s+/g, '');
 
 type ParsedRegion = { province: string; district: string | null } | { nationwide: true };
 
@@ -129,7 +129,7 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
       const assessment = assessSearchRegions(bid, regions).status;
       if (assessment === 'excluded' || assessment === 'review' && filters.regions !== undefined && !filters.includeUnknownRegions) return false;
     }
-    if (filters.license !== '전체' && !bid.licenses.some(license => canonicalLicense(license) === canonicalLicense(filters.license))) return false;
+    if (filters.license !== '전체' && assessIndustryCodes(bid, [filters.license]).status !== 'matched') return false;
     if (statuses.length && !statuses.some(status => noticeState(bid, now).label === status)) return false;
     if (filters.contractMethod !== '전체' && bid.contractMethod !== filters.contractMethod) return false;
     const price = priceOrNull(bid.estimatedPrice);

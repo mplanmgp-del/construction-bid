@@ -9,6 +9,7 @@ import type { ActiveCatalogStore } from './active-catalog-store.ts';
 import type { ActiveCatalogCommit, ActiveCatalogIdentity, ActiveCatalogSourceJob } from '../src/live/active-catalog-types.ts';
 import type { AlertNotice, WorkerRule } from '../src/alerts/types.ts';
 import { compactNoticeRegionText } from './notice-region-text.ts';
+import { noticeLicenseCodes } from './notice-license-codes.ts';
 
 type Row = Record<string, unknown>;
 class SourceSnapshotChanged extends Error {}
@@ -87,7 +88,7 @@ function fact(row: Row, type: ActiveCatalogIdentity['type'], now: number, procur
 
 /** Mirror the database source projection; condition/status enrichment is separate. */
 function sourceProjection(notice: AlertNotice) {
-  const excluded = new Set(['allowedRegions', 'licenses', 'regionComplete', 'licenseComplete', 'openingCompleted', 'status', 'description', 'documents', 'requirements', 'duration', 'regionSearchText']);
+  const excluded = new Set(['allowedRegions', 'licenses', 'licenseCodes', 'regionComplete', 'licenseComplete', 'openingCompleted', 'status', 'description', 'documents', 'requirements', 'duration', 'regionSearchText']);
   return JSON.stringify(Object.fromEntries(Object.entries(notice).filter(([key, value]) => !excluded.has(key) && value !== undefined).sort(([a], [b]) => a.localeCompare(b))));
 }
 
@@ -118,9 +119,9 @@ export function potentialCatalogRules(notice: AlertNotice, rules: WorkerRule[], 
 }
 
 async function participantConditions(notice: AlertNotice, request: ActiveCatalogProvider): Promise<AlertNotice> {
-  const region = !notice.regionComplete, license = !notice.licenseComplete;
+  const region = !notice.regionComplete, license = !notice.licenseComplete || !Array.isArray(notice.licenseCodes);
   const exact = { inqryDiv: '2', bidNtceNo: notice.number, bidNtceOrd: notice.revision };
-  const load = async (operation: string, field: string): Promise<string[]> => {
+  const load = async (operation: string, field: string): Promise<Row[]> => {
     const rows: Row[] = []; let total: number | undefined;
     // A single condition response can exceed 999 rows. Do not call it complete until every page arrives.
     for (let page = 1; page <= 12; page++) {
@@ -134,7 +135,7 @@ async function participantConditions(notice: AlertNotice, request: ActiveCatalog
         throw new Error('공고 참가조건의 번호·차수 또는 항목을 확인하지 못했습니다.');
       }
       rows.push(...response.items);
-      if (rows.length === total) return [...new Set(rows.map(row => str(row[field])))];
+      if (rows.length === total) return rows;
     }
     throw new Error('공고 참가조건을 모두 확인하지 못해 다음 확인 때 다시 시도합니다.');
   };
@@ -142,10 +143,13 @@ async function participantConditions(notice: AlertNotice, request: ActiveCatalog
   let enriched = notice;
   const prefix = notice.procurementSource === 'private' ? 'getPrvtBidPblancListInfo' : 'getBidPblancListInfo';
   if (region) {
-    const regions = await load(`${prefix}PrtcptPsblRgn`, 'prtcptPsblRgnNm');
+    const regions = [...new Set((await load(`${prefix}PrtcptPsblRgn`, 'prtcptPsblRgnNm')).map(row => str(row.prtcptPsblRgnNm)))];
     enriched = { ...enriched, allowedRegions: regions.length || notice.procurementSource !== 'private' ? regions : null, regionComplete: true };
   }
-  if (license) enriched = { ...enriched, licenses: await load(`${prefix}LicenseLimit`, 'lcnsLmtNm'), licenseComplete: true };
+  if (license) {
+    const rows = await load(`${prefix}LicenseLimit`, 'lcnsLmtNm');
+    enriched = { ...enriched, licenses: [...new Set(rows.map(row => str(row.lcnsLmtNm)))], licenseCodes: noticeLicenseCodes(rows), licenseComplete: true };
+  }
   return compactCatalogNotice(enriched);
 }
 
@@ -154,13 +158,14 @@ function reuseParticipantConditions(notice: AlertNotice, cached?: AlertNotice): 
   if (!cached || cached.number !== notice.number || cached.type !== notice.type || cached.revision !== notice.revision
     || cached.sourceUpdatedAt !== notice.sourceUpdatedAt || cached.sourceOmittedDigest !== notice.sourceOmittedDigest
     || cached.regionSearchDigest !== notice.regionSearchDigest) return notice;
-  const sourceKey = (value: AlertNotice) => noticeContentKey({ ...value, allowedRegions: null, licenses: [] });
+  const sourceKey = (value: AlertNotice) => noticeContentKey({ ...value, allowedRegions: null, licenses: [], licenseCodes: undefined });
   if (sourceKey(cached) !== sourceKey(notice)) return notice;
   const names = (values: unknown): values is string[] => Array.isArray(values) && values.every(value => typeof value === 'string' && Boolean(value.trim()));
   return compactCatalogNotice({ ...notice,
     ...(cached.regionComplete && (cached.allowedRegions === null || names(cached.allowedRegions))
       ? { allowedRegions: cached.allowedRegions, regionComplete: true } : {}),
-    ...(cached.licenseComplete && names(cached.licenses) ? { licenses: cached.licenses, licenseComplete: true } : {}),
+    ...(cached.licenseComplete && names(cached.licenses) && Array.isArray(cached.licenseCodes)
+      ? { licenses: cached.licenses, licenseCodes: cached.licenseCodes, licenseComplete: true } : {}),
   });
 }
 

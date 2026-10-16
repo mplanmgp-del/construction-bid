@@ -2,6 +2,7 @@ import { koreanTimestamp, mapNotice, readProviderPayload } from './g2b.ts';
 import { PRIVATE_BID_BASE } from './g2b-private.ts';
 import { latestAlertNotices } from '../src/alerts/domain.ts';
 import type { AlertNotice } from '../src/alerts/types.ts';
+import { noticeLicenseCodes } from './notice-license-codes.ts';
 
 type Row = Record<string, unknown>;
 export type AlertProvider = (operation: string, params: Record<string,string>) => Promise<Row[]>;
@@ -56,7 +57,7 @@ export async function collectAlertWindow(provider:AlertProvider,from:number,to:n
       const regionNames=r.filter(matches).map(item=>str(item.prtcptPsblRgnNm)).filter(Boolean);
       const licenseNames=l.filter(matches).map(item=>str(item.lcnsLmtNm)).filter(Boolean);
       if(r.some(item=>matches(item)&&!str(item.prtcptPsblRgnNm))||l.some(item=>matches(item)&&!str(item.lcnsLmtNm))) throw new Error('참가조건이 불완전하여 다음 확인 때 다시 시도합니다.');
-      notices.push({...notice,allowedRegions:[...new Set(regionNames)],licenses:[...new Set(licenseNames)],sourceUpdatedAt:updated,regionComplete:true,licenseComplete:true});
+      notices.push({...notice,allowedRegions:[...new Set(regionNames)],licenses:[...new Set(licenseNames)],licenseCodes:noticeLicenseCodes(l.filter(matches)),sourceUpdatedAt:updated,regionComplete:true,licenseComplete:true});
     }
   }
   return latestAlertNotices(notices);

@@ -19,6 +19,8 @@ import { toggleNoticeBookmark } from './member/bookmarks';
 import type { G2bNoticeDetail } from './g2b-types';
 import { useLiveNotices } from './live/useLiveNotices';
 import { useCachedNoticeRegions, useNoticeRegions } from './live/useNoticeRegions';
+import { useBookmarkIndustryRefresh } from './live/useBookmarkIndustryRefresh';
+import { withSavedIndustryFacts } from './live/bookmark-industry-refresh';
 import { seedNoticeDetailRegions, selectNoticeRegionTargets } from './live/notice-regions';
 import { UnifiedNoticeSearch } from './live/UnifiedNoticeSearch';
 import type { UnifiedSearchDraft } from './live/unified-notice-search';
@@ -241,9 +243,12 @@ export default function App() {
   useEffect(() => { setSelectedNoticeIds([]); setPage(1); }, [live.selectionKey]);
 
   const rawSourceNotices = useMemo(() => (view === 'bookmarks'
-    ? mergeById(mode === 'live' ? Object.values(member.workspace?.noticeSnapshots ?? {}).map(bid => currentNotice(bid)) : [], availableNotices).filter(bid => bookmarks.includes(bid.id))
+    ? mergeById(mode === 'live' ? Object.values(member.workspace?.noticeSnapshots ?? {}).map(bid => currentNotice(bid)) : [], availableNotices)
+      .filter(bid => bookmarks.includes(bid.id)).map(bid => withSavedIndustryFacts(bid, member.workspace?.noticeSnapshots[bid.id]))
     : availableNotices).filter(bid => serverSearch || mode !== 'live' || isCatalogNotice(bid, statusNow)), [view, mode, serverSearch, member.workspace?.noticeSnapshots, availableNotices, bookmarks, statusNow]);
   const activeRegions = selectedRegions(filters);
+  useBookmarkIndustryRefresh(rawSourceNotices, mode === 'live' && !menuDisabled && view === 'bookmarks' && member.ready,
+    member.user?.id, filters.license, member.updateWorkspace);
   const activeStatuses = selectedStatuses(filters);
   const regionCandidates = useMemo(() => serverSearch ? rawSourceNotices : filterNotices(rawSourceNotices,
     { ...filters, siteProvince: '전체', regions: [], autoRegion: false, regionView: 'all' }, profile, statusNow), [rawSourceNotices, filters, profile, statusNow, serverSearch]);

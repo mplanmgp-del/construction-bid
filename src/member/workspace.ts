@@ -26,11 +26,14 @@ export interface DraftStorage { getItem(key: string): string | null; setItem(key
 export type SaveStatus = 'loading' | 'saved' | 'saving' | 'error' | 'recovery';
 export interface WorkspaceSnapshot { data: MemberWorkspace | null; status: SaveStatus; error: string | null; ready: boolean; }
 export class WorkspaceConflict extends Error {}
+const validIndustryCodes = (value: unknown) => value === undefined
+  || Array.isArray(value) && value.length <= 100 && value.every(code => typeof code === 'string' && /^\d{4}$/.test(code));
 
 export function mergeNoticeDetail(notice: BidNotice, detail: G2bNoticeDetail): BidNotice {
   if (notice.number !== detail.number || notice.revision !== detail.revision) return notice;
   const allowedRegions = detail.regionComplete ? detail.allowedRegions : notice.allowedRegions;
   const licenses = detail.licenseComplete ? detail.licenses : notice.licenses;
+  const licenseCodes = detail.licenseComplete ? detail.licenseCodes : notice.licenseCodes;
   const incoming = [detail.notice?.regionSearchText, ...(detail.sections ?? []).flatMap(section => section.fields.map(field => field.value))]
     .filter((value): value is string => typeof value === 'string' && !!value.trim())
     .map(value => value.normalize('NFKC').trim().replace(/\s+/g, ' '));
@@ -38,8 +41,9 @@ export function mergeNoticeDetail(notice: BidNotice, detail: G2bNoticeDetail): B
   const additions = [...new Set(incoming)].filter(value => !previous.includes(value));
   const regionSearchText = additions.length ? [...additions, previous].filter(Boolean).join(' ').slice(0, 16_000) : notice.regionSearchText;
   if (JSON.stringify(allowedRegions) === JSON.stringify(notice.allowedRegions) && JSON.stringify(licenses) === JSON.stringify(notice.licenses)
+    && JSON.stringify(licenseCodes) === JSON.stringify(notice.licenseCodes)
     && regionSearchText === notice.regionSearchText) return notice;
-  return { ...notice, allowedRegions, licenses, ...(regionSearchText === undefined ? {} : { regionSearchText }) };
+  return { ...notice, allowedRegions, licenses, licenseCodes, ...(regionSearchText === undefined ? {} : { regionSearchText }) };
 }
 
 export function emptyMemberWorkspace(userId: string, email = ''): MemberWorkspace {
@@ -59,6 +63,7 @@ function validNoticeSnapshot(value: unknown): value is BidNotice {
     && (notice.allowedRegions === null || stringArray(notice.allowedRegions))
     && (notice.estimatedPrice === null || (typeof notice.estimatedPrice === 'number' && Number.isFinite(notice.estimatedPrice) && notice.estimatedPrice >= 0))
     && stringArray(notice.licenses) && stringArray(notice.requirements)
+    && validIndustryCodes(notice.licenseCodes)
     && Array.isArray(notice.documents) && notice.documents.every(item => item && typeof item.name === 'string' && typeof item.size === 'string' && (item.url === undefined || typeof item.url === 'string'))
     && (notice.regionSearchText === undefined || typeof notice.regionSearchText === 'string')
     && (notice.detailUrl === undefined || typeof notice.detailUrl === 'string');
@@ -72,6 +77,7 @@ export function validateWorkspace(value: unknown, userId: string): MemberWorkspa
     !['companyName', 'province', 'district', 'address', 'contactName', 'email'].every(key => typeof profile[key as keyof CompanyProfile] === 'string') ||
     !isOptionalBusinessNumber(profile.businessNumber) ||
     !Array.isArray(profile.licenses) || !profile.licenses.every(item => typeof item === 'string') ||
+    !validIndustryCodes(profile.licenseCodes) ||
     !Array.isArray(data.bookmarks) || !data.bookmarks.every(item => typeof item === 'string') ||
     typeof data.preferences?.autoRegion !== 'boolean' || !data.preparations || typeof data.preparations !== 'object' || Array.isArray(data.preparations) ||
     !Object.values(data.preparations).every(item => item && PREPARATION_STAGES.includes(item.stage) && typeof item.note === 'string' && typeof item.updatedAt === 'string')) {

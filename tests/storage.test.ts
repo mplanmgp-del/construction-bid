@@ -77,4 +77,19 @@ describe('업체별 브라우저 저장', () => {
     expect(result.warning).toBeTruthy();
     expect(savePrototypeState(result.state, storage)).toBe(false);
   });
+
+  it('공식 업종코드의 앞자리 0을 보존하고 잘못된 코드 저장값을 거부한다', () => {
+    const storage=memoryStorage(), state=loadPrototypeState(profiles,storage).state;
+    state.profiles[0].licenseCodes=['0002','4995'];
+    expect(savePrototypeState(state,storage)).toBe(true);
+    expect(loadPrototypeState(profiles,storage).state.profiles[0].licenseCodes).toEqual(['0002','4995']);
+    for(const invalid of [null,'0002',[2],['2'],['4995','bad']]) {
+      const value=JSON.stringify({...state,profiles:[{...state.profiles[0],licenseCodes:invalid},state.profiles[1]]});
+      storage.setItem(STORAGE_KEY,value);
+      expect(loadPrototypeState(profiles,storage).warning).toBeTruthy();
+      expect(storage.getItem(STORAGE_KEY)).toBe(value);
+      state.profiles[0].licenseCodes=invalid as string[];
+      expect(savePrototypeState(state,storage)).toBe(false);
+    }
+  });
 });

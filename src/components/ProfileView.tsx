@@ -4,6 +4,7 @@ import { DISTRICTS, LICENSES, PROVINCES } from '../data';
 import type { CompanyProfile } from '../types';
 import { formatBusinessNumber, normalizeBusinessNumber } from '../company-profile';
 import { QUICK_LINK_LABEL_LIMIT, quickLinkDrafts, validateQuickLinkDrafts } from '../quick-links';
+import { industrySelectionLabel, normalizeIndustryCode, resolveIndustrySelections } from '../industry-codes';
 
 interface ProfileViewProps {
   profile: CompanyProfile;
@@ -14,7 +15,7 @@ interface ProfileViewProps {
 type ProfileErrors = Partial<Record<'companyName' | 'businessNumber' | 'email', string>>;
 
 function copyProfile(profile: CompanyProfile): CompanyProfile {
-  return { ...profile, businessNumber: formatBusinessNumber(profile.businessNumber), licenses: [...profile.licenses], quickLinks: quickLinkDrafts(profile.quickLinks) };
+  return { ...profile, businessNumber: formatBusinessNumber(profile.businessNumber), licenses: [...profile.licenses], ...(profile.licenseCodes === undefined ? {} : { licenseCodes: [...profile.licenseCodes] }), quickLinks: quickLinkDrafts(profile.quickLinks) };
 }
 
 function profileHasChanges(profile: CompanyProfile, draft: CompanyProfile): boolean {
@@ -32,6 +33,8 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
   const [errors, setErrors] = useState<ProfileErrors>({});
   const [quickLinkErrors, setQuickLinkErrors] = useState<Record<number, string>>({});
   const [feedback, setFeedback] = useState('');
+  const [industryCode, setIndustryCode] = useState('');
+  const [industryCodeError, setIndustryCodeError] = useState('');
   const previousProfileId = useRef(profile.id);
   const companyInput = useRef<HTMLInputElement>(null);
   const businessNumberInput = useRef<HTMLInputElement>(null);
@@ -52,7 +55,7 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
   const regionLabel = [draft.province, draft.district].filter(Boolean).join(' ');
   const hasRegion = Boolean(draft.province && draft.district);
 
-  const updateField = (field: Exclude<keyof CompanyProfile, 'id' | 'licenses' | 'quickLinks'>, value: string) => {
+  const updateField = (field: Exclude<keyof CompanyProfile, 'id' | 'licenses' | 'licenseCodes' | 'quickLinks'>, value: string) => {
     setDraft((current) => ({ ...current, [field]: value }));
     setFeedback('');
     if (field === 'companyName' || field === 'businessNumber' || field === 'email') {
@@ -67,12 +70,13 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
   };
 
   const toggleLicense = (license: string) => {
-    setDraft((current) => ({
-      ...current,
-      licenses: current.licenses.includes(license)
+    setDraft((current) => {
+      const licenses = current.licenses.includes(license)
         ? current.licenses.filter((item) => item !== license)
-        : [...current.licenses, license],
-    }));
+        : [...current.licenses, license];
+      const resolved = resolveIndustrySelections(licenses);
+      return { ...current, licenses, licenseCodes: resolved.unresolved.length ? undefined : resolved.codes };
+    });
     setFeedback('');
   };
 
@@ -81,6 +85,17 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
     setErrors({});
     setQuickLinkErrors({});
     setFeedback('변경 내용을 취소했습니다.');
+  };
+
+  const addIndustryCode = () => {
+    const code = normalizeIndustryCode(industryCode);
+    if (!code) { setIndustryCodeError('공식 업종코드 4자리를 입력해 주세요.'); return; }
+    setDraft(current => {
+      if (resolveIndustrySelections(current.licenses).codes.includes(code)) return current;
+      const licenses = [...current.licenses, industrySelectionLabel(code)], resolved = resolveIndustrySelections(licenses);
+      return { ...current, licenses, licenseCodes: resolved.unresolved.length ? undefined : resolved.codes };
+    });
+    setIndustryCode(''); setIndustryCodeError(''); setFeedback('');
   };
 
   const saveProfile = (event: FormEvent<HTMLFormElement>) => {
@@ -113,6 +128,7 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
       address: draft.address.trim(),
       contactName: draft.contactName.trim(),
       licenses: [...draft.licenses],
+      licenseCodes: resolveIndustrySelections(draft.licenses).unresolved.length ? undefined : resolveIndustrySelections(draft.licenses).codes,
       quickLinks: shortcuts.links,
     };
     onSave(savedProfile);
@@ -191,17 +207,18 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
           <section className="profile-form-section" aria-labelledby={`${id}-license-heading`}>
             <div className="profile-section-heading">
               <span className="profile-section-icon"><ShieldCheck size={19} aria-hidden="true" /></span>
-              <div><h2 id={`${id}-license-heading`}>보유면허</h2><p>업체가 보유한 면허를 모두 선택하세요.</p></div>
+              <div><h2 id={`${id}-license-heading`}>보유면허</h2><p>업체가 보유한 면허를 선택하세요. 공고와 공식 업종코드로 비교합니다.</p></div>
               <span className="profile-license-count">{draft.licenses.length}개 선택</span>
             </div>
             <div className="profile-license-grid">
               {availableLicenses.map((license) => (
                 <label key={license} className={`profile-license-option ${draft.licenses.includes(license) ? 'profile-license-selected' : ''}`}>
                   <input type="checkbox" checked={draft.licenses.includes(license)} onChange={() => toggleLicense(license)} />
-                  <span>{license}</span>
+                  <span>{industrySelectionLabel(license)}</span>
                 </label>
               ))}
             </div>
+            <div className="profile-field"><label className="field-label" htmlFor={`${id}-industry-code`}>업종코드 직접 추가</label><input id={`${id}-industry-code`} className="field" inputMode="numeric" maxLength={4} value={industryCode} placeholder="공식 업종코드 4자리" onChange={event => { if (/^\d{0,4}$/.test(event.target.value)) setIndustryCode(event.target.value); setIndustryCodeError(''); }} /><button className="button button-secondary" type="button" onClick={addIndustryCode}>업종코드 추가</button>{industryCodeError && <p className="field-error" role="alert">{industryCodeError}</p>}<p className="filter-description">목록에 없는 업종이나 엔지니어링 세부 업종은 공식 코드를 추가하세요. 코드 미확인 면허는 자동조회에서 미확인 조건으로 처리됩니다.</p></div>
           </section>
 
           <section className="profile-form-section" aria-labelledby={`${id}-contact-heading`}>

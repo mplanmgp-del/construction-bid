@@ -12,7 +12,7 @@ export interface SearchRegion { province: string; district?: string; locality?: 
 export interface QuickLink { label: string; url: string; }
 export interface CompanyProfile {
   id: string; companyName: string; province: string; district: string;
-  address: string; licenses: string[]; contactName: string; email: string;
+  address: string; licenses: string[]; licenseCodes?: string[]; contactName: string; email: string;
   businessNumber?: string;
   quickLinks?: QuickLink[];
 }
@@ -33,7 +33,7 @@ export interface BidNotice {
   sourceUpdatedAt?: string;
   biddingStartAt?: string;
   openingCompleted?: boolean;
-  licenses: string[]; duration: string; description: string; requirements: string[];
+  licenses: string[]; licenseCodes?: string[]; duration: string; description: string; requirements: string[];
   documents: { name: string; size: string; url?: string }[]; revised: boolean;
   source?: 'live' | 'demo'; detailUrl?: string;
   specialRegionCondition?: boolean;

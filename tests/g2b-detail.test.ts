@@ -40,6 +40,8 @@ describe('complete official notice detail', () => {
     expect(value(result.sections, 'bssamt')).toBe('63,620,000 원');
     expect(value(result.sections, 'insuranceManagementSum')).toBe('4,748,790 원');
     expect(result.warnings).toEqual([]);
+    expect(result.licenseCodes).toEqual(['4996']);
+    expect(result.notice?.licenseCodes).toEqual(['4996']);
   });
   it('rejects wrong number, revision, missing revision and wrong business type rather than taking row order', async () => {
     const invalid = [
