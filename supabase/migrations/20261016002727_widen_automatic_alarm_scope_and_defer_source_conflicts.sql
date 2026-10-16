@@ -48,10 +48,14 @@ do $$declare definition text;anchor text;replacement text;begin
        and nullif(g.latest->>'deadline','')::timestamptz<(last_day+1)::timestamp at time zone 'Asia/Seoul'$a$;
   replacement:=$a$     select d.type,d.number from bid_active_catalog_private.deadline_index d
      union select g.type,g.number from bid_active_catalog_private.groups g$a$;
+  -- The production SQL editor retained one space per indented line. Accept
+  -- only that exact alternate spelling; never normalize the function body.
+  if position(anchor in definition)=0 then anchor:=regexp_replace(anchor,E'^[\t ]+',' ','gn');end if;
   if position(anchor in definition)=0 then raise exception 'Audited alarm candidate range changed';end if;
   definition:=replace(definition,anchor,replacement);
   anchor:=$a$         and (nullif(latest->>'deadline','')::timestamptz at time zone 'Asia/Seoul')::date between first_day and last_day
 $a$;
+  if position(anchor in definition)=0 then anchor:=regexp_replace(anchor,E'^[\t ]+',' ','gn');end if;
   if position(anchor in definition)=0 then raise exception 'Audited inactive alarm range changed';end if;
   execute replace(definition,anchor,'');
  end if;
@@ -97,6 +101,7 @@ $a$;
            raise exception using errcode='PBC01',message='SHARED_SOURCE_CHANGED',
              detail=bid_active_catalog_private.publication_conflict(head,indexed.notice,indexed.source_version)::text;
        end if;$a$;
+  if position(anchor in definition)=0 then anchor:=regexp_replace(anchor,E'^[\t ]+',' ','gn');end if;
   if position(anchor in definition)=0 then raise exception 'Audited stale public source guard changed';end if;
   definition:=replace(definition,anchor,replacement);
   anchor:=$a$   exception when program_limit_exceeded then
@@ -112,6 +117,7 @@ $a$;
      update bid_active_catalog_private.runtime set storage_blocked=true where singleton;return jsonb_build_object('ok',false,'storageFull',true);
    end;
  else$a$;
+  if position(anchor in definition)=0 then anchor:=regexp_replace(anchor,E'^[\t ]+',' ','gn');end if;
   if position(anchor in definition)=0 then raise exception 'Audited shared publication exception fence changed';end if;
   execute replace(definition,anchor,replacement);
  end if;
