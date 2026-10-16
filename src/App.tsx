@@ -2,7 +2,7 @@ import { NoticeList } from './components/NoticeList';
 import { pageGroup } from './pagination';
 import { selectedRegions, selectedStatuses, regionKey, regionLabel } from './search-filters';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Bookmark, Building2, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, ExternalLink, FileSearch, Info, LockKeyhole, MapPin, PanelLeftOpen, Search, Settings2, ShieldCheck, SlidersHorizontal, Star, UserRound, X } from 'lucide-react';
+import { ArrowRight, Bookmark, Building2, Calculator, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, ExternalLink, FileSearch, Info, LockKeyhole, MapPin, PanelLeftOpen, Search, Settings2, ShieldCheck, SlidersHorizontal, Star, UserRound, X } from 'lucide-react';
 import { CATEGORIES, type BidNotice, type CompanyProfile, type SearchFilters } from './types';
 import { DEFAULT_FILTERS, DEMO_PROFILES, DEMO_TODAY, NOTICES } from './data';
 import { assessRegion, assessSearchRegions, buildBidCsv, daysUntil, filterNotices, formatAmountInput, formatDateTime, formatPrice } from './domain';
@@ -35,6 +35,8 @@ import { useMenuAccess } from './admin/useMenuAccess';
 import { AdminPage, LockedMenu } from './admin/AdminPage';
 import { APP_MENUS, type MenuKey } from './admin/types';
 import { appViewFromHash, appViewHash, menuIsLocked, type AppView } from './admin/navigation';
+import { BidHelper } from './bid-helper/BidHelper';
+import type { BidHelperSeed } from './bid-helper/notice-seed';
 import { AlertsPage } from './alerts/AlertsPage';
 import { AlertMenu } from './alerts/AlertsPopover';
 import { alertFilterFromSearch, useAlerts } from './alerts/useAlerts';
@@ -77,6 +79,8 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileFilters, setMobileFilters] = useState(false);
   const [selectedBid, setSelectedBid] = useState<BidNotice | null>(null);
+  const [bidHelperSeed, setBidHelperSeed] = useState<BidHelperSeed>();
+  const [bidHelperLaunch, setBidHelperLaunch] = useState(0);
   const [toast, setToast] = useState('');
   const [existingAlertRequest, setExistingAlertRequest] = useState<{ userId: string; sequence: number } | null>(null);
   const [alertSeed, setAlertSeed] = useState<{ userId: string; filter: AlertFilter } | null>(null);
@@ -170,6 +174,12 @@ export default function App() {
     if (next === 'notices') { const saved = noticeFiltersRef.current; setFilters(saved); setSearchInput(mode === 'live' ? live.query.keyword : saved.keyword); }
     viewRef.current = next; setView(next);
     window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${appViewHash(next)}`);
+  }
+
+  function openBidHelper(seed?: BidHelperSeed) {
+    setBidHelperSeed(seed);
+    setBidHelperLaunch(value => value + 1);
+    navigate('bid-helper');
   }
 
   function openExistingAlerts() {
@@ -296,14 +306,14 @@ export default function App() {
         const locked = mode === 'live' && access.settings.find(setting => setting.menu_key === menu.key)?.locked;
         const Icon = menu.key === 'notices' ? ClipboardList : menu.key === 'bookmarks' ? Bookmark : menu.key === 'profile' ? UserRound : FileSearch;
         return <button key={menu.key} aria-current={view === menu.key ? 'page' : undefined} className={view === menu.key ? 'active' : ''} onClick={() => navigate(menu.key)} title={locked ? access.isAdmin ? '잠금 중 · 관리자 열람 가능' : '현재 점검 중인 메뉴입니다.' : undefined}><Icon size={17} /><span>{menu.label}</span>{locked && <LockKeyhole className="menu-lock-icon" size={12} aria-label="잠금" />}{menu.key === 'bookmarks' && bookmarks.length > 0 && <span className="nav-count">{bookmarks.length}</span>}</button>;
-      })}{mode === 'live' && access.ready && access.isAdmin && <button className={view === 'admin' ? 'active' : ''} onClick={() => navigate('admin')}><ShieldCheck size={17} /><span>관리자</span></button>}</nav>
+      })}<button aria-current={view === 'bid-helper' ? 'page' : undefined} className={view === 'bid-helper' ? 'active' : ''} onClick={() => openBidHelper()}><Calculator size={17} /><span>투찰 도우미</span></button>{mode === 'live' && access.ready && access.isAdmin && <button className={view === 'admin' ? 'active' : ''} onClick={() => navigate('admin')}><ShieldCheck size={17} /><span>관리자</span></button>}</nav>
       <div className="header-account"><AlertMenu key={`${mode}:${member.user?.id ?? 'guest'}`} alerts={alerts} signedIn={Boolean(member.user)} disabled={mode === 'demo'} contextKey={view} onLogin={() => navigate('account')} onOpenSettings={() => navigate('alerts')} onOpenExisting={openExistingAlerts} bookmarks={bookmarks} onBookmark={notice => toggleBookmark(notice.id, notice)} />{mode === 'live' ? <button className="button button-secondary" onClick={() => navigate('account')}>{member.user ? '내 계정' : '로그인'}</button> : <div className="account-select"><span className="account-avatar">{profile.companyName[0] || '업'}</span><label className="sr-only" htmlFor="demo-profile-switch">테스트 업체 전환</label><select id="demo-profile-switch" value={profile.id} onChange={event => switchProfile(event.target.value)}>{state.profiles.map(item => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select><ChevronDown size={15} /></div>}</div>
     </div></header>
 
     <main id="main-content" className="main-container" tabIndex={-1} inert={Boolean(selectedBid) || undefined}>
       {mode === 'demo' && storageWarning && <div className="storage-warning" role="status"><Info size={16} />{storageWarning}<button className="icon-button" onClick={() => setStorageWarning(null)} aria-label="안내 닫기"><X size={15} /></button></div>}
       {mode === 'live' && member.user && (member.saveStatus === 'saving' || member.saveStatus === 'error') && <div className={`live-member-status ${member.saveStatus === 'error' ? 'is-error' : ''}`} role="status">{member.saveStatus === 'saving' ? '변경 사항을 저장하고 있습니다.' : '변경 사항을 저장하지 못했습니다.'}{member.saveStatus === 'error' && <button className="text-button" onClick={() => navigate('account')}>저장 상태 확인</button>}</div>}
-      {view === 'admin' ? <AdminPage access={access} onLogin={() => navigate('account')} /> : view === 'account' ? <MemberAccess member={member} /> : view === 'alerts' ? <AlertsPage bookmarks={bookmarks} onBookmark={notice => toggleBookmark(notice.id, notice)} key={member.user?.id ?? 'guest'} openExistingRequest={existingAlertRequest?.userId === member.user?.id ? existingAlertRequest?.sequence : 0} alerts={alerts} signedIn={Boolean(member.user)} profile={profile} onLogin={() => navigate('account')} isAdmin={access.isAdmin} demo={mode === 'demo'} initialFilter={alertSeed?.userId === member.user?.id ? alertSeed?.filter : null} onInitialFilterConsumed={() => setAlertSeed(null)} /> : menuDisabled ? <LockedMenu menu={view as MenuKey} setting={access.settings.find(setting => setting.menu_key === view)} loading={!access.ready && !access.error} onLogin={() => navigate('account')} onRetry={() => { void access.refresh(); }} /> : view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
+      {view === 'admin' ? <AdminPage access={access} onLogin={() => navigate('account')} /> : view === 'account' ? <MemberAccess member={member} /> : view === 'bid-helper' ? <BidHelper key={bidHelperLaunch} initialSeed={bidHelperSeed} onSeedConsumed={bidHelperSeed ? () => setBidHelperSeed(undefined) : undefined} /> : view === 'alerts' ? <AlertsPage bookmarks={bookmarks} onBookmark={notice => toggleBookmark(notice.id, notice)} key={member.user?.id ?? 'guest'} openExistingRequest={existingAlertRequest?.userId === member.user?.id ? existingAlertRequest?.sequence : 0} alerts={alerts} signedIn={Boolean(member.user)} profile={profile} onLogin={() => navigate('account')} isAdmin={access.isAdmin} demo={mode === 'demo'} initialFilter={alertSeed?.userId === member.user?.id ? alertSeed?.filter : null} onInitialFilterConsumed={() => setAlertSeed(null)} /> : menuDisabled ? <LockedMenu menu={view as MenuKey} setting={access.settings.find(setting => setting.menu_key === view)} loading={!access.ready && !access.error} onLogin={() => navigate('account')} onRetry={() => { void access.refresh(); }} /> : view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
         <section className="search-intro"><div><div className="eyebrow">공고 탐색</div><h1>{view === 'bookmarks' ? '관심공고' : '입찰공고'}</h1>{view === 'bookmarks' && <p>저장한 공고를 확인하고 입찰을 준비하세요.</p>}</div><div className="intro-note"><span className="small-dot" />{mode === 'live' ? '나라장터 공공데이터' : '예시 데이터'}<span className="intro-date">{mode === 'live' ? `한국시간 ${koreanToday().replaceAll('-', '.')}` : `예시 기준일 ${DEMO_TODAY.replaceAll('-', '.')}`}</span></div></section>
 
         {!showNumberResults && profile.id !== 'guest' && <section className="company-strip" aria-label="내 업체 지역 자동필터"><div className="company-strip-info"><span className="company-icon"><Building2 size={20} /></span><div><div className="company-name">{profile.id === 'guest' ? '내 업체 기준으로 찾기' : profile.companyName}</div><div className="company-address">{profile.province ? <><MapPin size={12} />{profile.province} {profile.district}</> : '업체 소재지를 등록하면 참가 가능 지역을 비교할 수 있습니다.'}</div></div><button className="company-edit" aria-label="업체 정보 수정" onClick={() => navigate('profile')}><Settings2 size={14} /><span>{profile.province ? '업체 수정' : '업체 등록'}</span></button></div>{profile.province && profile.district && <div className="auto-filter-control"><label className="switch-label"><input type="checkbox" checked={filters.autoRegion} onChange={event => { updateFilter('autoRegion', event.target.checked); updateFilter('regionView', 'all'); }} /><span className="switch-track" /><strong>내 지역 일치 공고만</strong></label><span className="filter-state">{filters.autoRegion ? '적용 중' : '미적용'}</span></div>}</section>}
@@ -350,7 +360,7 @@ export default function App() {
       <footer className="app-footer"><div><span className="footer-brand">공사입찰 검색</span><span>내 업체에 맞는 공고, 더 간편하게.</span></div><div className="footer-links"><span>{mode === 'live' ? '공개 공고·결과 조회 및 회원별 입찰 준비 관리' : '화면·공고·업체 정보는 테스트용 예시입니다.'}</span><a href="https://www.g2b.go.kr" target="_blank" rel="noreferrer">나라장터<ExternalLink size={12} /></a></div></footer>
     </main>
     <FloatingQuickLinks key={profile.id} profile={profile} />
-    {selectedBid && !menuDisabled && <BidDetail bid={selectedBid} now={statusNow} profile={profile} assessment={assessRegion(selectedBid, profile)} isBookmarked={bookmarks.includes(selectedBid.id)} onClose={() => setSelectedBid(null)} onToggleBookmark={() => toggleBookmark(selectedBid.id)} onEnriched={detail => applyNoticeDetail(selectedBid.id, detail)} preparation={mode === 'live' ? <BidPreparation bidId={selectedBid.id} bid={selectedBid} member={member} /> : undefined} />}
+    {selectedBid && !menuDisabled && <BidDetail bid={selectedBid} now={statusNow} profile={profile} assessment={assessRegion(selectedBid, profile)} isBookmarked={bookmarks.includes(selectedBid.id)} onClose={() => setSelectedBid(null)} onToggleBookmark={() => toggleBookmark(selectedBid.id)} onEnriched={detail => applyNoticeDetail(selectedBid.id, detail)} onOpenBidHelper={openBidHelper} preparation={mode === 'live' ? <BidPreparation bidId={selectedBid.id} bid={selectedBid} member={member} /> : undefined} />}
     <div className={`toast ${toast ? 'visible' : ''}`} role="status" aria-live="polite">{toast && <><span><Check size={15} /></span>{toast}</>}</div>
   </div>;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUpRight, Building2, ChevronRight, Clock3, Copy, FileText, Info, ListOrdered, LoaderCircle, MapPin, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Building2, Calculator, ChevronRight, Clock3, Copy, FileText, Info, ListOrdered, LoaderCircle, MapPin, RefreshCw } from 'lucide-react';
 import type { G2bNoticeDetail } from '../g2b-types';
 import type { BidNotice } from '../types';
 import { formatDateTime } from '../domain';
@@ -17,6 +17,7 @@ import { LockedMenu } from '../admin/AdminPage';
 import { menuIsLocked } from '../admin/navigation';
 import { browserNoticeNumberRepository, buildNoticeNumberResult, type NoticeNumberRepository } from './notice-number-search';
 import { noticeSubmissionMessage } from '../components/notice-schedule';
+import { buildBidHelperSeed, storePendingBidHelperSeed } from '../bid-helper/notice-seed';
 import '../components/detail-remake.css';
 
 function queryNotice() {
@@ -172,6 +173,15 @@ export function NoticeDetailPage() {
     catch { setToast('공고번호를 복사하지 못했습니다. 번호를 선택해 직접 복사해 주세요.'); }
   }
 
+  function openBidHelper() {
+    if (!bid || !detail) return;
+    if (!storePendingBidHelperSeed(buildBidHelperSeed(bid, detail))) {
+      setToast('공고값을 전달하지 못했습니다. 브라우저 저장 설정을 확인해 주세요.');
+      return;
+    }
+    window.location.assign('/#bid-helper');
+  }
+
   if (locked) return <div className="fnd-page"><main className="fnd-page-main"><LockedMenu menu="notices" setting={access.settings.find(setting => setting.menu_key === 'notices')} loading={!access.ready && !access.error} onLogin={() => window.location.assign('/#account')} onRetry={() => { void access.refresh(); }} /></main></div>;
 
   return <div className="fnd-page">
@@ -191,6 +201,7 @@ export function NoticeDetailPage() {
           <div className="fnd-hero-bottom"><div><MapPin size={16} /><span><b>참가 가능 지역</b> {detail.allowedRegions?.join(' · ') || '-'}</span></div><div><FileText size={16} /><span><b>업종</b> {detail.licenses.join(' · ') || '-'}</span></div></div>
         </section>
         <NoticeDetailRevisionNotice bid={bid} verification={revisionVerification} now={statusNow} />
+        <div className="fnd-opening-launch"><button type="button" onClick={openBidHelper}><Calculator size={17} />투찰 도우미로 계산</button><span>공개된 금액을 확인하고 가정값으로 계산합니다.</span></div>
         {detail.warnings.length > 0 && <aside className="fnd-data-warning"><Info size={18} /><div><strong>일부 상세 항목은 확인이 필요합니다</strong><ul>{detail.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div></aside>}
         <div ref={resultsRef} className="fnd-opening-launch" id="results"><button type="button" aria-expanded={showOpeningResults} aria-controls="fnd-opening-results" onClick={() => setShowOpeningResults(value => !value)}><ListOrdered size={17} />{showOpeningResults ? '개찰·낙찰 결과 닫기' : '개찰·낙찰 결과 보기'}</button><span>개찰 1순위와 최종 낙찰업체를 구분해 확인합니다.</span></div>
         {showOpeningResults && <div id="fnd-opening-results"><OpeningResultsPanel key={`${bid.type}-${bid.number}-${bid.revision}`} row={bid} onClose={() => setShowOpeningResults(false)} autoFocus={false} /></div>}

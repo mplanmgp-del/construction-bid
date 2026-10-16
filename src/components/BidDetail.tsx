@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { CalendarClock, Check, Download, ExternalLink, FileText, Info, MapPin, ShieldCheck, X } from 'lucide-react';
+import { Calculator, CalendarClock, Check, Download, ExternalLink, FileText, Info, MapPin, ShieldCheck, X } from 'lucide-react';
 import { BookmarkButton } from './BookmarkButton';
 import { assessRegion, daysUntil, formatDateTime, formatPrice } from '../domain';
 import { NOTICE_REVISION_CONTEXT, type BidNotice, type CompanyProfile, type RegionAssessment } from '../types';
@@ -10,6 +10,7 @@ import { CompleteNoticeDetails } from '../live/CompleteNoticeDetails';
 import { PendingNoticeDetails } from '../live/NoticeSummary';
 import { noticeState } from '../notice-status';
 import { noticeSubmissionMessage } from './notice-schedule';
+import { buildBidHelperSeed, type BidHelperSeed } from '../bid-helper/notice-seed';
 import './detail-remake.css';
 
 interface BidDetailProps {
@@ -20,6 +21,7 @@ interface BidDetailProps {
   onClose: () => void;
   onToggleBookmark: () => void;
   onEnriched?: (detail: G2bNoticeDetail) => void;
+  onOpenBidHelper?: (seed: BidHelperSeed) => void;
   preparation?: ReactNode;
   now?: number;
 }
@@ -89,7 +91,7 @@ function KnownNoticeFallback({ bid }: { bid: BidNotice }) {
   </details>;
 }
 
-export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment, isBookmarked, onClose, onToggleBookmark, onEnriched, preparation, now = Date.now() }: BidDetailProps) {
+export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment, isBookmarked, onClose, onToggleBookmark, onEnriched, onOpenBidHelper, preparation, now = Date.now() }: BidDetailProps) {
   const id = useId();
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   const drawer = useRef<HTMLElement>(null);
@@ -230,8 +232,8 @@ export function BidDetail({ bid: inputBid, profile, assessment: inputAssessment,
 
         <div className="detail-content" role="tabpanel" id={`${id}-panel-${activeTab}`} aria-labelledby={`${id}-tab-${activeTab}`} tabIndex={0}>
           {isLive && activeTab === 'results' && <PublicResults bid={bid} />}
-          {isLive && activeTab === 'preparation' && preparation}
-          {isLive && activeTab === 'overview' && <div className="detail-live-status"><p role="status">{detailStatus}</p><div><button className="text-button" onClick={() => setDetailRetry(value => value + 1)}>새로 조회</button><a href={`/notice-detail.html?${new URLSearchParams({ number: bid.number, revision: historical?.latestRevision ?? bid.revision, type: bid.type })}`} target="_blank" rel="noopener noreferrer">{historical ? '최신 차수 넓은 화면으로 보기' : '넓은 화면으로 보기'}<ExternalLink size={14} /></a></div></div>}
+          {isLive && activeTab === 'preparation' && <>{onOpenBidHelper && <div className="detail-live-status"><button type="button" className="text-button" onClick={() => onOpenBidHelper(buildBidHelperSeed(bid, detailData))}><Calculator size={15} />투찰 도우미로 계산</button></div>}{preparation}</>}
+          {isLive && activeTab === 'overview' && <div className="detail-live-status"><p role="status">{detailStatus}</p><div>{onOpenBidHelper && <button type="button" className="text-button" onClick={() => onOpenBidHelper(buildBidHelperSeed(bid, detailData))}><Calculator size={15} />투찰 도우미로 계산</button>}<button className="text-button" onClick={() => setDetailRetry(value => value + 1)}>새로 조회</button><a href={`/notice-detail.html?${new URLSearchParams({ number: bid.number, revision: historical?.latestRevision ?? bid.revision, type: bid.type })}`} target="_blank" rel="noopener noreferrer">{historical ? '최신 차수 넓은 화면으로 보기' : '넓은 화면으로 보기'}<ExternalLink size={14} /></a></div></div>}
           {activeTab === 'overview' && (isLive ? detailData ? <CompleteNoticeDetails detail={detailData} bid={bid} /> : <><PendingNoticeDetails bid={bid} failed={failedRequest === requestKey} /><KnownNoticeFallback bid={bid} /></> : <>
             <div className="detail-price-block"><span>추정가격</span><strong>{formatPrice(bid.estimatedPrice)}</strong><p>{bid.estimatedPrice === null ? '이 공고에는 추정가격이 제공되지 않았습니다.' : '금액 검색 및 정렬에 사용하는 추정가격입니다.'}</p></div>
             <section className="detail-section" aria-labelledby={`${id}-base-info`}>

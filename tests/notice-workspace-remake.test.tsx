@@ -66,6 +66,13 @@ describe('deadline-first notice workspace', () => {
     expect(html).toContain('aria-modal="true"');
   });
 
+  it('opens a calculation task from a live notice without requiring a member preparation record', () => {
+    const html = renderToStaticMarkup(<BidDetail bid={bid} now={now}
+      profile={DEMO_PROFILES[0]} assessment={{ status: 'review', reason: '지역조건 확인 필요' }}
+      isBookmarked={false} onClose={() => {}} onToggleBookmark={() => {}} onOpenBidHelper={() => {}} />);
+    expect(html).toContain('투찰 도우미로 계산');
+  });
+
   it('keeps known qualifications and original attachments reachable before full detail is available', () => {
     const html = renderDetail({ ...bid, licenses: ['구조물해체·비계공사업'],
       requirements: ['현장설명 참가등록 필요'], documents: [
