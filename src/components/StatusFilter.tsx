@@ -2,7 +2,6 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, X } from 'lucide-react';
 import { NOTICE_STATUSES, type NoticeStatus } from '../types';
-import './StatusFilter.css';
 
 interface Props {
   values: NoticeStatus[];

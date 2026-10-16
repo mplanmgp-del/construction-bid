@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Check, LockKeyhole, ShieldCheck, UnlockKeyhole } from 'lucide-react';
 import { APP_MENUS, DEFAULT_MAINTENANCE_MESSAGE, type MenuKey, type MenuSetting } from './types';
 import type { useMenuAccess } from './useMenuAccess';
-import './admin.css';
 
 type Access = ReturnType<typeof useMenuAccess>;
 export function AdminPage({ access, onLogin }: { access: Access; onLogin: () => void }) {

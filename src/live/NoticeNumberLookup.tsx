@@ -7,7 +7,6 @@ import {
   NoticeNumberController, visibleNoticeNumberSearch,
   type NoticeNumberSnapshot, type NoticeNumberType,
 } from './notice-number-search';
-import './notice-number-search.css';
 
 function fullDate(value?: string): string {
   if (!value?.trim()) return '일정 미제공';

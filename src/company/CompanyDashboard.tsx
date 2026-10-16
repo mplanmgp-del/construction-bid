@@ -10,7 +10,6 @@ import { useCompanyHistory } from './useCompanyHistory';
 import { collectedCount, collectedWinningAmount, mergeCompanyProfile, type CompanyIndexFilter } from './company-index';
 import { koreanToday } from '../live/client';
 import { fetchCompanyApi } from './company-request';
-import './company-dashboard.css';
 
 const initialFilter: CompanyIndexFilter = { from: '', to: '', outcome: 'all', page: 1, awardsPage: 1, contractsPage: 1 };
 type CompanySearchResponse = { items: PublicCompany[]; message?: string; source?: string; year?: number; page?: number; hasMore?: boolean };

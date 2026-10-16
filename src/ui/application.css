@@ -1,0 +1,28 @@
+/* Both application entries share one ordered stylesheet. Keep feature rules
+   before workspace overrides so build chunk extraction cannot reverse them. */
+@import '../styles.css';
+@import '../components/SupportingViews.css';
+@import '../components/RegionFilter.css';
+@import '../components/StatusFilter.css';
+@import '../components/BookmarkButton.css';
+@import '../components/ExportButton.css';
+@import '../components/FloatingQuickLinks.css';
+@import '../components/NoticeList.css';
+@import '../live/notice-search.css';
+@import '../live/notice-number-search.css';
+@import '../live/unified-notice-search.css';
+@import '../live/CompleteNoticeDetails.css';
+@import '../live/RelatedNoticeDetails.css';
+@import '../live/opening-results.css';
+@import '../print/NoticePrintDialog.css';
+@import '../member/member.css';
+@import '../admin/admin.css';
+@import '../alerts/alerts.css';
+@import '../alerts/alerts-popover.css';
+@import '../company/company-dashboard.css';
+@import '../company/company-contracts.css';
+@import '../company/company-awards.css';
+@import '../bid-helper/bid-helper.css';
+@import './workspace.css';
+@import './supporting-workspaces.css';
+@import '../components/detail-remake.css';

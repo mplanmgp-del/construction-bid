@@ -10,3 +10,14 @@
 .company-opening-group>header{scroll-margin-top:130px;outline:none}.company-opening-pagination{display:flex;align-items:center;justify-content:space-between;gap:13px;flex-wrap:wrap;padding:16px 18px;border-top:1px solid #e6edf7;background:#fbfcff}.company-opening-pagination>p{font-size:10px;color:#8da4c2;line-height:1.8;font-variant-numeric:tabular-nums}.company-opening-pagination>p>span{margin-left:8px;color:#b0bed2;font-size:9px}.company-opening-pagination>nav{display:flex;align-items:center;gap:13px}.company-opening-panel .company-opening-pagination button{display:flex;align-items:center;gap:5px;min-height:31px;padding:6px 9px;border:1px solid #dce6f4;background:white;border-radius:5px;font-size:10px;color:#7495c1}.company-opening-pagination button:disabled{opacity:.35}.company-opening-pagination nav>span{font-size:10px;color:#93a9c5;font-variant-numeric:tabular-nums}
 @media(max-width:620px){.company-opening-pagination{padding:14px 12px;justify-content:center}.company-opening-pagination>p{width:100%;text-align:center;font-size:9px}.company-opening-pagination>p>span{font-size:8px}.company-opening-group>header{scroll-margin-top:140px}}
 @media print{.fnd-opening-launch,.company-opening-panel,.company-opening-trigger{display:none!important}}
+
+/* Keep long official identities inside their card; only the result table scrolls sideways. */
+.company-opening-panel,.company-opening-groups,.company-opening-group,.company-opening-desktop,.company-opening-mobile{min-width:0;max-width:100%}
+.company-opening-panel :is(.company-opening-heading small,.company-opening-group>header p,.company-opening-group>header>div>span,.company-opening-group>header>div>strong,.company-opening-reason p,.company-opening-mobile article>p){min-width:0;overflow-wrap:anywhere}
+.company-opening-panel .company-opening-company>strong,.company-opening-panel .company-opening-company>button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.company-opening-panel .company-opening-scope>label{min-width:0}
+.company-opening-panel .company-opening-scope select{min-width:0;width:100%}
+.company-opening-panel .company-opening-mobile dl{grid-template-columns:repeat(2,minmax(0,1fr))}
+.company-opening-panel .company-opening-mobile dl>div{min-width:0}
+.company-opening-panel .company-opening-mobile dd{min-width:0;max-width:100%}
+@media(max-width:620px){.company-opening-panel .company-opening-mobile dl{grid-template-columns:minmax(0,1fr)}.company-opening-panel .company-opening-toolbar>div{flex-wrap:wrap}.company-opening-panel .company-opening-pagination>nav{max-width:100%;flex-wrap:wrap;justify-content:center}}

@@ -6,7 +6,6 @@ import { koreanToday } from '../live/client';
 import { fetchCompanyApi } from './company-request';
 import { normalizeAwardDay, type AwardDateRange } from './company-awards';
 import { contractJobKey, createContractJobs, mergeCompanyContracts, restartContractJob, runContractJobs, type ContractJob } from './company-contracts';
-import './company-contracts.css';
 
 const number = (value: number) => value.toLocaleString('ko-KR');
 const money = (value: number | null) => value == null ? '-' : `${number(value)}원`;

@@ -3,7 +3,6 @@ import { Cloud, LogIn, ShieldCheck, UserRound } from 'lucide-react';
 import type { MemberWorkspaceAccess } from './useMemberWorkspace';
 import { PREPARATION_STAGES, type BidPreparationRecord } from './workspace';
 import type { BidNotice } from '../types';
-import './member.css';
 
 export function MemberAccess({ member }: { member: MemberWorkspaceAccess }) {
   const id = useId();

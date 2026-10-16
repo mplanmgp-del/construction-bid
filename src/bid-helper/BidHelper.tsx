@@ -5,7 +5,6 @@ import { BID_GLOSSARY } from './glossary';
 import { clearPendingBidHelperSeed, readPendingBidHelperSeed, type BidHelperSeed } from './notice-seed';
 import { readRate, readWon } from './form';
 import { EMPTY_FIELDS, restoreBidHelperState, serializeBidHelperState, type BidHelperFields as Fields } from './draft';
-import './bid-helper.css';
 
 type Mode = 'scenario' | 'analysis' | 'glossary';
 const EMPTY = EMPTY_FIELDS;

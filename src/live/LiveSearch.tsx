@@ -3,7 +3,6 @@ import { ArrowRight, Search, X } from 'lucide-react';
 import { indexedSearchDateError } from './indexed-notice-search';
 import type { NoticeQuery } from './useLiveNotices';
 import { deadlineMonthWindow } from '../notice-deadline-window';
-import './notice-search.css';
 
 export function LiveSearch({ query, loading, refreshBlocked = false, onSearch }: { query: NoticeQuery; loading: boolean; refreshBlocked?: boolean; onSearch: (query: NoticeQuery) => void; onRefresh: () => void }) {
   const [draft, setDraft] = useState(query);

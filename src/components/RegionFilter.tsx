@@ -3,7 +3,6 @@ import { Plus, X } from 'lucide-react';
 import { REGION_PROVINCES, regionDistricts, regionLocalities } from '../region-directory';
 import { regionKey, regionLabel, toggleSearchRegion } from '../search-filters';
 import type { SearchRegion } from '../types';
-import './RegionFilter.css';
 
 export function RegionFilter({ values, onChange }: { values: SearchRegion[]; onChange: (values: SearchRegion[]) => void }) {
   const [province, setProvince] = useState('');

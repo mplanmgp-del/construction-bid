@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowDownToLine, ChevronDown, FileSpreadsheet, FileText, LoaderCircle } from 'lucide-react';
-import './ExportButton.css';
 
 export type ExportFormat = 'xlsx' | 'csv';
 

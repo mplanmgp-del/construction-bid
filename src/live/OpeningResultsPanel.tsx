@@ -3,7 +3,6 @@ import { ArrowRight, ChevronLeft, ChevronRight, ExternalLink, Info, LoaderCircle
 import type { CompanyParticipation } from '../company-types';
 import type { NoticeOpeningResults, OpeningResultGroup, OpeningParticipant } from '../opening-result-types';
 import { fetchApi } from './client';
-import './opening-results.css';
 
 const number = (value: number) => value.toLocaleString('ko-KR');
 const money = (value: number | null | undefined) => value == null ? '-' : `${number(value)}원`;

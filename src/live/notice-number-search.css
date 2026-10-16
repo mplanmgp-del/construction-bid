@@ -51,3 +51,13 @@
 .notice-number-fetched{font-size:11px;color:#91a0b6;text-align:right;margin:13px 0 0}
 @media(max-width:760px){.notice-number-panel{padding:19px 16px}.notice-number-heading{gap:8px}.notice-number-heading p{font-size:12px;line-height:1.6}.notice-number-form{flex-wrap:wrap;gap:10px}.notice-number-input{flex-basis:100%}.notice-number-type{flex:1;width:auto}.notice-number-submit{flex:1}.notice-number-card{padding:16px}.notice-number-card-top{gap:9px}.notice-number-dates{grid-template-columns:1fr;padding:13px 14px;gap:10px}.notice-number-dates>div{display:flex;gap:12px;align-items:baseline}.notice-number-dates dt{min-width:92px;margin:0}.notice-number-dates dd{min-width:0}.notice-number-card-actions .button{flex:1;justify-content:center}.notice-number-history li{padding:10px}.notice-number-card h3{font-size:16px}}
 @media(prefers-reduced-motion:reduce){.notice-number-submit-icon.is-loading>svg:last-child{animation:none}}
+
+/* Number and agency identities can be long uninterrupted strings. */
+.notice-number-results,.notice-number-card{min-width:0;max-width:100%}
+.notice-number-card-top>span,.notice-number-card-top>div{min-width:0;overflow-wrap:anywhere}
+.notice-number-card-top>div{flex-wrap:wrap}
+.notice-number-card h3 button{display:block;min-width:0;max-width:100%;width:100%;white-space:normal;overflow-wrap:anywhere}
+.notice-number-agency,.notice-number-history-note,.notice-number-history li>div,.notice-number-error>span,.notice-number-cancel-note>span{min-width:0;overflow-wrap:anywhere}
+.notice-number-card-actions .button{min-width:0;white-space:normal}
+.notice-number-history li>button{flex:none;min-height:44px}
+@media(max-width:480px){.notice-number-history li{flex-wrap:wrap}.notice-number-history li>div{flex:1 1 100%}.notice-number-history li>button{margin-left:auto}.notice-number-dates>div{flex-wrap:wrap;gap:3px 10px}}

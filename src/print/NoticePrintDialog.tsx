@@ -5,7 +5,6 @@ import type { G2bNoticeDetail, G2bRelatedDetail } from '../g2b-types';
 import type { BidNotice } from '../types';
 import { fetchApi } from '../live/client';
 import { buildNoticePrintDocument, type NoticePrintDocument } from './notice-print-model';
-import './NoticePrintDialog.css';
 
 interface Props { bid: BidNotice; detail: G2bNoticeDetail; related: G2bRelatedDetail | null; onClose: () => void; }
 interface ReadyDocument { document: NoticePrintDocument; url: string; notice: string; }

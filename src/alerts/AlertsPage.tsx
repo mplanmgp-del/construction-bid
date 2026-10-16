@@ -7,7 +7,6 @@ import type { AlertsAccess } from './useAlerts';
 import { BrowserPushControls } from './BrowserPushControls';
 import { BookmarkButton } from '../components/BookmarkButton';
 import { matchAlarmNotice, normalizeAlertSettings } from './domain';
-import './alerts.css';
 
 interface AlertForm {
   enabled: boolean; notifyChanges: boolean; keywords: string; excludeKeywords: string;

@@ -6,7 +6,6 @@ import { ApiError, koreanToday } from '../live/client';
 import { fetchCompanyApi } from './company-request';
 import { OpeningResultsPanel } from '../live/OpeningResultsPanel';
 import { companyAwardKey, companyAwardTaskKey, companyAwardTasks, mergeCompanyAwards, normalizeAwardDay, type AwardDateRange } from './company-awards';
-import './company-awards.css';
 
 type AwardJob = { query: CompanyAwardQuery; status: 'idle' | 'loading' | 'complete' | 'partial' | 'error'; result?: CompanyAwardPage; error?: string; force?: boolean };
 const number = (value: number) => value.toLocaleString('ko-KR');

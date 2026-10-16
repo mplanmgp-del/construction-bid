@@ -150,13 +150,13 @@ input::placeholder,textarea::placeholder { color:#6b7982; }
 .toast { font-size:14px;line-height:1.7;background:#16392e;box-shadow:0 6px 30px #11253520; }
 @media(min-width:1101px) {
   .app-header { position:fixed;inset:0 auto 0 0;width:216px;height:100dvh;background:var(--navy);border:0;backdrop-filter:none;z-index:60; }
-  .header-inner { display:flex;flex-direction:column;align-items:stretch;gap:0;height:100%;padding:32px 18px 20px;max-width:none; }
+  .header-inner { display:flex;flex-direction:column;align-items:stretch;gap:0;height:100%;padding:32px 18px 20px;max-width:none;overflow-y:auto;overscroll-behavior-y:contain; }
   .brand { color:#fff;font-size:19px;letter-spacing:-.8px;gap:8px;padding:0 4px;min-height:42px; }
   .brand b { color:#a7d9c7; }
   .brand-mark { width:30px;transform:scale(.86);transform-origin:center; }
   .brand-mark span,.brand-mark span:nth-child(3) { background:#a7d9c7; }
   .brand-mark span:nth-child(2) { background:#518b7b; }
-  .main-nav { flex-direction:column;align-items:stretch;gap:7px;height:auto;margin-top:48px; }
+  .main-nav { flex-direction:column;align-items:stretch;gap:7px;height:auto;margin-top:48px;flex-shrink:0; }
   .main-nav>button { justify-content:flex-start;gap:12px;padding:13px 14px;min-height:48px;font-size:14px;color:#b8c8cc;border-radius:8px; }
   .main-nav>button>svg { display:block; }
   .main-nav>button.active { color:#d7f3e6;background:#24473f;font-weight:650; }
@@ -204,8 +204,8 @@ input::placeholder,textarea::placeholder { color:#6b7982; }
   .brand { height:44px;font-size:18px; }
   .header-account { min-height:44px;gap:4px; }
   .header-account .button { min-height:40px;padding:8px 10px;font-size:13px; }
-  .main-nav { margin-top:7px;gap:2px;scrollbar-width:none; }
-  .main-nav>button { min-height:46px;font-size:12px;padding:8px 4px;gap:4px;flex:1 1 0;min-width:0; }
+  .main-nav { margin-top:7px;gap:2px;scrollbar-width:thin;overflow-y:hidden;scroll-padding-inline:10px; }
+  .main-nav>button { min-height:46px;font-size:13px;padding:8px 10px;gap:5px;flex:0 0 auto;min-width:max-content;white-space:nowrap; }
   .main-nav>button>svg:not(.menu-lock-icon) { display:none; }
   .main-nav>button>svg.menu-lock-icon { width:11px; }
   .nav-count { font-size:10px; }

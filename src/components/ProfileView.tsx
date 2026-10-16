@@ -4,7 +4,6 @@ import { DISTRICTS, LICENSES, PROVINCES } from '../data';
 import type { CompanyProfile } from '../types';
 import { formatBusinessNumber, normalizeBusinessNumber } from '../company-profile';
 import { QUICK_LINK_LABEL_LIMIT, quickLinkDrafts, validateQuickLinkDrafts } from '../quick-links';
-import './FloatingQuickLinks.css';
 
 interface ProfileViewProps {
   profile: CompanyProfile;

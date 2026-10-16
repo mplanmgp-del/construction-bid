@@ -7,7 +7,6 @@ import { NoticeSummary } from './NoticeSummary';
 import { safeG2bUrl } from './client';
 import { RelatedNoticeDetails } from './RelatedNoticeDetails';
 import { NoticePrintDialog } from '../print/NoticePrintDialog';
-import './CompleteNoticeDetails.css';
 
 const icons: Record<string, ReactNode> = {
   general: <Building2 />, schedule: <CalendarClock />, eligibility: <ShieldCheck />,

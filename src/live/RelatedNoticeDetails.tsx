@@ -4,7 +4,6 @@ import type { G2bRelatedDetail, G2bRelatedGroup, G2bRelatedRecord } from '../g2b
 import type { BidNotice } from '../types';
 import { formatDateTime } from '../domain';
 import { fetchApi, safeG2bUrl } from './client';
-import './RelatedNoticeDetails.css';
 
 function groupIcon(id: string) {
   if (/contract|cntrct/i.test(id)) return <FileSignature size={19} />;

@@ -5,7 +5,6 @@ import { noticeState } from '../notice-status';
 export { noticeState } from '../notice-status';
 import { needsNoticeRegions, noticeRegionKey } from '../live/notice-regions';
 import { noticeSubmissionMessage } from './notice-schedule';
-import './NoticeList.css';
 
 export function HighlightTitle({ title, keyword }: { title: string; keyword: string }) {
   const words = [...new Set(keyword.trim().split(/\s+/).filter(Boolean))].sort((a, b) => b.length - a.length);

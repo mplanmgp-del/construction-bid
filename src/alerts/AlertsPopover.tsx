@@ -5,7 +5,6 @@ import { formatDateTime } from '../domain';
 import type { AlertInboxItem, AlertNotice } from './types';
 import { BookmarkButton } from '../components/BookmarkButton';
 import type { AlertsAccess } from './useAlerts';
-import './alerts-popover.css';
 
 export function AlertBell({ unreadCount, onOpen, disabled = false, expanded = false, controls, buttonRef }: {
   unreadCount: number; onOpen: () => void; disabled?: boolean; expanded?: boolean; controls?: string; buttonRef?: Ref<HTMLButtonElement>;

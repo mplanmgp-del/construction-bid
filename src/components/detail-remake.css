@@ -1,10 +1,10 @@
 /* Shared notice detail surfaces; scoped to the drawer and standalone page. */
 @media screen {
 .detail-drawer.detail-drawer, .fnd-page { --detail-accent:var(--blue,#116b57); --detail-border:#dbe3e8; --detail-text:#172c35; --detail-muted:#52646e; color:var(--detail-text); font-size:14px; }
-.detail-drawer.detail-drawer { background:#fff; }
-.detail-drawer .detail-topbar { padding:16px 24px 0; }
+.detail-drawer.detail-drawer { background:#fff; min-width:0; max-width:100vw; }
+.detail-drawer .detail-topbar { position:sticky; top:0; z-index:40; min-height:60px; box-sizing:border-box; padding:8px 24px; background:#fff; border-bottom:1px solid var(--detail-border); }
 .detail-drawer .detail-topbar .eyebrow { color:var(--detail-muted); font-size:12px; }
-.detail-drawer .detail-close { width:44px; height:44px; background:#f3f5f7; color:var(--detail-text); border-radius:8px; }
+.detail-drawer .detail-close { width:44px; height:44px; flex:none; background:#f3f5f7; color:var(--detail-text); border-radius:8px; }
 .detail-drawer .detail-heading { padding:10px 24px 20px; }
 .detail-drawer .detail-title-row h2 { color:var(--detail-text); font-size:25px; line-height:1.5; letter-spacing:-.6px; }
 .detail-drawer .detail-title-row .notice-bookmark { min-height:44px; }
@@ -27,17 +27,25 @@
 .detail-drawer .detail-footer .button { min-height:44px; font-size:14px; }
 .detail-drawer .detail-info-grid, .detail-drawer .detail-requirements, .detail-drawer .detail-description, .detail-drawer .detail-license, .detail-drawer .detail-document-name strong { font-size:14px; }
 .detail-drawer .detail-help, .detail-drawer .detail-warning p { color:var(--detail-muted); font-size:13px; }
+.detail-drawer :is(.detail-agency,.detail-notice-number,.detail-description,.detail-live-status,.detail-warning,.detail-region-assessment) { min-width:0; overflow-wrap:anywhere; }
+.detail-drawer :is(.detail-warning,.detail-region-assessment) > div { min-width:0; }
+.detail-drawer .detail-live-status > div { flex-wrap:wrap; }
+.detail-drawer .detail-content { min-width:0; }
+.detail-drawer .fnd-jumpbar { top:60px; }
+.detail-drawer :is(.fnd-section,.fnd-related-anchor) { scroll-margin-top:140px; }
 .fnd-page { min-height:100vh; background:#f3f5f7; }
 .fnd-page .fnd-page-header { background:#112535; border-color:#112535; }
 .fnd-page .fnd-brand, .fnd-page .fnd-brand b, .fnd-page .fnd-header-caption { color:#fff; }
 .fnd-page .fnd-brand-icon { color:#fff; background:#254c49; }
-.fnd-page .fnd-page-header-inner { min-height:72px; }
+.fnd-page .fnd-page-header-inner { min-height:0; }
 .fnd-page .fnd-header-caption { margin-left:auto; font-size:13px; opacity:.85; }
 .fnd-page .fnd-page-main { max-width:1280px; padding-inline:28px; }
+.fnd-page .fnd-jumpbar { min-width:0;max-width:100%;margin-inline:0;padding-inline:0; }
 .fnd-page .fnd-breadcrumb { color:var(--detail-muted); font-size:13px; }
 .fnd-page .fnd-hero { border-color:var(--detail-border); border-radius:12px; box-shadow:none; }
 .fnd-page .fnd-hero h1 { color:var(--detail-text); font-size:28px; }
 .fnd-page .fnd-hero-meta, .fnd-page .fnd-hero-bottom { color:var(--detail-muted); font-size:14px; }
+.fnd-page .fnd-hero-meta > span { min-width:0; overflow-wrap:anywhere; }
 .fnd-page .fnd-hero-bottom b, .fnd-page .fnd-notice-number { color:var(--detail-muted); }
 .fnd-page .fnd-hero-actions > button { width:44px; height:44px; color:var(--detail-muted); border-color:var(--detail-border); }
 .fnd-page .fnd-badges > span { color:var(--detail-muted); font-size:12px; border-color:var(--detail-border); }
@@ -49,13 +57,14 @@
 .fnd-page .fnd-data-footer, .fnd-page .fnd-data-footer p { color:var(--detail-muted); font-size:13px; }
 .fnd-page .fnd-page-actions { display:flex; gap:12px; justify-content:space-between; margin:0; padding:0 0 18px; }
 .fnd-page .fnd-page-actions > a { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:46px; padding:12px 18px; font-size:14px; border-radius:8px; }
+.fnd-page .fnd-opening-launch > button { max-width:100%; white-space:normal; text-align:left; }
 .fnd-page .fnd-primary-button { background:var(--detail-accent); color:#fff; }
 .fnd-page .fnd-secondary-button { border-color:var(--detail-border); color:var(--detail-text); background:#fff; }
 .fnd-page :focus-visible, .detail-drawer.detail-drawer :focus-visible { outline:3px solid #64a795; outline-offset:3px; }
 :is(.fnd-page,.detail-drawer) .fnd-complete { color:#172c35; font-size:14px; }
 :is(.fnd-page,.detail-drawer) .fnd-key-summary { border-color:#dbe3e8; border-radius:10px; padding:20px; }
 :is(.fnd-page,.detail-drawer) .fnd-estimate > span, :is(.fnd-page,.detail-drawer) .fnd-summary-date > span { color:#52646e; font-size:13px; }
-:is(.fnd-page,.detail-drawer) .fnd-estimate > strong { color:var(--detail-accent); font-size:28px; }
+:is(.fnd-page,.detail-drawer) .fnd-estimate > strong { color:var(--detail-accent); font-size:clamp(20px,4cqi,28px); }
 :is(.fnd-page,.detail-drawer) .fnd-estimate > small { color:#52646e; font-size:12px; }
 :is(.fnd-page,.detail-drawer) .fnd-summary-date > strong { color:#172c35; font-size:18px; }
 :is(.fnd-page,.detail-drawer) .fnd-jumpbar { background:#f3f5f7; border-color:#dbe3e8; }
@@ -93,8 +102,8 @@
   .fnd-page .fnd-hero h1 { font-size:23px; }
   .fnd-page .fnd-header-caption, .fnd-page .fnd-live-source { display:none; }
   .fnd-page .fnd-page-actions { position:fixed; z-index:35; inset:auto 0 0; margin:0; gap:10px; padding:12px 14px calc(12px + env(safe-area-inset-bottom)); background:#fffffff5; border-top:1px solid #dbe3e8; }
-  .fnd-page .fnd-page-actions > a { flex:1; padding-inline:10px; }
-  .fnd-page .fnd-page-actions > .fnd-secondary-button { flex:0 1 auto; }
+  .fnd-page .fnd-page-actions > a { flex:1 1 0; min-width:0; padding-inline:10px; white-space:normal; }
+  .fnd-page .fnd-page-actions > .fnd-secondary-button { flex:1 1 0; }
   :is(.fnd-page,.detail-drawer) .fnd-detail-tools { align-items:flex-start; }
   :is(.fnd-page,.detail-drawer) .fnd-key-summary { padding:16px; }
   :is(.fnd-page,.detail-drawer) .fnd-field { font-size:14px; }

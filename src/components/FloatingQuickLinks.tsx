@@ -2,7 +2,6 @@ import { useId, useState } from 'react';
 import { ChevronDown, ExternalLink, Link2 } from 'lucide-react';
 import type { CompanyProfile } from '../types';
 import { readQuickLinks } from '../quick-links';
-import './FloatingQuickLinks.css';
 
 export function FloatingQuickLinks({ profile }: { profile: CompanyProfile }) {
   const id = useId();

@@ -3,3 +3,14 @@
 @container(max-width:620px){.fnd-tool-actions{flex-wrap:wrap}.fnd-tool-actions>.fnd-print-document{min-height:44px}.fnd-tool-actions>.fnd-search{flex-basis:50%}}
 @media(prefers-reduced-motion:reduce){.npd-spin{animation:none}}
 @media print{.npd-backdrop{display:none!important}.fnd-print-document{display:none!important}}
+
+.npd-backdrop,.npd-backdrop *{box-sizing:border-box}
+.npd-dialog,.npd-header,.npd-content,.npd-footer,.npd-paper,.npd-header>div,.npd-footer>div{min-width:0}
+.npd-dialog{max-width:100%}
+.npd-close{flex:none}
+.npd-header h2,.npd-header p,.npd-footer p,.npd-ready,.npd-summary dd,.npd-section dd,.npd-documents li{overflow-wrap:anywhere}
+.npd-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+.npd-summary>div,.npd-summary dd,.npd-section dt,.npd-section dd{min-width:0}
+.npd-actions{min-width:0;max-width:100%;flex-wrap:wrap}
+@media(max-width:700px){.npd-summary{grid-template-columns:minmax(0,1fr)}}
+@media screen and (max-height:480px){.npd-backdrop{padding:8px}.npd-dialog{height:auto;max-height:calc(100dvh - 16px);overflow-y:auto;overscroll-behavior:contain}.npd-header{position:sticky;top:0;z-index:2}.npd-content{overflow:visible;flex:none}}

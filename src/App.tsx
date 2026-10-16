@@ -11,7 +11,6 @@ import { FilterPanel } from './components/FilterPanel';
 import { ProfileView } from './components/ProfileView';
 import { BidDetail } from './components/BidDetail';
 import { ExportButton, type ExportFormat } from './components/ExportButton';
-import './components/SupportingViews.css';
 import { useMemberWorkspace } from './member/useMemberWorkspace';
 import { MemberAccess, BidPreparation } from './member/MemberAccess';
 import { mergeNoticeDetail } from './member/workspace';

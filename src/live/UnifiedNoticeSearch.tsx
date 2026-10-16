@@ -6,7 +6,6 @@ import { deadlineMonthWindow } from '../notice-deadline-window';
 import { NoticeNumberController, visibleNoticeNumberSearch } from './notice-number-search';
 import { NoticeNumberResults } from './NoticeNumberLookup';
 import { noticeSearchKind, planUnifiedNoticeSearch, reconcileUnifiedSearchDraft, type NoticeSearchKind, type NoticeSearchTarget, type UnifiedSearchDraft } from './unified-notice-search';
-import './unified-notice-search.css';
 
 export interface UnifiedNoticeSearchProps {
   query: NoticeQuery;

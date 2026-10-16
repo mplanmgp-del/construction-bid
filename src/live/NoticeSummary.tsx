@@ -2,7 +2,6 @@ import { CalendarClock, FileCheck2 } from 'lucide-react';
 import type { BidNotice } from '../types';
 import type { G2bNoticeDetail } from '../g2b-types';
 import { formatDateTime, formatPrice } from '../domain';
-import './CompleteNoticeDetails.css';
 
 export function NoticeSummary({ bid, detail, pending = false, failed = false }: {
   bid: BidNotice; detail?: G2bNoticeDetail; pending?: boolean; failed?: boolean;

@@ -1,6 +1,5 @@
 import type { VerifiedNoticeSearchPage, VerifiedNoticeSearchView } from './active-catalog-types';
 import { formatDateTime } from '../domain';
-import './notice-search.css';
 
 export function VerifiedSearchFeedback({ page, loading, stale, error, onRestart }: {
   page: VerifiedNoticeSearchPage | VerifiedNoticeSearchView | null; loading: boolean; stale: boolean; error: string; onRestart: () => void;

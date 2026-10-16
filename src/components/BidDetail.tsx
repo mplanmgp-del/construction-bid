@@ -11,7 +11,6 @@ import { PendingNoticeDetails } from '../live/NoticeSummary';
 import { noticeState } from '../notice-status';
 import { noticeSubmissionMessage } from './notice-schedule';
 import { buildBidHelperSeed, type BidHelperSeed } from '../bid-helper/notice-seed';
-import './detail-remake.css';
 
 interface BidDetailProps {
   bid: BidNotice;

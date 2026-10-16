@@ -18,7 +18,6 @@ import { menuIsLocked } from '../admin/navigation';
 import { browserNoticeNumberRepository, buildNoticeNumberResult, type NoticeNumberRepository } from './notice-number-search';
 import { noticeSubmissionMessage } from '../components/notice-schedule';
 import { buildBidHelperSeed, storePendingBidHelperSeed } from '../bid-helper/notice-seed';
-import '../components/detail-remake.css';
 
 function queryNotice() {
   const params = new URLSearchParams(window.location.search);

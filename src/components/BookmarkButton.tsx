@@ -1,5 +1,4 @@
 import { Star } from 'lucide-react';
-import './BookmarkButton.css';
 
 export function BookmarkButton({ noticeTitle, saved, onToggle, disabled = false, className = '' }: {
   noticeTitle: string; saved: boolean; onToggle: () => void; disabled?: boolean; className?: string;
