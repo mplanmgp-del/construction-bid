@@ -9,10 +9,10 @@ import { isAlarmEligible } from '../src/notice-deadline-window.ts';
 const dayKst=(time:number)=>new Date(time+9*3600_000).toISOString().slice(0,10);
 const safeError=(error:unknown)=>error instanceof Error&&/^나라장터|^공고 |^참가조건|^조회 도중|^알리미 저장/.test(error.message)?error.message:'알리미 확인 중 오류가 발생했습니다. 다음 확인 때 다시 시도합니다.';
 
-export async function runAlertWorker(store:AlertStore,{dispatchOnly=false,provider,now=Date.now(),catalog,deadline=Date.now()+43_000}: {dispatchOnly?:boolean;provider?:AlertProvider;now?:number;catalog?:CatalogReader;deadline?:number}={}) {
+export async function runAlertWorker(store:AlertStore,{dispatchOnly=false,forceCollection=false,provider,now=Date.now(),catalog,deadline=Date.now()+43_000}: {dispatchOnly?:boolean;forceCollection?:boolean;provider?:AlertProvider;now?:number;catalog?:CatalogReader;deadline?:number}={}) {
   store.setDeadline?.(deadline);
   provider??=createAlertProvider(undefined,undefined,{deadline:Math.min(deadline-(catalog?13_000:8_000),Date.now()+30_000),maxRequests:40});
-  const claim=await store.claim(dispatchOnly);
+  const claim=await store.claim(dispatchOnly,forceCollection&&!dispatchOnly);
   if(!claim.leaseId) return {ok:true,skipped:true};
   const lease=claim.leaseId;let collected=0,warning:string|undefined;
   let checkpoint:AlertCheckpoint|undefined;

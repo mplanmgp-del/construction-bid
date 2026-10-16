@@ -40,7 +40,7 @@ export function createAlertStore(options:{url?:string;key?:string;fetcher?:typeo
   const worker=<T>(action:string,payload:unknown={})=>rpc<T>('bid_alert_worker',{p_token:options.token??process.env.ALERT_WORKER_TOKEN,p_action:action,p_payload:payload},undefined,4_000);
   return {authenticate,setDeadline:(time:number)=>{deadline=time;},user:<T>(bearer:string,action:string,payload:unknown={})=>rpc<T>('bid_alert_user',{p_action:action,p_payload:payload},bearer),
     setup:(bearer:string)=>rpc('bid_alert_admin_setup',{p_token:process.env.ALERT_WORKER_TOKEN,p_endpoint:'https://construction-bid-nine.vercel.app/api/alerts?action=worker'},bearer),
-    claim:(dispatchOnly=false)=>worker<AlertClaim>('claim',{dispatchOnly}),
+    claim:(dispatchOnly=false,forceCollection=false)=>worker<AlertClaim>('claim',{dispatchOnly,...(forceCollection&&!dispatchOnly?{forceCollection:true}:{})}),
     load:(leaseId:string,keys:string[])=>worker<{observations:Observation[];memberships:Membership[]}>('load',{leaseId,keys}),
     commit:(leaseId:string,payload:Partial<AlertCommit>&{checkpoint?:AlertCheckpoint;finish?:boolean;error?:string;warning?:string;retryWindowMinutes?:number})=>worker<{storageFull?:boolean}>('commit',{leaseId,...payload}),
     deliveries:(leaseId:string,limit=5)=>worker<{deliveries:AlertDelivery[]}>('deliveries',{leaseId,limit}),

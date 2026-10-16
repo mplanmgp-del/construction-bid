@@ -21,7 +21,7 @@ export async function handleAlertRequest(method:string,params:URLSearchParams,bo
     catalog.setDeadline(started+43_000);
     if(action==='catalog-worker') return runActiveCatalogWorker(catalog,{budgetMs:43_000,maxRequests:40});
     store.setDeadline?.(started+43_000);
-    return runAlertWorker(store,{catalog,deadline:started+43_000});
+    return runAlertWorker(store,{catalog,deadline:started+43_000,forceCollection:body.forceCollection===true});
   }
   const bearer=await store.authenticate(authorization);
   if(action==='overview'&&method==='GET') {
