@@ -21,7 +21,7 @@
 
 - 전체 Vitest: 117개 파일, 1,306개 통과.
 - TypeScript 검사 및 운영 빌드 통과. 기존 Excel 내보내기 청크 크기 경고만 존재.
-- SQL: 기존 9개 묶음 및 신규 region_name_keyword_filtering, bounded_region_keyword_projection을 검증한다. 동일 마이그레이션 두 번 적용과 JS/SQL 4,096바이트 경계 표본의 일치를 확인한다.
+- SQL: 기존 9개 묶음 및 신규 region_name_keyword_filtering, bounded_region_keyword_projection 모두 통과했다. 동일 마이그레이션 두 번 적용과 JS/SQL 4,096바이트 경계 표본의 일치도 확인했다.
 - 운영 DB에 20261016042754_region_name_keyword_filtering.sql 적용 성공.
 - 운영 검색 API에서 철거 + 서울특별시 + 미확인 제외 검색 3건 확인.
 - 운영 DB에서 현장·참가 지역에 서울이 없어도 기관명이 서울지방조달청인 R26BK01749070 등이 서울 키워드로 판정되는 것을 확인.
@@ -30,4 +30,8 @@
 - 미확인 공고 포함을 요청대로 켜고 저장 및 새로고침 후 유지 여부를 확인했다. 다른 현재 설정은 보존했다.
 - 자동조회 작업 실행 결과 ok=true, collected=1544. R26BK01774453은 현재 저장 조건으로 비교하면 needsReview=true로 일치한다. 전체 원본 수집 완료를 의미하지 않는다.
 
-저장 크기 보완의 최종 운영 배포 결과는 반영 후 보강한다.
+- 최종 코드 5001871 운영 배포: dpl_AjTNbpygKenxYAtgJDhJ4Bczg3po, READY, https://construction-bid-nine.vercel.app.
+- 후속 마이그레이션 20261016044015_bound_region_keyword_projection.sql 운영 적용 성공. 반영 직후 색인 최대 크기 2,642바이트, 검색용 추가 문구를 가진 행 25개, 새 크기 제한 함수와 기관명 키워드 판정을 확인했다.
+- 최종 운영 수집 작업: ok=true, requests=40, groups=3, versions=7, searchGroups=4. 재검증 대기는 남아 있으며 전체 수집 완료를 주장하지 않는다.
+- 최종 공고번호 API는 R26BK01774453의 민간 차수 001/000을 모두 반환하고, 각 차수에 지역 검색 문구 277자 및 원본 해시 64자를 제공했다.
+- 최종 배포 후 Chrome에서 서울 + 철거의 3개 공고와 키워드 일치 표시를 다시 확인했다. 미확인 공고 포함의 저장값은 true다. 증거는 outputs/region-keywords-20261016에 보관했다.
