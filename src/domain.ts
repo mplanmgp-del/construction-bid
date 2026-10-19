@@ -130,6 +130,7 @@ export function filterNotices(notices: BidNotice[], filters: SearchFilters, prof
       if (assessment === 'excluded' || assessment === 'review' && filters.regions !== undefined && !filters.includeUnknownRegions) return false;
     }
     if (filters.license !== '전체' && assessIndustryCodes(bid, [filters.license]).status !== 'matched') return false;
+    if (filters.autoRegion && profile.licenseCodes !== undefined && assessIndustryCodes(bid, profile.licenseCodes).status !== 'matched') return false;
     if (statuses.length && !statuses.some(status => noticeState(bid, now).label === status)) return false;
     if (filters.contractMethod !== '전체' && bid.contractMethod !== filters.contractMethod) return false;
     const price = priceOrNull(bid.estimatedPrice);

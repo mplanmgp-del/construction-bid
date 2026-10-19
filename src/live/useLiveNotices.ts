@@ -12,7 +12,7 @@ export function canRetainNoticePage(page: G2bNoticePage | null | undefined, now 
 }
 
 /** Filtered results arrive first; aggregate collection status follows separately. */
-export function useLiveNotices(enabled: boolean, filters?: SearchFilters, profile?: Pick<CompanyProfile, 'province' | 'district'>, initialQuery?: NoticeQuery) {
+export function useLiveNotices(enabled: boolean, filters?: SearchFilters, profile?: Pick<CompanyProfile, 'province' | 'district' | 'licenseCodes'>, initialQuery?: NoticeQuery) {
   const [query, setQuery] = useState<NoticeQuery>(() => initialQuery ?? ({ type: '공사·용역', ...deadlineMonthWindow(6), keyword: '' }));
   const [version, setVersion] = useState(0);
   const controllerRef = useRef<IndexedNoticesController | null>(null);

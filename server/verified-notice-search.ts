@@ -24,7 +24,7 @@ const choice = <T extends string>(value: unknown, choices: readonly T[], fallbac
 };
 const boolean = (value: unknown, fallback = false) => value === undefined ? fallback : typeof value === 'boolean' ? value : invalid();
 
-/** Public search sends only explicit filters and minimal company geography. */
+/** Public search sends explicit filters, geography and optional saved codes. */
 export function parseVerifiedNoticeSearch(params: URLSearchParams): VerifiedNoticeSearchQuery {
   const type = choice(params.get('type') ?? undefined, ['공사', '용역', '공사·용역'] as const, '공사·용역');
   const from = params.get('from') || '', to = params.get('to') || '';
@@ -66,6 +66,11 @@ export function parseVerifiedNoticeSearch(params: URLSearchParams): VerifiedNoti
   if (Object.keys(company).length) {
     const province = clean(company.province ?? '', 60), district = clean(company.district ?? '', 100);
     profile = { province: canonicalProvince(province) ?? province, district };
+    if (filters.autoRegion && company.licenseCodes !== undefined) {
+      const codes = company.licenseCodes;
+      if (!Array.isArray(codes) || codes.length > 100 || codes.some(value => typeof value !== 'string' || !/^\d{4}$/.test(value))) return invalid('내 정보의 공식 업종코드를 확인해 주세요.');
+      profile.licenseCodes = [...new Set(codes)].sort();
+    }
   }
   const rawLimit = params.get('limit') ?? '50';
   if (!/^\d{1,2}$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 50) return invalid('한 번에 최대 50건씩 조회할 수 있습니다.');

@@ -26,3 +26,4 @@
 @import './workspace.css';
 @import './supporting-workspaces.css';
 @import '../components/detail-remake.css';
+.company-search-summary { margin-top: 4px; color: var(--text-muted, #6c7c8d); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }

@@ -4,9 +4,10 @@ import type { VerifiedNoticeSearchQuery, VerifiedNoticeSearchResults, VerifiedNo
 import { canonicalProvince, selectedRegions, selectedStatuses } from '../search-filters';
 import { DEFAULT_FILTERS } from '../data';
 import { ApiError, dateRangeError, fetchApi } from './client';
+import { normalizeIndustryCode } from '../industry-codes';
 import type { NoticeQuery } from './notice-search';
 
-export type IndexedSearchInput = NoticeQuery & { filters?: SearchFilters; profile?: Pick<CompanyProfile, 'province' | 'district'> };
+export type IndexedSearchInput = NoticeQuery & { filters?: SearchFilters; profile?: Pick<CompanyProfile, 'province' | 'district' | 'licenseCodes'> };
 export interface IndexedNoticeRepository {
   search(query: VerifiedNoticeSearchQuery, signal: AbortSignal): Promise<VerifiedNoticeSearchResults>;
   status?(query: VerifiedNoticeSearchStatusQuery, signal: AbortSignal): Promise<VerifiedNoticeSearchStatus>;
@@ -23,7 +24,7 @@ export function indexedSearchDateError(from: string, to: string): string | null 
   const error = dateRangeError(from, to, 100_000); if (error) return error;
   return from < '1995-10-01' || to > '2100-12-31' ? '조회 날짜는 1995년 10월부터 2100년 사이로 선택해 주세요.' : null;
 }
-/** Explicitly project preferences and the two company geography fields only. */
+/** Project only search geography and, when enabled, saved official codes. */
 export function normalizeIndexedSearch(input: IndexedSearchInput): VerifiedNoticeSearchQuery {
   const error = indexedSearchDateError(input.from, input.to); if (error) throw new Error(error);
   if (!['공사', '용역', '공사·용역'].includes(input.type) || input.keyword.length > 100 || /[\u0000-\u001f]/.test(input.keyword)) throw new Error('업무와 검색어를 확인해 주세요.');
@@ -32,13 +33,25 @@ export function normalizeIndexedSearch(input: IndexedSearchInput): VerifiedNotic
     type: value.type, siteProvince: value.siteProvince, regions: selectedRegions(value), license: value.license, minAmount: value.minAmount,
     maxAmount: value.maxAmount, status: value.status, statuses: selectedStatuses(value), includeUnknownRegions: value.includeUnknownRegions === true,
     contractMethod: value.contractMethod, deadlineFrom: '', deadlineTo: '', regionView: value.regionView, autoRegion: value.autoRegion, sort: value.sort };
+  let licenseCodes: string[] | undefined;
+  if (filters.autoRegion && input.profile?.licenseCodes !== undefined) {
+    const values = input.profile.licenseCodes;
+    if (!Array.isArray(values) || values.length > 100 || values.some(value => !normalizeIndustryCode(value))) throw new Error('내 정보의 공식 업종코드를 확인해 주세요.');
+    licenseCodes = [...new Set(values.map(value => normalizeIndustryCode(value)!))].sort();
+  }
   return { from: input.from, to: input.to, type: input.type, keyword: input.keyword.trim(), filters,
-    ...(input.profile && (filters.autoRegion || filters.regionView !== 'all') ? { profile: { province: canonicalProvince(input.profile.province) ?? input.profile.province.trim(), district: input.profile.district.trim() } } : {}), limit: 50 };
+    ...(input.profile && (filters.autoRegion || filters.regionView !== 'all') ? { profile: {
+      province: canonicalProvince(input.profile.province) ?? input.profile.province.trim(), district: input.profile.district.trim(),
+      ...(licenseCodes !== undefined ? { licenseCodes } : {}),
+    } } : {}), limit: 50 };
 }
 export function indexedSearchKey(input: IndexedSearchInput): string { return JSON.stringify(normalizeIndexedSearch(input)); }
 function searchParams(query: VerifiedNoticeSearchQuery, mode: string) {
   return new URLSearchParams({ mode, type: query.type, from: query.from, to: query.to, keyword: query.keyword,
-      filters: JSON.stringify(query.filters), limit: '50', ...(query.profile ? { companyRegion: JSON.stringify({ province: query.profile.province, district: query.profile.district }) } : {}), ...(query.cursor ? { cursor: query.cursor } : {}) });
+      filters: JSON.stringify(query.filters), limit: '50', ...(query.profile ? { companyRegion: JSON.stringify({
+        province: query.profile.province, district: query.profile.district,
+        ...(query.filters.autoRegion && query.profile.licenseCodes !== undefined ? { licenseCodes: query.profile.licenseCodes } : {}),
+      }) } : {}), ...(query.cursor ? { cursor: query.cursor } : {}) });
 }
 export const browserIndexedNoticeRepository: IndexedNoticeRepository = {
   search: (query, signal) => fetchApi<VerifiedNoticeSearchResults>(`/api/notices?${searchParams(query, 'search-results')}`, signal),

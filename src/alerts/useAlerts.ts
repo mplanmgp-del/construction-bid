@@ -204,5 +204,5 @@ export function alertFilterFromSearch(filters: SearchFilters, query: NoticeQuery
     regions: selectedRegions(filters).map(regionLabel), licenses: filters.license === '전체' ? [] : [filters.license],
     minAmount: filters.minAmount ? Number(filters.minAmount) : null, maxAmount: filters.maxAmount ? Number(filters.maxAmount) : null,
     includeUnknown: filters.includeUnknownRegions === true, useCompanyRegion: filters.autoRegion,
-    regionBasis:'auto',agencies:[],contractMethods:filters.contractMethod==='전체'?[]:[filters.contractMethod],minDaysUntilDeadline:null,useCompanyLicenses:false };
+    regionBasis:'auto',agencies:[],contractMethods:filters.contractMethod==='전체'?[]:[filters.contractMethod],minDaysUntilDeadline:null,useCompanyLicenses:filters.autoRegion };
 }

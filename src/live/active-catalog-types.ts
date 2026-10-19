@@ -72,7 +72,7 @@ export interface DeadlineIndexBatch {
 
 export interface VerifiedNoticeSearchQuery {
   type: G2bBusinessType | '공사·용역'; from: string; to: string; keyword: string;
-  filters: SearchFilters; profile?: { province: string; district: string };
+  filters: SearchFilters; profile?: { province: string; district: string; licenseCodes?: string[] };
   limit?: number; cursor?: string;
 }
 export type VerifiedNoticeSearchStatusQuery = Omit<VerifiedNoticeSearchQuery, 'cursor'> & { asOf: string; snapshotVersion: string };

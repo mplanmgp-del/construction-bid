@@ -43,6 +43,7 @@ import { AlertsPage } from './alerts/AlertsPage';
 import { AlertMenu } from './alerts/AlertsPopover';
 import { alertFilterFromSearch, useAlerts } from './alerts/useAlerts';
 import type { AlertFilter } from './alerts/types';
+import { assessIndustryCodes, companyIndustrySelections, resolveIndustrySelections } from './industry-codes';
 
 type View = AppView;
 const PAGE_SIZE = 30;
@@ -66,6 +67,9 @@ export default function App() {
   const [storageWarning, setStorageWarning] = useState(loaded.warning);
   const guestProfile: CompanyProfile = { id: 'guest', companyName: '업체 정보 미등록', province: '', district: '', address: '', licenses: [], contactName: '', email: '' };
   const profile = mode === 'live' ? member.workspace?.profile ?? guestProfile : state.profiles.find(item => item.id === state.activeProfileId) ?? state.profiles[0];
+  const profileLicenseCodes = useMemo(() => resolveIndustrySelections(companyIndustrySelections(profile)).codes, [profile.licenses, profile.licenseCodes]);
+  const searchProfile = useMemo(() => ({ ...profile, licenseCodes: profileLicenseCodes }), [profile, profileLicenseCodes]);
+  const profileSearchReady = Boolean(profile.province.trim() && profileLicenseCodes.length);
   const [searchSession] = useState(() => readSearchSession());
   const [localFilters, setFilters] = useState<SearchFilters>(() => view === 'notices' && searchSession ? { ...searchSession.filters, type: '전체' } : ({ ...DEFAULT_FILTERS, category: '전체', status: '전체', autoRegion: false }));
   const filters = useMemo(() => filtersForIndexedSearch(localFilters, mode === 'live' && view === 'notices'), [localFilters, mode, view]);
@@ -74,7 +78,7 @@ export default function App() {
   const [unifiedDraft, setUnifiedDraft] = useState<UnifiedSearchDraft>();
   const [searchResetKey, setSearchResetKey] = useState(0);
   const showNumberResults = serverSearch && resultMode === 'number';
-  const live = useLiveNotices(serverSearch && !menuDisabled && !showNumberResults, filters, { province: profile.province, district: profile.district }, searchSession?.query);
+  const live = useLiveNotices(serverSearch && !menuDisabled && !showNumberResults, filters, { province: profile.province, district: profile.district, licenseCodes: profileLicenseCodes }, searchSession?.query);
   const [searchInput, setSearchInput] = useState(live.query.keyword);
   const [page, setPage] = useState(1);
   const [selectedNoticeIds, setSelectedNoticeIds] = useState<string[]>([]);
@@ -128,7 +132,7 @@ export default function App() {
     return () => { window.clearInterval(timer); window.removeEventListener('focus', update); };
   }, []);
 
-  // Region filtering is opt-in for each visit, including accounts with an older saved ON preference.
+  // Saved-profile search remains opt-in for each visit.
   useEffect(() => { setSelectedNoticeIds([]); setSelectedBid(null); setPage(1); noticeFiltersRef.current = { ...noticeFiltersRef.current, autoRegion: false, regionView: 'all' }; setFilters(previous => ({ ...previous, autoRegion: false, regionView: 'all' })); }, [member.user?.id, mode]);
   useEffect(() => {
     if (member.recoveryMode) { setMode('live'); setView('account'); setSelectedBid(null); setMobileFilters(false); }
@@ -248,18 +252,19 @@ export default function App() {
     : availableNotices).filter(bid => serverSearch || mode !== 'live' || isCatalogNotice(bid, statusNow)), [view, mode, serverSearch, member.workspace?.noticeSnapshots, availableNotices, bookmarks, statusNow]);
   const activeRegions = selectedRegions(filters);
   useBookmarkIndustryRefresh(rawSourceNotices, mode === 'live' && !menuDisabled && view === 'bookmarks' && member.ready,
-    member.user?.id, filters.license, member.updateWorkspace);
+    member.user?.id, filters.license !== '전체' ? filters.license : filters.autoRegion && profileLicenseCodes.length ? profileLicenseCodes.join(',') : '전체', member.updateWorkspace);
   const activeStatuses = selectedStatuses(filters);
   const regionCandidates = useMemo(() => serverSearch ? rawSourceNotices : filterNotices(rawSourceNotices,
-    { ...filters, siteProvince: '전체', regions: [], autoRegion: false, regionView: 'all' }, profile, statusNow), [rawSourceNotices, filters, profile, statusNow, serverSearch]);
-  const companyRegionFilter = !!profile.province && !!profile.district && (filters.autoRegion || filters.regionView !== 'all');
+    { ...filters, siteProvince: '전체', regions: [], autoRegion: false, regionView: 'all' }, searchProfile, statusNow), [rawSourceNotices, filters, searchProfile, statusNow, serverSearch]);
+  const companyRegionFilter = !!profile.province && (filters.autoRegion || filters.regionView !== 'all');
   const regionFilterEnabled = mode === 'live' && !menuDisabled && view === 'bookmarks'
     && (companyRegionFilter || (filters.type !== '공사' && activeRegions.length > 0));
   const cachedLocalNotices = useCachedNoticeRegions(serverSearch ? [] : regionCandidates);
   const sourceNotices = serverSearch ? live.items : cachedLocalNotices;
-  const baseResults = useMemo(() => serverSearch ? sourceNotices : filterNotices(sourceNotices, { ...filters, autoRegion: false, regionView: 'all' }, profile, statusNow), [sourceNotices, filters, profile, statusNow, serverSearch]);
+  const baseResults = useMemo(() => serverSearch ? sourceNotices : filterNotices(sourceNotices, { ...filters, autoRegion: false, regionView: 'all' }, searchProfile, statusNow)
+    .filter(bid => !filters.autoRegion || assessIndustryCodes(bid, profileLicenseCodes).status === 'matched'), [sourceNotices, filters, searchProfile, profileLicenseCodes, statusNow, serverSearch]);
   const counts = useMemo(() => baseResults.reduce((total, bid) => { total[assessCompanyRegionKeywords(bid, profile).status]++; return total; }, { matched: 0, review: 0, excluded: 0 }), [baseResults, profile]);
-  const filtered = useMemo(() => serverSearch ? sourceNotices : filterNotices(sourceNotices, filters, profile, statusNow), [sourceNotices, filters, profile, statusNow, serverSearch]);
+  const filtered = useMemo(() => serverSearch ? sourceNotices : filterNotices(sourceNotices, filters, searchProfile, statusNow), [sourceNotices, filters, searchProfile, statusNow, serverSearch]);
   const unknownSearchRegions = !activeRegions.length ? 0
     : sourceNotices.filter(bid => assessSearchRegions(bid, activeRegions).status === 'review').length;
   const unknownParticipationRegions = companyRegionFilter
@@ -321,7 +326,14 @@ export default function App() {
       {view === 'admin' ? <AdminPage access={access} onLogin={() => navigate('account')} /> : view === 'account' ? <MemberAccess member={member} /> : view === 'bid-helper' ? <BidHelper key={bidHelperLaunch} initialSeed={bidHelperSeed} onSeedConsumed={bidHelperSeed ? () => setBidHelperSeed(undefined) : undefined} /> : view === 'alerts' ? <AlertsPage bookmarks={bookmarks} onBookmark={notice => toggleBookmark(notice.id, notice)} key={member.user?.id ?? 'guest'} openExistingRequest={existingAlertRequest?.userId === member.user?.id ? existingAlertRequest?.sequence : 0} alerts={alerts} signedIn={Boolean(member.user)} profile={profile} onLogin={() => navigate('account')} isAdmin={access.isAdmin} demo={mode === 'demo'} initialFilter={alertSeed?.userId === member.user?.id ? alertSeed?.filter : null} onInitialFilterConsumed={() => setAlertSeed(null)} /> : menuDisabled ? <LockedMenu menu={view as MenuKey} setting={access.settings.find(setting => setting.menu_key === view)} loading={!access.ready && !access.error} onLogin={() => navigate('account')} onRetry={() => { void access.refresh(); }} /> : view === 'profile' ? <>{mode === 'live' && <MemberAccess member={member} />}{(mode === 'demo' || member.ready) && <ProfileView key={profile.id} profile={profile} onSave={saveProfile} persistence={mode === 'live' ? 'cloud' : 'browser'} />}</> : view === 'results' ? <CompanyDashboard key={profile.id} profile={profile} onProfile={() => navigate('profile')} /> : <>
         <section className="search-intro"><div><div className="eyebrow">공고 탐색</div><h1>{view === 'bookmarks' ? '관심공고' : '입찰공고'}</h1>{view === 'bookmarks' && <p>저장한 공고를 확인하고 입찰을 준비하세요.</p>}</div><div className="intro-note"><span className="small-dot" />{mode === 'live' ? '나라장터 공공데이터' : '예시 데이터'}<span className="intro-date">{mode === 'live' ? `한국시간 ${koreanToday().replaceAll('-', '.')}` : `예시 기준일 ${DEMO_TODAY.replaceAll('-', '.')}`}</span></div></section>
 
-        {!showNumberResults && profile.id !== 'guest' && <section className="company-strip" aria-label="내 업체 지역 자동필터"><div className="company-strip-info"><span className="company-icon"><Building2 size={20} /></span><div><div className="company-name">{profile.id === 'guest' ? '내 업체 기준으로 찾기' : profile.companyName}</div><div className="company-address">{profile.province ? <><MapPin size={12} />{profile.province} {profile.district}</> : '업체 소재지를 등록하면 지역명으로 공고를 찾을 수 있습니다.'}</div></div><button className="company-edit" aria-label="업체 정보 수정" onClick={() => navigate('profile')}><Settings2 size={14} /><span>{profile.province ? '업체 수정' : '업체 등록'}</span></button></div>{profile.province && profile.district && <div className="auto-filter-control"><label className="switch-label"><input type="checkbox" checked={filters.autoRegion} onChange={event => { updateFilter('autoRegion', event.target.checked); updateFilter('regionView', 'all'); }} /><span className="switch-track" /><strong>내 지역 이름 포함</strong></label><span className="filter-state">{filters.autoRegion ? '적용 중' : '미적용'}</span></div>}</section>}
+        {!showNumberResults && profile.id !== 'guest' && <section className="company-strip" aria-label="내 정보로 찾기">
+          <div className="company-strip-info"><span className="company-icon"><Building2 size={20} /></span><div>
+            <div className="company-name">{profile.companyName}</div>
+            <div className="company-address">{profile.province ? <><MapPin size={12} />지역 키워드 {profile.province}</> : '내 정보에 지역을 등록해 주세요.'}</div>
+            <div className="company-search-summary" title={profileLicenseCodes.join(' · ')}>{profileLicenseCodes.length ? <>업종코드 {profileLicenseCodes.slice(0, 3).join(' · ')}{profileLicenseCodes.length > 3 ? ` 외 ${profileLicenseCodes.length - 3}개` : ''}</> : '내 정보에 업종코드를 등록해 주세요.'}</div>
+          </div><button className="company-edit" aria-label="내 정보 수정" onClick={() => navigate('profile')}><Settings2 size={14} /><span>내 정보 수정</span></button></div>
+          <div className="auto-filter-control"><label className="switch-label"><input type="checkbox" checked={filters.autoRegion} disabled={!profileSearchReady && !filters.autoRegion} onChange={event => { updateFilter('autoRegion', event.target.checked); updateFilter('regionView', 'all'); }} /><span className="switch-track" /><strong>내 정보로 찾기</strong></label><span className="filter-state">{filters.autoRegion ? '적용 중' : '미적용'}</span></div>
+        </section>}
 
         <div className={`search-workspace ${sidebarCollapsed || showNumberResults ? 'sidebar-collapsed' : ''}`}>
           {!showNumberResults && (!sidebarCollapsed || mobileFilters) && <FilterPanel filters={filters} showType={!serverSearch} showDeadlineRange={!serverSearch} onChange={updateFilter} onReset={resetFilters} onCollapse={() => { setSidebarCollapsed(true); setMobileFilters(false); }} mobileOpen={mobileFilters} onMobileClose={() => setMobileFilters(false)} />}
@@ -336,11 +348,11 @@ export default function App() {
             {!showNumberResults && <>
             {serverSearch && <VerifiedSearchFeedback page={live.meta} loading={live.loading} stale={live.stale} error={live.error} onRestart={live.refresh} />}{mode === 'live' && view === 'bookmarks' && <p className="live-scope">저장한 공고 중 진행중·마감 임박·예정 공고를 표시합니다. 개찰 완료·취소 공고는 목록에서 제외되며 저장 기록은 보존됩니다.</p>}
             <div className="results-toolbar"><div className="results-heading-group"><button className="button button-secondary show-filter-button" aria-label="상세 검색 열기" onClick={() => { if (window.matchMedia('(max-width: 1000px)').matches) setMobileFilters(true); else setSidebarCollapsed(false); }}><PanelLeftOpen size={16} /><span>상세 검색</span></button><h2>{view === 'bookmarks' ? '저장한 공고' : '검색 결과'} <strong>{serverSearch && (live.loading || live.error) ? '—' : serverSearch ? live.totalCount : filtered.length}</strong><span>건</span></h2></div><div className="results-actions"><button type="button" className="text-button reset-results" onClick={resetFilters}>조건 초기화</button>{mode === 'live' && view === 'notices' && <button type="button" className="button button-secondary alerts-save-search" disabled={!live.query.keyword.trim()} onClick={prepareCurrentSearchAlert}>이 조건으로 알림 받기</button>}<ExportButton onExport={exportResults} disabled={exportNotices.length === 0 || serverSearch && (live.loading || Boolean(live.error))} /><label className="sr-only" htmlFor="sort-order">공고 정렬</label><select id="sort-order" className="sort-select" value={filters.sort} onChange={event => updateFilter('sort', event.target.value as SearchFilters['sort'])}><option value="deadline">마감 임박순</option><option value="newest">최신 공고순</option><option value="amountDesc">추정가격 높은순</option><option value="amountAsc">추정가격 낮은순</option></select></div></div>
-            {profile.province && profile.district && <div className="result-filter-line"><div className="result-state-tabs" aria-label="지역 키워드 필터"><button className={filters.regionView === 'all' ? 'active' : ''} onClick={() => updateFilter('regionView', 'all')}>전체 {!serverSearch && <span>{allCount}</span>}</button></div><button className={`excluded-button ${filters.regionView === 'excluded' ? 'active' : ''}`} onClick={() => updateFilter('regionView', filters.regionView === 'excluded' ? 'all' : 'excluded')}>{filters.regionView === 'excluded' ? '기본 목록으로 돌아가기' : serverSearch ? '지역 제외 보기' : `지역 제외 ${counts.excluded}건 보기`}<ChevronRight size={13} /></button></div>}
-            {(chips.length > 0 || filters.autoRegion) && <div className="chips-line"><div className="filter-chips">{chips.map(chip => <button key={chip.label} onClick={chip.remove}>{chip.label}<X size={12} /></button>)}{filters.autoRegion && <span className="automatic-chip"><ShieldCheck size={13} />내 지역 자동필터</span>}</div></div>}
+            {profile.province && <div className="result-filter-line"><div className="result-state-tabs" aria-label="지역 키워드 필터"><button className={filters.regionView === 'all' ? 'active' : ''} onClick={() => updateFilter('regionView', 'all')}>전체 {!serverSearch && <span>{allCount}</span>}</button></div><button className={`excluded-button ${filters.regionView === 'excluded' ? 'active' : ''}`} onClick={() => updateFilter('regionView', filters.regionView === 'excluded' ? 'all' : 'excluded')}>{filters.regionView === 'excluded' ? '기본 목록으로 돌아가기' : serverSearch ? '지역 제외 보기' : `지역 제외 ${counts.excluded}건 보기`}<ChevronRight size={13} /></button></div>}
+            {(chips.length > 0 || filters.autoRegion) && <div className="chips-line"><div className="filter-chips">{chips.map(chip => <button key={chip.label} onClick={chip.remove}>{chip.label}<X size={12} /></button>)}{filters.autoRegion && <span className="automatic-chip"><ShieldCheck size={13} />내 정보 · 지역 키워드 + 업종코드</span>}</div></div>}
             {filters.regionView === 'excluded' && <div className="excluded-notice"><Info size={15} />공고 전체 정보에서 등록한 업체의 시·도 이름을 찾지 못한 공고입니다. 실제 현장과 참가 지역은 공고 원문에서 확인해 주세요.</div>}
             {(activeRegions.length > 0 || companyRegionFilter) && <div className="region-search-note" role="status">
-              <div><strong>{activeRegions.length ? `${activeRegions.map(regionLabel).join(' · ')} 지역 검색` : '내 업체 지역명 검색'}</strong><span>{companyRegionFilter ? '공고 전체 정보에서 내 업체 시·도 이름을 찾습니다.' : '공고명·기관명·주소·참가 지역 등 전체 정보의 지역명 키워드'}</span>
+              <div><strong>{activeRegions.length ? `${activeRegions.map(regionLabel).join(' · ')} 지역 검색` : filters.autoRegion ? '내 정보로 찾기 적용 중' : '내 업체 지역명 검색'}</strong><span>{filters.autoRegion ? '내 정보의 지역 키워드가 있고, 저장된 업종코드 중 하나가 일치하는 공고를 찾습니다.' : companyRegionFilter ? '공고 전체 정보에서 내 업체 시·도 이름을 찾습니다.' : '공고명·기관명·주소·참가 지역 등 전체 정보의 지역명 키워드'}</span>
                 {serverSearch ? <p>현재 페이지의 지역 정보입니다. 지역·면허·금액 조건은 서버의 전체 검색 결과에 적용합니다.</p> : regionSearch.loading ? <p>추가 지역 정보를 확인 중입니다. {regionSearch.pending}건 남음</p>
                   : companyRegionFilter && unknownParticipationRegions > 0 ? <p>지역 미확인 공고 {unknownParticipationRegions}건은 자동필터를 끄고 확인할 수 있습니다.</p>
                     : unknownSearchRegions > 0 ? <p>지역명을 찾지 못한 공고 {unknownSearchRegions}건은 {filters.includeUnknownRegions ? '함께 표시합니다. 정확한 지역은 원문에서 확인해 주세요.' : '제외했습니다. 상세 검색의 ‘지역 미확인 공고 포함’으로 볼 수 있습니다.'}</p> : null}

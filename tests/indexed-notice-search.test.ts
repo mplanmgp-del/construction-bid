@@ -8,6 +8,22 @@ const query = () => ({ type: '공사·용역' as const, from: '1995-10-01', to: 
 const page = (patch: Partial<VerifiedNoticeSearchPage> = {}): VerifiedNoticeSearchPage => ({ items: [NOTICES[0]], totalCount: 501, page: 1, pageSize: 50, hasMore: true, nextCursor: 'next-1', snapshotVersion: 'epoch1', asOf: '2026-10-15T03:00:00Z', fetchedAt: '2026-10-15T03:00:00Z', source: '검증된 색인', indexCoverage: { complete: true, pending: 0, checked: 746 }, sourceSyncedThrough: '2026-10-15T02:58:00Z', verifiedCount: 510, pendingCount: 9, conditionPendingCount: 3, storage: { bytes: 100, ceiling: 1000, full: false }, ...patch });
 function controller(search: IndexedNoticeRepository['search']) { const instance = new IndexedNoticesController({ search }); instance.setUser('public'); return instance; }
 afterEach(() => vi.useRealTimers());
+it('sends saved official codes in both result and status requests, and omits them when off', async () => {
+  vi.mocked(fetchApi).mockClear(); vi.mocked(fetchApi).mockResolvedValue(page());
+  const input = normalizeIndexedSearch({ ...query(), filters: { ...query().filters, autoRegion: true },
+    profile: { ...query().profile, licenseCodes: ['4995', '0002', '4995'] } });
+  await browserIndexedNoticeRepository.search(input, new AbortController().signal);
+  await browserIndexedNoticeRepository.status!({ ...input, asOf: page().asOf, snapshotVersion: '123' }, new AbortController().signal);
+  for (const [path] of vi.mocked(fetchApi).mock.calls) {
+    const params = new URL(path, 'https://example.test').searchParams;
+    expect(JSON.parse(params.get('companyRegion')!)).toEqual({ ...query().profile, licenseCodes: ['0002', '4995'] });
+  }
+  vi.mocked(fetchApi).mockClear();
+  await browserIndexedNoticeRepository.search(normalizeIndexedSearch({ ...query(), filters: { ...query().filters, regionView: 'excluded' },
+    profile: { ...query().profile, licenseCodes: ['4995'] } }), new AbortController().signal);
+  expect(JSON.parse(new URL(vi.mocked(fetchApi).mock.calls[0][0], 'https://example.test').searchParams.get('companyRegion')!)).toEqual(query().profile);
+  vi.mocked(fetchApi).mockClear();
+});
 it('gets both businesses, full filters and only minimal company geography in one 50-item request', async () => {
   const input = { ...query(), profile: { ...query().profile, companyName: 'DO NOT SEND', email: 'secret@example.test', licenses: ['PRIVATE'] }, filters: { ...query().filters, license: '철거면허', minAmount: '100', maxAmount: '200', contractMethod: '제한경쟁', excludeKeyword: '설계', regions: [{ province: '경기', district: '성남시' }], statuses: ['예정' as const], sort: 'amountDesc' as const, autoRegion: true } };
   vi.mocked(fetchApi).mockResolvedValueOnce(page()); await browserIndexedNoticeRepository.search(normalizeIndexedSearch(input), new AbortController().signal);
