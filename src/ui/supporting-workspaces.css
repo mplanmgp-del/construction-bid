@@ -630,6 +630,15 @@
 /* The desktop navigation rail places the bell near the bottom of the viewport.
    Override the trigger's inline dropdown coordinates only in that layout. */
 @media (min-width: 1101px) {
+  .header-inner > .floating-quick-links {
+    position: static;
+    width: 100%;
+    max-width: none;
+    flex-shrink: 0;
+    margin-top: auto;
+    padding: 24px 0 16px;
+  }
+  .header-inner > .floating-quick-links + .header-account { margin-top: 0; }
   body > .alert-popover {
     left: 228px !important;
     top: auto !important;

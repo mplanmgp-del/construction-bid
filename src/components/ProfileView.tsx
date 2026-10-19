@@ -246,7 +246,7 @@ export function ProfileView({ profile, onSave, persistence = 'browser' }: Profil
           <section className="profile-form-section" aria-labelledby={`${id}-links-heading`}>
             <div className="profile-section-heading">
               <span className="profile-section-icon"><Link2 size={19} aria-hidden="true" /></span>
-              <div><h2 id={`${id}-links-heading`}>내 바로가기</h2><p>자주 사용하는 웹사이트를 최대 4개 등록하세요. 저장하면 화면 오른쪽에 따라다니는 버튼으로 표시됩니다.</p></div>
+              <div><h2 id={`${id}-links-heading`}>내 바로가기</h2><p>자주 사용하는 웹사이트를 최대 4개 등록하세요. 저장하면 화면의 ‘내 바로가기’ 영역에 표시됩니다.</p></div>
             </div>
             <div className="profile-quick-links">
               {(draft.quickLinks ?? []).map((link, index) => (
